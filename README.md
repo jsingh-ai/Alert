@@ -272,7 +272,55 @@ Run this once in Administrator PowerShell:
 New-NetFirewallRule -DisplayName "ProcessGuard Andon 5003" -Direction Inbound -Protocol TCP -LocalPort 5003 -Action Allow
 ```
 
-### 9. Install as an auto-start scheduled task
+### 9. Install as a Windows service
+
+For the Windows VM, the easiest production option is the included NSSM service installer. It creates a real Windows service named `ProcessGuardAndon`.
+
+On every service start or restart it will:
+
+- Pull latest code from GitHub.
+- Install dependencies.
+- Generate Prisma.
+- Push the current database schema.
+- Build the web and API.
+- Start the API server.
+
+Install and start the service from **Administrator PowerShell**:
+
+```powershell
+cd C:\Users\jsingh\Desktop\Alert
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-service.ps1
+```
+
+Restart after pushing new code:
+
+```powershell
+Restart-Service ProcessGuardAndon
+```
+
+Useful service commands:
+
+```powershell
+Get-Service ProcessGuardAndon
+Start-Service ProcessGuardAndon
+Stop-Service ProcessGuardAndon
+Restart-Service ProcessGuardAndon
+```
+
+Check logs:
+
+```powershell
+Get-Content .\logs\service-out.log -Tail 80
+Get-Content .\logs\service-error.log -Tail 80
+```
+
+Remove the service:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall-service.ps1
+```
+
+### 10. Alternative: install as an auto-start scheduled task
 
 After `npm run build` works, install the included scheduled task:
 
@@ -301,9 +349,20 @@ Remove the task:
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall-scheduled-task.ps1
 ```
 
-### 10. Pull updates later
+### 11. Pull updates later
 
 When you push new code and want to update the Windows VM:
+
+If you installed the Windows service:
+
+```powershell
+cd C:\Users\jsingh\Desktop\Alert
+Restart-Service ProcessGuardAndon
+```
+
+The service restart pulls, builds, and starts the newest code.
+
+If you installed the scheduled task:
 
 ```powershell
 cd C:\Apps\processguard-andon
