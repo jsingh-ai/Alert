@@ -68,10 +68,10 @@ Quality can acknowledge and resolve the Quality alert. Supervisor can acknowledg
 Admin-configured quick button. Example:
 
 ```text
-Button: Machine Down
+Button: Material Clear
 Targets:
-  Maintenance / Machine down
-  Supervisor / Line support needed
+  Quality / Material clear
+  Supervisor / Material clear
 ```
 
 ### Pager device
@@ -89,7 +89,6 @@ Run `npm run db:seed`, then use these logins:
 | operator | operator123 | Operator |
 | quality | quality123 | Quality responder |
 | supervisor | supervisor123 | Supervisor responder |
-| maintenance | maintenance123 | Maintenance responder |
 | viewer | viewer123 | Viewer |
 
 Demo pager tokens:
@@ -98,50 +97,52 @@ Demo pager tokens:
 |---|---|
 | Quality | `demo-quality-pager-token` |
 | Supervisor | `demo-supervisor-pager-token` |
-| Maintenance | `demo-maintenance-pager-token` |
-| Material Handler | `demo-material-pager-token` |
 
-## Windows Server 2025 Datacenter setup
+## Windows Datacenter VM with PostgreSQL
 
-These commands assume a clean Microsoft Windows Server 2025 Datacenter VM, version `10.0.26100 Build 26100`.
+These steps are for a fresh Windows Datacenter VM where the app will run from GitHub with PostgreSQL.
 
-Open **Windows Terminal / PowerShell as Administrator**.
+Open **PowerShell as Administrator**.
 
-### 1. Install Node.js LTS and PostgreSQL
+### 1. Install prerequisites
+
+Install Node.js LTS, Git, and PostgreSQL:
 
 ```powershell
 winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
+winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements
 winget install -e --id PostgreSQL.PostgreSQL.18 --accept-package-agreements --accept-source-agreements
 ```
 
-Close PowerShell and open it again so PATH updates are loaded.
+Close PowerShell and open a new **Administrator** PowerShell window so PATH changes load.
 
-Verify:
+Verify the tools:
 
 ```powershell
 node -v
 npm -v
+git --version
 ```
 
-Add PostgreSQL tools to the current PowerShell session if needed:
+Add PostgreSQL tools to this PowerShell session if `psql` is not found:
 
 ```powershell
 $env:Path += ";C:\Program Files\PostgreSQL\18\bin"
 psql --version
 ```
 
-If your PostgreSQL installer used a different major version, replace `18` in the path with the installed folder number.
+If PostgreSQL installed a different major version, replace `18` with that folder number.
 
 ### 2. Create the PostgreSQL database
 
-Run:
+Start `psql` as the PostgreSQL superuser. Use the postgres password you entered during PostgreSQL installation.
 
 ```powershell
 $env:Path += ";C:\Program Files\PostgreSQL\18\bin"
 psql -U postgres
 ```
 
-Inside `psql`, run:
+Inside `psql`, run this. Change the password before using the app on a real network.
 
 ```sql
 CREATE USER processguard WITH PASSWORD 'processguard_dev_password';
@@ -150,63 +151,84 @@ GRANT ALL PRIVILEGES ON DATABASE processguard TO processguard;
 \q
 ```
 
-Use a stronger password for production.
+Test the new app database login:
 
-### 3. Put the app on the server
+```powershell
+psql -U processguard -d processguard -h localhost
+```
 
-Create an app folder:
+If it connects, run:
+
+```sql
+\q
+```
+
+### 3. Pull the app from GitHub
+
+Create an app folder and clone the repo:
 
 ```powershell
 New-Item -ItemType Directory -Force C:\Apps | Out-Null
+cd C:\Apps
+git clone https://github.com/jsingh-ai/Alert.git processguard-andon
+cd C:\Apps\processguard-andon
 ```
 
-Unzip this project to:
-
-```text
-C:\Apps\processguard-andon
-```
-
-Then enter the folder:
+If you previously cloned before the `Zone.Identifier` cleanup and Windows pull still fails, delete that old folder and clone fresh:
 
 ```powershell
+cd C:\Apps
+Remove-Item -Recurse -Force .\processguard-andon
+git clone https://github.com/jsingh-ai/Alert.git processguard-andon
 cd C:\Apps\processguard-andon
 ```
 
 ### 4. Create `.env`
 
+Copy the example file:
+
 ```powershell
 Copy-Item .env.example .env
+```
+
+Generate a JWT secret:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+```
+
+Open `.env`:
+
+```powershell
 notepad .env
 ```
 
-At minimum, check these values:
+Use values like this:
 
 ```env
 DATABASE_URL="postgresql://processguard:processguard_dev_password@localhost:5432/processguard?schema=public"
 PORT=5003
 HOST=0.0.0.0
-JWT_SECRET="replace-with-a-long-random-secret-at-least-32-characters"
+JWT_SECRET="paste-the-random-secret-here"
 DEMO_MODE=true
 SERVE_WEB=true
+CORS_ORIGIN="http://localhost:5173"
 PUBLIC_URL="http://YOUR_SERVER_IP:5003"
+REPORT_TIME_ZONE="America/Chicago"
 SEED_DEMO=true
 ```
 
-For production, set:
-
-```env
-DEMO_MODE=false
-```
-
-Only disable demo mode after you create your real admin users.
+Keep `DEMO_MODE=true` for first setup so you can log in easily. After you create real users, set `DEMO_MODE=false`.
 
 ### 5. Install dependencies
 
 ```powershell
-npm install
+npm run install:fresh
 ```
 
-### 6. Create the database schema and seed demo data
+### 6. Create schema and seed data
+
+This repo currently uses Prisma schema push for setup.
 
 ```powershell
 npm run db:generate
@@ -214,41 +236,43 @@ npm run db:push
 npm run db:seed
 ```
 
-`db:seed` also creates a partial PostgreSQL unique index that prevents duplicate active alerts for the same machine and department.
+`db:seed` creates:
 
-### 7. Build the web UI and API
+- Demo users listed above.
+- Press and Packaging machine groups.
+- Quality and Supervisor departments.
+- Call Quality, Call Supervisor, and Material Clear quick commands.
+- Demo pager tokens.
+- A PostgreSQL partial unique index that prevents duplicate active alerts for the same machine and department.
+
+### 7. Build and start
 
 ```powershell
 npm run build
-```
-
-### 8. Start the app
-
-```powershell
 npm run start
 ```
 
-Open a browser on the VM:
+Open on the VM:
 
 ```text
 http://localhost:5003
 ```
 
-From another device on the same network:
+Open from another device on the same network:
 
 ```text
 http://YOUR_SERVER_IP:5003
 ```
 
-### 9. Open the Windows firewall port
+### 8. Open the Windows firewall port
 
-Run this in Administrator PowerShell:
+Run this once in Administrator PowerShell:
 
 ```powershell
 New-NetFirewallRule -DisplayName "ProcessGuard Andon 5003" -Direction Inbound -Protocol TCP -LocalPort 5003 -Action Allow
 ```
 
-### 10. Install as an auto-start scheduled task
+### 9. Install as an auto-start scheduled task
 
 After `npm run build` works, install the included scheduled task:
 
@@ -263,10 +287,44 @@ The task runs at startup and writes logs to:
 C:\Apps\processguard-andon\logs
 ```
 
-Stop/remove the task:
+Useful task commands:
+
+```powershell
+Start-ScheduledTask -TaskName ProcessGuardAndon
+Stop-ScheduledTask -TaskName ProcessGuardAndon
+Get-ScheduledTask -TaskName ProcessGuardAndon
+```
+
+Remove the task:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall-scheduled-task.ps1
+```
+
+### 10. Pull updates later
+
+When you push new code and want to update the Windows VM:
+
+```powershell
+cd C:\Apps\processguard-andon
+Stop-ScheduledTask -TaskName ProcessGuardAndon
+git pull origin main
+npm run install:fresh
+npm run db:generate
+npm run db:push
+npm run build
+Start-ScheduledTask -TaskName ProcessGuardAndon
+```
+
+If you are not using the scheduled task, stop the running `npm run start` terminal, then run:
+
+```powershell
+git pull origin main
+npm run install:fresh
+npm run db:generate
+npm run db:push
+npm run build
+npm run start
 ```
 
 ## Development mode on the server or your laptop
@@ -352,8 +410,6 @@ Use the correct token per department:
 ```text
 Quality: demo-quality-pager-token
 Supervisor: demo-supervisor-pager-token
-Maintenance: demo-maintenance-pager-token
-Material Handler: demo-material-pager-token
 ```
 
 For production, generate pager tokens in:
@@ -364,9 +420,9 @@ Admin Setup -> Pagers
 
 Then paste the raw token into the device configuration. The raw token is only shown once.
 
-## Recommended firmware refinement
+## Pager API fields
 
-Your existing parser will work because the API still returns:
+The pager API returns these compatibility fields for the current M5 firmware:
 
 ```text
 machine.name
@@ -380,7 +436,7 @@ responder_name_text
 elapsed_seconds
 ```
 
-The new API also returns these extra useful fields:
+It also returns these fields for newer firmware screens:
 
 ```text
 command_id
@@ -389,9 +445,11 @@ department.name
 issue_text
 display_message
 priority
+active_timer_started_at
+active_timer_stage
 ```
 
-Add those fields to the device struct when you want the M5 screen to show the parent command label and shared operator note.
+`elapsed_seconds` follows the current active timer stage. For an open alert, it counts from creation. For an acknowledged alert, it counts from acknowledgement.
 
 ## Production checklist
 
