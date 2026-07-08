@@ -1,0 +1,460 @@
+# ProcessGuard Andon
+
+ProcessGuard Andon is a modern internal manufacturing command and live alert system.
+
+It is built for the workflow you described:
+
+```text
+Operator presses one command button
+-> the command can create alerts for multiple departments
+-> each department page sees only its own work
+-> each physical M5 pager receives only its own department alerts
+-> managers see the command grouped in a split-screen live floor card
+```
+
+The app is intentionally not a copy of the old `/andon/...` path structure. The optimized browser paths are:
+
+```text
+/login
+/operator
+/queue
+/floor
+/reports
+/admin
+```
+
+The old pager paths are kept for compatibility with your current `app_main.c` firmware:
+
+```text
+GET  /api/andon/pager/alerts/active
+POST /api/andon/pager/alerts/:id/acknowledge
+POST /api/andon/pager/alerts/:id/arrive
+POST /api/andon/pager/alerts/:id/resolve
+```
+
+## Tech stack
+
+- Node.js API server
+- Fastify
+- React
+- Vite
+- TypeScript
+- PostgreSQL
+- Prisma ORM
+- Socket.IO realtime refresh
+- TanStack Query frontend cache
+- Browser-local draggable/resizable sidebar preferences
+
+## Main concepts
+
+### Command
+
+A command is the thing the operator creates. Example: `Quality Hold`.
+
+### Department alert
+
+A command creates one alert per target department. Example:
+
+```text
+Quality Hold command
+  -> Quality alert
+  -> Supervisor alert
+```
+
+Quality can acknowledge and resolve the Quality alert. Supervisor can acknowledge and resolve the Supervisor alert. The manager sees both under one grouped command.
+
+### Command template
+
+Admin-configured quick button. Example:
+
+```text
+Button: Machine Down
+Targets:
+  Maintenance / Machine down
+  Supervisor / Line support needed
+```
+
+### Pager device
+
+A physical M5 pager scoped to one company and one department. It authenticates with a bearer token. The raw token is shown once during creation or rotation.
+
+## Demo users created by seed
+
+Run `npm run db:seed`, then use these logins:
+
+| Username | Password | Role |
+|---|---|---|
+| admin | admin123 | Admin |
+| manager | manager123 | Manager |
+| operator | operator123 | Operator |
+| quality | quality123 | Quality responder |
+| supervisor | supervisor123 | Supervisor responder |
+| maintenance | maintenance123 | Maintenance responder |
+| viewer | viewer123 | Viewer |
+
+Demo pager tokens:
+
+| Department | Token |
+|---|---|
+| Quality | `demo-quality-pager-token` |
+| Supervisor | `demo-supervisor-pager-token` |
+| Maintenance | `demo-maintenance-pager-token` |
+| Material Handler | `demo-material-pager-token` |
+
+## Windows Server 2025 Datacenter setup
+
+These commands assume a clean Microsoft Windows Server 2025 Datacenter VM, version `10.0.26100 Build 26100`.
+
+Open **Windows Terminal / PowerShell as Administrator**.
+
+### 1. Install Node.js LTS and PostgreSQL
+
+```powershell
+winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
+winget install -e --id PostgreSQL.PostgreSQL.18 --accept-package-agreements --accept-source-agreements
+```
+
+Close PowerShell and open it again so PATH updates are loaded.
+
+Verify:
+
+```powershell
+node -v
+npm -v
+```
+
+Add PostgreSQL tools to the current PowerShell session if needed:
+
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\18\bin"
+psql --version
+```
+
+If your PostgreSQL installer used a different major version, replace `18` in the path with the installed folder number.
+
+### 2. Create the PostgreSQL database
+
+Run:
+
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\18\bin"
+psql -U postgres
+```
+
+Inside `psql`, run:
+
+```sql
+CREATE USER processguard WITH PASSWORD 'processguard_dev_password';
+CREATE DATABASE processguard OWNER processguard;
+GRANT ALL PRIVILEGES ON DATABASE processguard TO processguard;
+\q
+```
+
+Use a stronger password for production.
+
+### 3. Put the app on the server
+
+Create an app folder:
+
+```powershell
+New-Item -ItemType Directory -Force C:\Apps | Out-Null
+```
+
+Unzip this project to:
+
+```text
+C:\Apps\processguard-andon
+```
+
+Then enter the folder:
+
+```powershell
+cd C:\Apps\processguard-andon
+```
+
+### 4. Create `.env`
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+At minimum, check these values:
+
+```env
+DATABASE_URL="postgresql://processguard:processguard_dev_password@localhost:5432/processguard?schema=public"
+PORT=5003
+HOST=0.0.0.0
+JWT_SECRET="replace-with-a-long-random-secret-at-least-32-characters"
+DEMO_MODE=true
+SERVE_WEB=true
+PUBLIC_URL="http://YOUR_SERVER_IP:5003"
+SEED_DEMO=true
+```
+
+For production, set:
+
+```env
+DEMO_MODE=false
+```
+
+Only disable demo mode after you create your real admin users.
+
+### 5. Install dependencies
+
+```powershell
+npm install
+```
+
+### 6. Create the database schema and seed demo data
+
+```powershell
+npm run db:generate
+npm run db:push
+npm run db:seed
+```
+
+`db:seed` also creates a partial PostgreSQL unique index that prevents duplicate active alerts for the same machine and department.
+
+### 7. Build the web UI and API
+
+```powershell
+npm run build
+```
+
+### 8. Start the app
+
+```powershell
+npm run start
+```
+
+Open a browser on the VM:
+
+```text
+http://localhost:5003
+```
+
+From another device on the same network:
+
+```text
+http://YOUR_SERVER_IP:5003
+```
+
+### 9. Open the Windows firewall port
+
+Run this in Administrator PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "ProcessGuard Andon 5003" -Direction Inbound -Protocol TCP -LocalPort 5003 -Action Allow
+```
+
+### 10. Install as an auto-start scheduled task
+
+After `npm run build` works, install the included scheduled task:
+
+```powershell
+cd C:\Apps\processguard-andon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-scheduled-task.ps1
+```
+
+The task runs at startup and writes logs to:
+
+```text
+C:\Apps\processguard-andon\logs
+```
+
+Stop/remove the task:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\uninstall-scheduled-task.ps1
+```
+
+## Development mode on the server or your laptop
+
+Use this when actively editing the app:
+
+```powershell
+npm run install:fresh
+npm run db:generate
+npm run db:push
+npm run db:seed
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+The Vite dev server proxies `/api` and `/socket.io` to the API on port `5003`.
+
+### Local SQLite mode without PostgreSQL
+
+Use this when you only want to run the app locally and do not have PostgreSQL ready yet. This is a development-only path; PostgreSQL remains the default production database.
+
+```powershell
+Copy-Item .env.sqlite.example .env
+npm run install:fresh
+npm run setup:sqlite
+npm run dev:sqlite
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+SQLite files live under:
+
+```text
+prisma/sqlite
+```
+
+To remove the SQLite option later, delete:
+
+```text
+prisma/sqlite
+.env.sqlite.example
+```
+
+Then remove the `db:*:sqlite` and `setup:sqlite` scripts from `package.json`.
+
+### If `npm install` hangs
+
+The old checked-in `package-lock.json` was generated against an internal package mirror URL. On a normal Windows machine, npm may wait on those unreachable tarball URLs. This project now includes `.npmrc` pointing to the public npm registry, and the lockfile should contain only `https://registry.npmjs.org/...` resolved URLs.
+
+`dev:sqlite`, `start:sqlite`, and the `db:*:sqlite` scripts force the SQLite environment even if your `.env` still points at PostgreSQL.
+
+If you already have a broken partial install, remove the generated install artifacts and rerun:
+
+```powershell
+Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+npm run install:fresh
+```
+
+Use Node.js 22 or newer. Node 20 may install with warnings, but it is below the declared supported runtime.
+
+## M5 pager firmware settings
+
+Your posted firmware can keep these defaults except token/base URL:
+
+```c
+#define CONFIG_PAGER_API_BASE_URL "http://YOUR_SERVER_IP:5003"
+#define CONFIG_PAGER_TOKEN "demo-quality-pager-token"
+#define CONFIG_PAGER_RESPONDER_NAME "Quality"
+```
+
+Use the correct token per department:
+
+```text
+Quality: demo-quality-pager-token
+Supervisor: demo-supervisor-pager-token
+Maintenance: demo-maintenance-pager-token
+Material Handler: demo-material-pager-token
+```
+
+For production, generate pager tokens in:
+
+```text
+Admin Setup -> Pagers
+```
+
+Then paste the raw token into the device configuration. The raw token is only shown once.
+
+## Recommended firmware refinement
+
+Your existing parser will work because the API still returns:
+
+```text
+machine.name
+machine.machine_code
+issue_category.name
+issue_problem.name
+status
+status_label
+action_available
+responder_name_text
+elapsed_seconds
+```
+
+The new API also returns these extra useful fields:
+
+```text
+command_id
+command_label
+department.name
+issue_text
+display_message
+priority
+```
+
+Add those fields to the device struct when you want the M5 screen to show the parent command label and shared operator note.
+
+## Production checklist
+
+Before using this on a real plant network:
+
+1. Change the PostgreSQL password.
+2. Set a strong `JWT_SECRET`.
+3. Set `DEMO_MODE=false`.
+4. Generate real pager tokens and remove demo tokens if desired.
+5. Use HTTPS or keep the app on a protected local network/VPN.
+6. Rotate any Wi-Fi passwords or bearer tokens that were pasted into shared code.
+7. Back up PostgreSQL.
+8. Run the app as a scheduled task or service account.
+
+## Troubleshooting
+
+### `psql` is not recognized
+
+Add PostgreSQL to the current PowerShell session:
+
+```powershell
+$env:Path += ";C:\Program Files\PostgreSQL\18\bin"
+```
+
+### Cannot connect to database
+
+Check `.env`:
+
+```env
+DATABASE_URL="postgresql://processguard:processguard_dev_password@localhost:5432/processguard?schema=public"
+```
+
+Then test:
+
+```powershell
+psql -U processguard -d processguard -h localhost
+```
+
+### Browser cannot reach app from another machine
+
+Check that the app is listening on all interfaces:
+
+```env
+HOST=0.0.0.0
+PORT=5003
+```
+
+Then add the firewall rule:
+
+```powershell
+New-NetFirewallRule -DisplayName "ProcessGuard Andon 5003" -Direction Inbound -Protocol TCP -LocalPort 5003 -Action Allow
+```
+
+### Pager says auth failed
+
+Check that the device has the exact raw token from Admin Setup -> Pagers or one of the demo tokens. The app stores only token hashes, so you cannot recover old raw tokens. Rotate the pager token if needed.
+
+### Pager is slow to show new alerts
+
+Your firmware polls every 15 seconds when there are no active alerts. Reduce this line in firmware for faster response:
+
+```c
+#define POLL_EMPTY_MS 3000
+```
+
+For the next hardware iteration, use MQTT or long polling as a wake-up signal and keep REST as the source-of-truth snapshot.

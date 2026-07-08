@@ -1,0 +1,100 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { postJson } from "../lib/api";
+import { formatElapsed } from "../lib/format";
+import type { Alert } from "../lib/types";
+import { StatusBadge } from "./StatusBadge";
+
+type ActionMode = "queue" | "operator" | "floor";
+
+export function AlertCard({ alert, compact = false, actionMode = "queue" }: { alert: Alert; compact?: boolean; actionMode?: ActionMode }) {
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["active-alerts"] });
+    queryClient.invalidateQueries({ queryKey: ["floor"] });
+    queryClient.invalidateQueries({ queryKey: ["operator-snapshot"] });
+  };
+  const mutate = useMutation({
+    mutationFn: (action: string) => postJson(`/api/alerts/${alert.id}/${action}`, { responderNameText: "Web" }),
+    onSuccess: refresh
+  });
+  const sendMessage = useMutation({
+    mutationFn: (note: string) => postJson(`/api/alerts/${alert.id}/notes`, { note }),
+    onSuccess: () => {
+      setMessage("");
+      refresh();
+    }
+  });
+  const events = [...(alert.events ?? [])].filter((event: any) => event.eventType === "NOTE").reverse();
+  const activeTimerStartedAt = new Date(alert.activeTimerStartedAt ?? alert.createdAt).getTime();
+  const activeElapsedSeconds = Number.isNaN(activeTimerStartedAt) ? alert.elapsedSeconds : Math.max(0, Math.floor((now - activeTimerStartedAt) / 1000));
+  const canResolve = alert.status === "ACKNOWLEDGED" || alert.status === "ARRIVED";
+  const queueAction = actionMode === "queue" && alert.status === "OPEN" ? "acknowledge" : actionMode === "queue" && canResolve ? "resolve" : "";
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <article className={`alert-card priority-${alert.priority.toLowerCase()} ${actionMode === "queue" ? "queue-alert" : ""} ${actionMode === "queue" ? `queue-alert-${alert.status.toLowerCase()}` : ""} ${actionMode === "floor" ? "floor-alert" : ""} ${actionMode === "operator" ? "operator-active-alert" : ""} ${actionMode === "operator" && alert.status === "ACKNOWLEDGED" ? "operator-acknowledged-alert" : ""}`}>
+      <header>
+        <div>
+          <strong>{alert.machine.name}</strong>
+          <span>{alert.issueText}</span>
+        </div>
+        <StatusBadge status={alert.status} />
+      </header>
+      {!compact && (alert.displayMessage || alert.operatorNote) && <p>{alert.displayMessage || alert.operatorNote}</p>}
+      <div className="alert-meta">
+        {(actionMode === "queue" || actionMode === "floor") && <strong className="queue-panel-title">Elapsed Time</strong>}
+        <span className="alert-timer-value">{formatElapsed(activeElapsedSeconds)}</span>
+        {actionMode === "operator" && <span className="alert-responder-value">{alert.responderNameText ? `Responder: ${alert.responderNameText}` : "Unassigned"}</span>}
+      </div>
+      {(actionMode === "operator" || actionMode === "queue" || actionMode === "floor") && (
+        <div className="alert-conversation">
+          {(actionMode === "queue" || actionMode === "floor") && <strong className="queue-panel-title">Messages</strong>}
+          {events.length > 0 && (
+            <div className="conversation-log">
+              {events.map((event: any) => (
+                <div key={event.id} className={`conversation-event ${event.eventType === "NOTE" ? "note" : ""}`}>
+                  <div>
+                    <strong>{event.actorNameText || "System"}</strong>
+                    <span>{new Date(event.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                  </div>
+                  <p>{event.note || event.eventType.replaceAll("_", " ").toLowerCase()}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          <form className="conversation-form" onSubmit={(event) => {
+            event.preventDefault();
+            const note = message.trim();
+            if (note) sendMessage.mutate(note);
+          }}>
+            <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type a message" />
+            <button type="submit" disabled={!message.trim() || sendMessage.isPending}>Send</button>
+          </form>
+        </div>
+      )}
+      {queueAction && (
+        <div className="action-row queue-action-row">
+          <button
+            className={queueAction === "resolve" ? "success" : "queue-acknowledge-button"}
+            onClick={() => mutate.mutate(queueAction)}
+            disabled={mutate.isPending}
+          >
+            {queueAction === "resolve" ? "Resolve" : "Acknowledge"}
+          </button>
+        </div>
+      )}
+      {actionMode === "operator" && canResolve && (
+        <div className="action-row operator-resolve-row">
+          <button className="success" onClick={() => mutate.mutate("resolve")} disabled={mutate.isPending}>Resolve</button>
+        </div>
+      )}
+    </article>
+  );
+}

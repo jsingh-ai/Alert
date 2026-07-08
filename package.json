@@ -1,0 +1,45 @@
+{
+  "name": "processguard-andon",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ProcessGuard Andon - modern internal manufacturing command and live alert system.",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
+    "start": "node apps/api/dist/index.js",
+    "install:fresh": "npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:push": "prisma db push --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:seed": "tsx prisma/seed.ts",
+    "setup:dev": "npm run db:generate && npm run db:push && npm run db:seed",
+    "dev:sqlite": "node scripts/run-sqlite.mjs npm run dev",
+    "start:sqlite": "node scripts/run-sqlite.mjs npm run start",
+    "build:sqlite": "npm run db:generate:sqlite && npm run build",
+    "db:generate:sqlite": "node scripts/run-sqlite.mjs prisma generate --schema prisma/sqlite/schema.prisma",
+    "db:push:sqlite": "node scripts/run-sqlite.mjs prisma db push --schema prisma/sqlite/schema.prisma",
+    "db:seed:sqlite": "node scripts/run-sqlite.mjs tsx prisma/sqlite/seed.ts",
+    "setup:sqlite": "npm run db:generate:sqlite && npm run db:push:sqlite && npm run db:seed:sqlite",
+    "check": "npm run typecheck -w apps/api && npm run typecheck -w apps/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prisma": "^6.14.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.14.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7"
+  }
+}

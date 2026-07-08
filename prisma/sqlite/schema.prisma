@@ -1,0 +1,335 @@
+// SQLite-only development schema.
+// Remove this whole prisma/sqlite folder when PostgreSQL is the only target.
+// The main PostgreSQL schema remains at ../schema.prisma.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships      Membership[]
+  machineGroups    MachineGroup[]
+  machines         Machine[]
+  departments      Department[]
+  issueTypes       IssueType[]
+  commandTemplates CommandTemplate[]
+  commands         AndonCommand[]
+  alerts           AndonAlert[]
+  pagerDevices     PagerDevice[]
+  preferences      UserPreference[]
+
+  @@map("companies")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  workId       String?  @map("work_id")
+  email        String?
+  phone        String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  memberships         Membership[]
+  commandsCreated     AndonCommand[] @relation("CommandOperator")
+  alertsCreated       AndonAlert[]   @relation("AlertCreatedBy")
+  alertsAcknowledged  AndonAlert[]   @relation("AlertAcknowledgedBy")
+  alertsArrived       AndonAlert[]   @relation("AlertArrivedBy")
+  alertsResolved      AndonAlert[]   @relation("AlertResolvedBy")
+  alertsCancelled     AndonAlert[]   @relation("AlertCancelledBy")
+  alertEvents         AlertEvent[]
+  preferences         UserPreference[]
+
+  @@map("users")
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  companyId String   @map("company_id")
+  role      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  scopes  MembershipScope[]
+
+  @@unique([userId, companyId])
+  @@index([companyId, role])
+  @@map("memberships")
+}
+
+model MembershipScope {
+  id           String   @id @default(cuid())
+  membershipId String   @map("membership_id")
+  scopeType    String   @map("scope_type")
+  scopeId      String   @map("scope_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, scopeType, scopeId])
+  @@index([scopeType, scopeId])
+  @@map("membership_scopes")
+}
+
+model MachineGroup {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  name      String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machines Machine[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active])
+  @@map("machine_groups")
+}
+
+model Machine {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  machineGroupId  String   @map("machine_group_id")
+  code            String
+  name            String
+  active          Boolean  @default(true)
+  sortOrder       Int      @default(0) @map("sort_order")
+  radiusMachineId String?  @map("radius_machine_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machineGroup MachineGroup  @relation(fields: [machineGroupId], references: [id], onDelete: Restrict)
+  commands     AndonCommand[]
+  alerts       AndonAlert[]
+
+  @@unique([companyId, code])
+  @@index([companyId, active])
+  @@index([machineGroupId, active])
+  @@map("machines")
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  name      String
+  color     String   @default("#2563eb")
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company         Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  issueTypes      IssueType[]
+  commandTargets  CommandTemplateTarget[]
+  alerts          AndonAlert[]
+  pagerDevices    PagerDevice[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active])
+  @@map("departments")
+}
+
+model IssueType {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  departmentId    String   @map("department_id")
+  name            String
+  defaultPriority String   @default("NORMAL") @map("default_priority")
+  active          Boolean  @default(true)
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company        Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department     Department              @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  commandTargets CommandTemplateTarget[]
+  alerts         AndonAlert[]
+
+  @@unique([departmentId, name])
+  @@index([companyId, active])
+  @@index([departmentId, active])
+  @@map("issue_types")
+}
+
+model CommandTemplate {
+  id          String   @id @default(cuid())
+  companyId   String   @map("company_id")
+  name        String
+  buttonLabel String   @map("button_label")
+  icon        String   @default("bell")
+  color       String   @default("#ef4444")
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company  Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  targets  CommandTemplateTarget[]
+  commands AndonCommand[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active])
+  @@map("command_templates")
+}
+
+model CommandTemplateTarget {
+  id                String   @id @default(cuid())
+  commandTemplateId String   @map("command_template_id")
+  departmentId      String   @map("department_id")
+  issueTypeId       String   @map("issue_type_id")
+  targetMessage     String?  @map("target_message")
+  priority          String   @default("NORMAL")
+  sortOrder         Int      @default(0) @map("sort_order")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  commandTemplate CommandTemplate @relation(fields: [commandTemplateId], references: [id], onDelete: Cascade)
+  department      Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  issueType       IssueType       @relation(fields: [issueTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([commandTemplateId, departmentId])
+  @@index([departmentId])
+  @@map("command_template_targets")
+}
+
+model AndonCommand {
+  id                String   @id @default(cuid())
+  companyId         String   @map("company_id")
+  machineId         String   @map("machine_id")
+  commandTemplateId String?  @map("command_template_id")
+  commandLabel      String   @map("command_label")
+  operatorUserId    String?  @map("operator_user_id")
+  operatorNameText  String?  @map("operator_name_text")
+  sharedNote        String?  @map("shared_note")
+  clientRequestId   String?  @map("client_request_id")
+  status            String   @default("OPEN")
+  createdAt         DateTime @default(now()) @map("created_at")
+  closedAt          DateTime? @map("closed_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machine         Machine          @relation(fields: [machineId], references: [id], onDelete: Restrict)
+  commandTemplate CommandTemplate? @relation(fields: [commandTemplateId], references: [id], onDelete: SetNull)
+  operatorUser    User?            @relation("CommandOperator", fields: [operatorUserId], references: [id], onDelete: SetNull)
+  alerts          AndonAlert[]
+
+  @@unique([companyId, clientRequestId])
+  @@index([companyId, status])
+  @@index([machineId, status])
+  @@map("andon_commands")
+}
+
+model AndonAlert {
+  id                   String   @id @default(cuid())
+  commandId            String?  @map("command_id")
+  companyId            String   @map("company_id")
+  machineId            String   @map("machine_id")
+  departmentId         String   @map("department_id")
+  issueTypeId          String?  @map("issue_type_id")
+  status               String   @default("OPEN")
+  priority             String   @default("NORMAL")
+  operatorNote         String?  @map("operator_note")
+  displayMessage       String?  @map("display_message")
+  createdByUserId      String?  @map("created_by_user_id")
+  acknowledgedByUserId String?  @map("acknowledged_by_user_id")
+  arrivedByUserId      String?  @map("arrived_by_user_id")
+  resolvedByUserId     String?  @map("resolved_by_user_id")
+  cancelledByUserId    String?  @map("cancelled_by_user_id")
+  responderNameText    String?  @map("responder_name_text")
+  createdAt            DateTime @default(now()) @map("created_at")
+  acknowledgedAt       DateTime? @map("acknowledged_at")
+  arrivedAt            DateTime? @map("arrived_at")
+  resolvedAt           DateTime? @map("resolved_at")
+  cancelledAt          DateTime? @map("cancelled_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  command          AndonCommand? @relation(fields: [commandId], references: [id], onDelete: SetNull)
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machine          Machine       @relation(fields: [machineId], references: [id], onDelete: Restrict)
+  department       Department    @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  issueType        IssueType?    @relation(fields: [issueTypeId], references: [id], onDelete: SetNull)
+  createdByUser    User?         @relation("AlertCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acknowledgedByUser User?       @relation("AlertAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  arrivedByUser      User?       @relation("AlertArrivedBy", fields: [arrivedByUserId], references: [id], onDelete: SetNull)
+  resolvedByUser     User?       @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser    User?       @relation("AlertCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  events           AlertEvent[]
+
+  @@index([companyId, status])
+  @@index([departmentId, status])
+  @@index([machineId, status])
+  @@index([commandId])
+  @@map("andon_alerts")
+}
+
+model AlertEvent {
+  id            String   @id @default(cuid())
+  alertId       String   @map("alert_id")
+  eventType     String   @map("event_type")
+  actorUserId   String?  @map("actor_user_id")
+  actorNameText String?  @map("actor_name_text")
+  note          String?
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  alert     AndonAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  actorUser User?      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([alertId, createdAt])
+  @@map("alert_events")
+}
+
+model PagerDevice {
+  id               String   @id @default(cuid())
+  companyId        String   @map("company_id")
+  departmentId     String   @map("department_id")
+  name             String
+  tokenHash        String   @unique @map("token_hash")
+  tokenFingerprint String?  @map("token_fingerprint")
+  active           Boolean  @default(true)
+  lastSeenAt       DateTime? @map("last_seen_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, departmentId, active])
+  @@map("pager_devices")
+}
+
+model UserPreference {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  companyId String   @map("company_id")
+  key       String
+  value     Json     @map("value_json")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId, key])
+  @@map("user_preferences")
+}

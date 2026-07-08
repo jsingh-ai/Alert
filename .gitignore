@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.npm/
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.sqlite.example
+
+# Build output
+dist/
+build/
+apps/web/dist/
+apps/api/dist/
+
+# Prisma/client generated cache
+.prisma/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Runtime
+*.pid
+coverage/
+prisma/sqlite/*.db
+prisma/sqlite/*.db-journal
