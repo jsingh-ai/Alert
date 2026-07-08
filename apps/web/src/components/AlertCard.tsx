@@ -40,21 +40,24 @@ export function AlertCard({ alert, compact = false, actionMode = "queue" }: { al
 
   return (
     <article className={`alert-card priority-${alert.priority.toLowerCase()} ${actionMode === "queue" ? "queue-alert" : ""} ${actionMode === "queue" ? `queue-alert-${alert.status.toLowerCase()}` : ""} ${actionMode === "floor" ? "floor-alert" : ""} ${actionMode === "operator" ? "operator-active-alert" : ""} ${actionMode === "operator" && alert.status === "ACKNOWLEDGED" ? "operator-acknowledged-alert" : ""}`}>
-      <header>
-        <div>
-          <strong>{alert.machine.name}</strong>
-          <span>{alert.issueText}</span>
-        </div>
-        <StatusBadge status={alert.status} />
-      </header>
+      {actionMode !== "operator" && (
+        <header>
+          <div>
+            <strong>{alert.machine.name}</strong>
+            <span>{alert.issueText}</span>
+          </div>
+          <StatusBadge status={alert.status} />
+        </header>
+      )}
       {!compact && (alert.displayMessage || alert.operatorNote) && <p>{alert.displayMessage || alert.operatorNote}</p>}
       <div className="alert-meta">
         {(actionMode === "queue" || actionMode === "floor") && <strong className="queue-panel-title">Elapsed Time</strong>}
         <span className="alert-timer-value">{formatElapsed(activeElapsedSeconds)}</span>
-        {actionMode === "operator" && <span className="alert-responder-value">{alert.responderNameText ? `Responder: ${alert.responderNameText}` : "Unassigned"}</span>}
+        {actionMode === "operator" && alert.responderNameText && <span className="alert-responder-value">Responder: {alert.responderNameText}</span>}
       </div>
       {(actionMode === "operator" || actionMode === "queue" || actionMode === "floor") && (
         <div className="alert-conversation">
+          {actionMode === "operator" && <strong className="operator-conversation-title">Live Conversation</strong>}
           {(actionMode === "queue" || actionMode === "floor") && <strong className="queue-panel-title">Messages</strong>}
           {events.length > 0 && (
             <div className="conversation-log">

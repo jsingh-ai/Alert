@@ -18,9 +18,9 @@ const items: Record<string, NavItem> = {
 export function navForRole(role: Role): NavItem[] {
   switch (role) {
     case "ADMIN":
-      return [items.floor, items.queue, items.operator, items.reports, items.admin];
+      return [items.floor, items.operator, items.queue, items.reports, items.admin];
     case "MANAGER":
-      return [items.floor, items.queue, items.operator, items.reports];
+      return [items.floor, items.operator, items.queue, items.reports];
     case "OPERATOR":
       return [items.operator];
     case "RESPONDER":

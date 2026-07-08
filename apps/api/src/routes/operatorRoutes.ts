@@ -6,16 +6,17 @@ import { ACTIVE_ALERT_STATUSES, machineWhereForContext } from "../services/permi
 function groupCommands(alerts: any[]) {
   const map = new Map<string, any>();
   for (const alert of alerts) {
-    const key = alert.commandId ?? `single:${alert.id}`;
+    const key = alert.commandId ? `${alert.commandId}:${alert.id}` : `single:${alert.id}`;
     if (!map.has(key)) {
       map.set(key, {
-        id: alert.commandId ?? key,
+        id: key,
+        realCommandId: alert.commandId,
         commandTemplateId: alert.command?.commandTemplateId ?? null,
         commandLabel: alert.command?.commandLabel ?? alert.issueType?.name ?? "Help Call",
-        status: alert.command?.status ?? alert.status,
+        status: alert.status,
         machine: alert.machine,
         sharedNote: alert.command?.sharedNote ?? alert.operatorNote,
-        createdAt: alert.command?.createdAt ?? alert.createdAt,
+        createdAt: alert.createdAt,
         alerts: []
       });
     }

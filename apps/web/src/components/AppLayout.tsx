@@ -8,7 +8,14 @@ function orderedNav(items: NavItem[], order: string[]) {
   const byId = new Map(items.map((item) => [item.id, item]));
   const ordered = order.map((id) => byId.get(id)).filter(Boolean) as NavItem[];
   const missing = items.filter((item) => !order.includes(item.id));
-  return [...ordered, ...missing];
+  const nav = [...ordered, ...missing];
+  const operatorIndex = nav.findIndex((item) => item.id === "operator");
+  const queueIndex = nav.findIndex((item) => item.id === "queue");
+  if (operatorIndex >= 0 && queueIndex >= 0 && queueIndex < operatorIndex) {
+    const [operator] = nav.splice(operatorIndex, 1);
+    nav.splice(queueIndex, 0, operator);
+  }
+  return nav;
 }
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -49,7 +56,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell" style={{ gridTemplateColumns: collapsed ? "72px 1fr" : `${width}px 1fr` }}>
-      <aside className="sidebar">
+      <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
         <div className="brand-row">
           <div className="brand-mark">PG</div>
           {!collapsed && <div><strong>ProcessGuard</strong><span>{session.company.name}</span></div>}

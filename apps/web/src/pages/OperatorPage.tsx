@@ -34,15 +34,19 @@ export function OperatorPage() {
     return commands.filter((command: any) => command.machine?.id === machineId);
   }, [snapshot.data, machineId]);
   const activeTemplateStates = useMemo(() => {
-    const map = new Map<string, { startedAt: number; status: string }>();
+    const map = new Map<string, { startedAt: number; openCount: number; acknowledgedCount: number; totalCount: number }>();
     for (const command of visibleCommands) {
       if (!command.commandTemplateId) continue;
       for (const alert of command.alerts ?? []) {
         const startedAt = new Date(alert.activeTimerStartedAt ?? alert.createdAt ?? command.createdAt).getTime();
         if (Number.isNaN(startedAt)) continue;
         const current = map.get(command.commandTemplateId);
-        const status = alert.status === "ACKNOWLEDGED" || current?.status === "ACKNOWLEDGED" ? "ACKNOWLEDGED" : alert.status;
-        if (!current || startedAt < current.startedAt || current.status !== status) map.set(command.commandTemplateId, { startedAt, status });
+        map.set(command.commandTemplateId, {
+          startedAt: current ? Math.min(current.startedAt, startedAt) : startedAt,
+          openCount: (current?.openCount ?? 0) + (alert.status === "OPEN" ? 1 : 0),
+          acknowledgedCount: (current?.acknowledgedCount ?? 0) + (alert.status === "ACKNOWLEDGED" ? 1 : 0),
+          totalCount: (current?.totalCount ?? 0) + 1
+        });
       }
     }
     return map;
@@ -59,6 +63,12 @@ export function OperatorPage() {
   const allVisibleCallsAcknowledged = visibleCommands.length > 0 && visibleCommands.every((command: any) =>
     (command.alerts ?? []).length > 0 && command.alerts.every((alert: any) => alert.status === "ACKNOWLEDGED")
   );
+  const openCommands = useMemo(() => visibleCommands.filter((command: any) =>
+    (command.alerts ?? []).some((alert: any) => alert.status === "OPEN")
+  ), [visibleCommands]);
+  const acknowledgedCommands = useMemo(() => visibleCommands.filter((command: any) =>
+    (command.alerts ?? []).length > 0 && command.alerts.every((alert: any) => alert.status === "ACKNOWLEDGED")
+  ), [visibleCommands]);
 
   useEffect(() => {
     if (!lockedMachineId) return;
@@ -92,11 +102,12 @@ export function OperatorPage() {
     if (!machineId) return { disabled: true, state: "Select machine", activeNames: [] as string[] };
     const activeState = activeTemplateStates.get(template.id);
     if (activeState) {
+      const acknowledged = activeState.totalCount > 0 && activeState.acknowledgedCount === activeState.totalCount;
       return {
         disabled: true,
         fullyActive: true,
-        acknowledged: activeState.status === "ACKNOWLEDGED",
-        state: activeState.status === "ACKNOWLEDGED" ? "Acknowledged" : "Active now",
+        acknowledged,
+        state: acknowledged ? "Acknowledged" : "Active now",
         activeNames: [],
         elapsedSeconds: Math.max(0, Math.floor((now - activeState.startedAt) / 1000))
       };
@@ -142,7 +153,16 @@ export function OperatorPage() {
   return (
     <div className="page-stack">
       <div className={`selected-machine-banner ${selectedMachine ? "active" : ""} ${visibleCommands.length > 0 ? "has-calls" : ""} ${allVisibleCallsAcknowledged ? "acknowledged-calls" : ""}`}>
-        <strong>{selectedMachine ? selectedMachine.name : "No machine selected"}</strong>
+        <div className="machine-title-mark" aria-hidden="true">
+          <span>{selectedMachine?.code ?? "--"}</span>
+        </div>
+        <div className="machine-title-copy">
+          <span className="machine-title-eyebrow">Operator Station</span>
+          <strong>{selectedMachine ? selectedMachine.name : "No machine selected"}</strong>
+        </div>
+        <span className="machine-title-status">
+          {!selectedMachine ? "Select machine" : allVisibleCallsAcknowledged ? "Acknowledged" : visibleCommands.length > 0 ? "Active call" : "Monitoring"}
+        </span>
       </div>
       <section className="panel">
         {lockedMachineId && !machinePickerOpen ? (
@@ -182,8 +202,13 @@ export function OperatorPage() {
         )}
       </section>
       <section className="panel">
-        <div className="section-heading">
-          <h2>Quick Commands</h2>
+        <div className={`operator-section-banner quick-command-banner ${visibleCommands.length > 0 ? "has-calls" : ""} ${allVisibleCallsAcknowledged ? "acknowledged" : ""}`}>
+          <div className="operator-section-mark" aria-hidden="true">QC</div>
+          <div className="operator-section-copy">
+            <span>Operator Actions</span>
+            <h2>Quick Commands</h2>
+          </div>
+          <strong>{(data?.commandTemplates ?? []).length} commands</strong>
         </div>
         <div className="command-grid">
           {(data?.commandTemplates ?? []).map((template: any) => {
@@ -195,6 +220,7 @@ export function OperatorPage() {
                 onClick={() => sendTemplate(template.id)}
                 disabled={createCommand.isPending || status.disabled}
               >
+                <span className="command-call-glyph" aria-hidden="true">☎</span>
                 <span className="command-icon">{commandBadge(template.buttonLabel)}</span>
                 <span className="command-copy">
                   <strong>{template.buttonLabel}</strong>
@@ -207,7 +233,7 @@ export function OperatorPage() {
           })}
         </div>
       </section>
-      <section className="panel subtle">
+      <section className="panel subtle operator-manual-call">
         <button className="collapse-header" onClick={() => setManualOpen((open) => !open)} aria-expanded={manualOpen}>
           <span>Manual multi-department call</span>
           <strong>{manualOpen ? "Hide" : "Show"}</strong>
@@ -230,13 +256,41 @@ export function OperatorPage() {
         )}
       </section>
       <section className="panel">
-        <div className="section-heading">
-          <h2>Active Calls</h2>
+        <div className={`operator-section-banner active-call-banner ${visibleCommands.length > 0 ? "has-calls" : ""} ${allVisibleCallsAcknowledged ? "acknowledged" : ""}`}>
+          <div className="operator-section-mark" aria-hidden="true">AC</div>
+          <div className="operator-section-copy">
+            <span>Machine Queue</span>
+            <h2>Active Calls</h2>
+          </div>
+          <strong>{!machineId ? "Select machine" : visibleCommands.length === 0 ? "Clear" : `${visibleCommands.length} active`}</strong>
         </div>
-        <div className="command-list operator-command-list">
+        <div className="operator-active-columns">
           {!machineId && <div className="empty-state">Select a machine to see its active calls.</div>}
           {machineId && visibleCommands.length === 0 && <div className="empty-state">No active calls for this machine.</div>}
-          {visibleCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" />)}
+          {machineId && visibleCommands.length > 0 && (
+            <>
+              <div className="operator-active-column open">
+                <div className="operator-active-column-header">
+                  <strong>Open</strong>
+                  <span>{openCommands.length}</span>
+                </div>
+                <div className="command-list operator-command-list">
+                  {openCommands.length === 0 && <div className="empty-state small">No open calls.</div>}
+                  {openCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" />)}
+                </div>
+              </div>
+              <div className="operator-active-column acknowledged">
+                <div className="operator-active-column-header">
+                  <strong>Acknowledged</strong>
+                  <span>{acknowledgedCommands.length}</span>
+                </div>
+                <div className="command-list operator-command-list">
+                  {acknowledgedCommands.length === 0 && <div className="empty-state small">No calls waiting to resolve.</div>}
+                  {acknowledgedCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" />)}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
     </div>

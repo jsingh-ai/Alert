@@ -5,6 +5,8 @@ import { formatElapsed } from "../lib/format";
 import { CommandGroupCard } from "../components/CommandGroupCard";
 import type { CommandGroup } from "../lib/types";
 
+const naturalMachineSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
 export function FloorPage() {
   const [onlyActive, setOnlyActive] = useState(false);
   const [machineGroup, setMachineGroup] = useState("all");
@@ -29,11 +31,26 @@ export function FloorPage() {
     (!onlyActive || activeMachineIds.has(machine.id)) &&
     (machineGroup === "all" || machine.machineGroup?.name === machineGroup)
   );
+  const visibleMachineGroups = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    for (const machine of visibleMachines) {
+      const name = machine.machineGroup?.name ?? "Machines";
+      groups.set(name, [...(groups.get(name) ?? []), machine]);
+    }
+    return Array.from(groups, ([name, machines]) => ({
+      name,
+      machines: [...machines].sort((a, b) =>
+        naturalMachineSort.compare(a.name ?? "", b.name ?? "") ||
+        naturalMachineSort.compare(a.code ?? "", b.code ?? "")
+      )
+    })).sort((a, b) => naturalMachineSort.compare(a.name, b.name));
+  }, [visibleMachines]);
 
   return (
     <div className="page-stack floor-page">
-      <header className={`floor-header ${commands.length > 0 ? "has-alerts" : ""}`}>
-        <div className="floor-heading">
+      <header className="floor-header">
+        <div className="operator-section-mark" aria-hidden="true">LF</div>
+        <div className="operator-section-copy">
           <span>Live Floor</span>
           <h1>Floor Overview</h1>
         </div>
@@ -43,36 +60,60 @@ export function FloorPage() {
           <div><span>Alerts</span><strong>{alertCount}</strong></div>
         </div>
       </header>
-      <div className="floor-tabs" role="tablist" aria-label="Machine groups">
-        <button className={machineGroup === "all" ? "active" : ""} onClick={() => setMachineGroup("all")}>All</button>
-        {machineGroups.map((group) => (
-          <button key={group} className={machineGroup === group ? "active" : ""} onClick={() => setMachineGroup(group)}>{group}</button>
-        ))}
+      <section className="floor-control-panel">
+        <div className="floor-machine-filter">
+          <div>
+            <span>Machine Groups</span>
+            <strong>{machineGroup === "all" ? "All machines" : machineGroup}</strong>
+          </div>
+          <div className="floor-tabs" role="tablist" aria-label="Machine groups">
+            <button className={machineGroup === "all" ? "active" : ""} onClick={() => setMachineGroup("all")}>All</button>
+            {machineGroups.map((group) => (
+              <button key={group} className={machineGroup === group ? "active" : ""} onClick={() => setMachineGroup(group)}>{group}</button>
+            ))}
+          </div>
+        </div>
         <label className={`floor-toggle floor-tabs-toggle ${onlyActive ? "active" : ""}`}>
           <input type="checkbox" checked={onlyActive} onChange={(event) => setOnlyActive(event.target.checked)} /> Active Alerts
         </label>
-      </div>
-      <section className="floor-grid">
-        {visibleMachines.map((machine: any) => {
-          const machineCommands = activeByMachine.get(machine.id) ?? [];
-          const machineAlerts = machineCommands.reduce((sum, command) => sum + command.alerts.length, 0);
-          const acknowledged = machineCommands.length > 0 && machineCommands.every((command) => command.alerts.every((alert) => alert.status === "ACKNOWLEDGED"));
-          const stats = machineStats[machine.id] ?? {};
-          const lastAlert = stats.lastAlert;
-          return (
-          <article key={machine.id} className={`floor-machine ${machineCommands.length > 0 ? "hot" : "normal"} ${acknowledged ? "acknowledged" : ""}`}>
-            <div>
-              <strong>{machine.name}</strong>
-              <span>{machine.machineGroup?.name} / {machine.code}</span>
+      </section>
+      <section className="floor-groups">
+        {visibleMachineGroups.map((group) => (
+          <section key={group.name} className="floor-machine-group">
+            <header>
+              <div>
+                <span>Machine Group</span>
+                <strong>{group.name}</strong>
+              </div>
+              <em>{group.machines.length}</em>
+            </header>
+            <div className="floor-grid">
+              {group.machines.map((machine: any) => {
+                const machineCommands = activeByMachine.get(machine.id) ?? [];
+                const machineAlerts = machineCommands.reduce((sum, command) => sum + command.alerts.length, 0);
+                const acknowledged = machineCommands.length > 0 && machineCommands.every((command) => command.alerts.every((alert) => alert.status === "ACKNOWLEDGED"));
+                const stats = machineStats[machine.id] ?? {};
+                const lastAlert = stats.lastAlert;
+                const todayText = String(stats.alertsToday ?? 0);
+                const lastText = lastAlert ? new Date(lastAlert.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "-";
+                const durationText = lastAlert ? formatElapsed(lastAlert.durationSeconds) : "-";
+                return (
+                <article key={machine.id} className={`floor-machine ${machineCommands.length > 0 ? "hot" : "normal"} ${acknowledged ? "acknowledged" : ""}`}>
+                  <div>
+                    <strong>{machine.name}</strong>
+                    <span>{machine.code}</span>
+                  </div>
+                  <em>{machineCommands.length > 0 ? `${machineAlerts} alert${machineAlerts === 1 ? "" : "s"}` : "Clear"}</em>
+                  <dl>
+                    <div title={`Today: ${todayText}`}><dt>Today</dt><dd>{todayText}</dd></div>
+                    <div title={`Last: ${lastText}`}><dt>Last</dt><dd>{lastText}</dd></div>
+                    <div title={`Duration: ${durationText}`}><dt>Duration</dt><dd>{durationText}</dd></div>
+                  </dl>
+                </article>
+              );})}
             </div>
-            <em>{machineCommands.length > 0 ? `${machineAlerts} alert${machineAlerts === 1 ? "" : "s"}` : "Clear"}</em>
-            <dl>
-              <div><dt>Today</dt><dd>{stats.alertsToday ?? 0}</dd></div>
-              <div><dt>Last</dt><dd>{lastAlert ? new Date(lastAlert.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "-"}</dd></div>
-              <div><dt>Duration</dt><dd>{lastAlert ? formatElapsed(lastAlert.durationSeconds) : "-"}</dd></div>
-            </dl>
-          </article>
-        );})}
+          </section>
+        ))}
         {visibleMachines.length === 0 && <div className="empty-state">No active machines right now.</div>}
       </section>
       <section className="panel floor-active-panel">

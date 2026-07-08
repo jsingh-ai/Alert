@@ -26,7 +26,7 @@ export function CommandGroupCard({ command, actionMode = "queue" }: { command: C
           <strong>{command.machine.name} - {command.commandLabel}</strong>
           {actionMode !== "operator" && <span>{command.machine.group || command.machine.code} | {formatElapsed(elapsed)}</span>}
         </div>
-        <span className="command-status">{command.status}</span>
+        {actionMode !== "operator" && <span className="command-status">{command.status}</span>}
       </header>
       {showNote && (
         <p
@@ -37,7 +37,19 @@ export function CommandGroupCard({ command, actionMode = "queue" }: { command: C
         </p>
       )}
       <div className="split-alerts">
-        {command.alerts.map((alert) => <AlertCard key={alert.id} alert={alert} compact actionMode={actionMode} />)}
+        {command.alerts.map((alert) => (
+          actionMode === "operator" ? (
+            <div key={alert.id} className={`operator-department-box ${alert.status === "ACKNOWLEDGED" ? "acknowledged" : ""}`}>
+              <div className="operator-department-label">
+                <strong>{alert.department.name}</strong>
+                <span className="operator-department-status">{alert.status === "ACKNOWLEDGED" ? "Acknowledged" : alert.status === "OPEN" ? "Open" : alert.status}</span>
+              </div>
+              <AlertCard alert={alert} compact actionMode={actionMode} />
+            </div>
+          ) : (
+            <AlertCard key={alert.id} alert={alert} compact actionMode={actionMode} />
+          )
+        ))}
       </div>
     </article>
   );
