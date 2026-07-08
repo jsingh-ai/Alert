@@ -27,8 +27,6 @@ Write-Host "[$(Get-Date -Format o)] Service startup begin"
 Invoke-Checked -Command "git" -Arguments @("pull", "origin", "main")
 
 Invoke-Checked -Command "npm" -Arguments @("run", "install:fresh")
-Invoke-Checked -Command "npm" -Arguments @("run", "db:generate")
-Invoke-Checked -Command "npm" -Arguments @("run", "db:push")
 Invoke-Checked -Command "npm" -Arguments @("run", "build")
 
 Write-Host "[$(Get-Date -Format o)] Build complete; starting API"

@@ -280,10 +280,10 @@ On every service start or restart it will:
 
 - Pull latest code from GitHub.
 - Install dependencies.
-- Generate Prisma.
-- Push the current database schema.
 - Build the web and API.
 - Start the API server.
+
+It does not run database schema commands on every restart. Run those manually only when a release changes `prisma/schema.prisma`.
 
 Install and start the service from **Administrator PowerShell**:
 
@@ -361,6 +361,18 @@ Restart-Service ProcessGuardAndon
 ```
 
 The service restart pulls, builds, and starts the newest code.
+
+If the update includes a database schema change, run the database commands manually before restarting:
+
+```powershell
+cd C:\Users\jsingh\Desktop\Alert
+Stop-Service ProcessGuardAndon
+git pull origin main
+npm run install:fresh
+npm run db:generate
+npm run db:push
+Restart-Service ProcessGuardAndon
+```
 
 If you installed the scheduled task:
 
