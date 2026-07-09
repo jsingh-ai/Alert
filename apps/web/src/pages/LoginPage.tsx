@@ -54,8 +54,8 @@ export function LoginPage() {
 
         <div className="demo-panel">
           <div className="demo-panel-header">
-            <strong>Demo workspace</strong>
-            <span>Choose the view you want to test</span>
+            <strong>Quick Login</strong>
+            <span>Choose a view</span>
           </div>
           <div className="demo-grid">
             <button className="demo-button operator" onClick={() => demo("operator")} disabled={busy}>

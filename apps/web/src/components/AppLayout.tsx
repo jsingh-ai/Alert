@@ -31,6 +31,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   useEffect(() => localStorage.setItem("pg_sidebar_order", JSON.stringify(order)), [order]);
 
   if (!session) return null;
+  const companyLabel = session.company.name === "Five Star Demo" ? "Five Star Workflow" : session.company.name;
 
   const startResize = (event: ReactMouseEvent) => {
     const startX = event.clientX;
@@ -59,7 +60,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
         <div className="brand-row">
           <div className="brand-mark">PG</div>
-          {!collapsed && <div><strong>ProcessGuard</strong><span>{session.company.name}</span></div>}
+          {!collapsed && <div><strong>ProcessGuard</strong><span>{companyLabel}</span></div>}
         </div>
         <button className="sidebar-toggle" onClick={() => setCollapsed((value) => !value)}>{collapsed ? ">" : "Collapse"}</button>
         <nav className="side-nav">
