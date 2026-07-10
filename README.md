@@ -372,6 +372,37 @@ If you need to test a build without applying migrations, pass `-SkipMigrate` and
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy-update.ps1 -SkipMigrate
 ```
 
+### 12. Clear demo alert or chat data
+
+Use this only when you want to reset presentation/test data while keeping users, machines, departments, channels, channel access, and pager setup.
+
+Clear alert history only:
+
+```powershell
+cd C:\Users\jsingh\Desktop\Alert
+Stop-Service ProcessGuardAndon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\clear-demo-data.ps1 -Alerts -ConfirmClear
+Start-Service ProcessGuardAndon
+```
+
+Clear communication messages only:
+
+```powershell
+cd C:\Users\jsingh\Desktop\Alert
+Stop-Service ProcessGuardAndon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\clear-demo-data.ps1 -Messages -ConfirmClear
+Start-Service ProcessGuardAndon
+```
+
+Clear both:
+
+```powershell
+cd C:\Users\jsingh\Desktop\Alert
+Stop-Service ProcessGuardAndon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\clear-demo-data.ps1 -Alerts -Messages -ConfirmClear
+Start-Service ProcessGuardAndon
+```
+
 If you installed the scheduled task:
 
 ```powershell
