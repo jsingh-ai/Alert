@@ -91,12 +91,13 @@ export async function pagerRoutes(app: FastifyInstance) {
         });
 
         const notifications: Array<{ channelId: string; message: any }> = [];
-        if (action === "resolve" && updated.createdByUserId) {
+        if (action === "resolve") {
           const commandLabel = alertCommandLabel(updated);
           const message = `${commandLabel} alert resolved on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
           notifications.push(...await createAlertSystemMessages(tx, {
             companyId: pager.companyId,
-            userId: updated.createdByUserId,
+            userId: null,
+            actorNameText: responderNameText,
             machineId: updated.machineId,
             departmentId: updated.departmentId,
             alertId: updated.id,

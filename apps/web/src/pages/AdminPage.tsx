@@ -302,11 +302,43 @@ function UsersAdmin({ data }: any) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState({ username: "", password: "", displayName: "", role: "OPERATOR" });
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [editingUserId, setEditingUserId] = useState("");
+  const [editUser, setEditUser] = useState({ username: "", displayName: "", password: "", role: "OPERATOR" });
   const createUser = useMutation({ mutationFn: () => postJson("/api/admin/users", user), onSuccess: () => { setUser({ username: "", password: "", displayName: "", role: "OPERATOR" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggle = useMutation({ mutationFn: (item: any) => patchJson(`/api/admin/users/${item.id}`, { active: !item.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const remove = useMutation({ mutationFn: (item: any) => deleteJson(`/api/admin/users/${item.id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
+  const updateUser = useMutation({
+    mutationFn: () => patchJson(`/api/admin/users/${editingUserId}`, {
+      username: editUser.username,
+      displayName: editUser.displayName,
+      role: editUser.role,
+      ...(editUser.password ? { password: editUser.password } : {})
+    }),
+    onSuccess: () => {
+      setEditUser((current) => ({ ...current, password: "" }));
+      queryClient.invalidateQueries({ queryKey: ["admin"] });
+    }
+  });
   const users = data?.users ?? [];
   const selectedUser = users.find((item: any) => item.id === selectedUserId) ?? users[0];
+  const editingUser = users.find((item: any) => item.id === editingUserId);
+  const startViewUser = (item: any) => {
+    setSelectedUserId(item.id);
+    setEditingUserId(item.id);
+    setEditUser({
+      username: item.username ?? "",
+      displayName: item.displayName ?? "",
+      password: "",
+      role: item.memberships?.[0]?.role ?? "OPERATOR"
+    });
+  };
+
+  useEffect(() => {
+    if (!editingUserId || editingUser) return;
+    setEditingUserId("");
+    setEditUser({ username: "", displayName: "", password: "", role: "OPERATOR" });
+  }, [editingUserId, editingUser]);
+
   return (
     <div className="admin-grid">
       <section className="panel">
@@ -323,14 +355,137 @@ function UsersAdmin({ data }: any) {
             <div key={item.id} className={`admin-row admin-group-row ${selectedUser?.id === item.id ? "selected" : ""}`} onClick={() => setSelectedUserId(item.id)}>
               <strong>{item.username}</strong>
               <span>{item.displayName} | {item.memberships?.[0]?.role ?? "no role"} | {item.active ? "active" : "inactive"}</span>
-              <AdminActions active={item.active} onToggle={() => toggle.mutate(item)} onDelete={() => remove.mutate(item)} />
+              <div className="admin-actions" onClick={(event) => event.stopPropagation()}>
+                <button onClick={() => startViewUser(item)}>View</button>
+                <button onClick={() => toggle.mutate(item)}>{item.active ? "Disable" : "Enable"}</button>
+                <button className="danger" onClick={() => window.confirm("Delete this user? This disables access but keeps history.") && remove.mutate(item)}>Delete</button>
+              </div>
             </div>
           ))}
           {users.length === 0 && <div className="empty-state small">No items yet.</div>}
         </div>
       </section>
+      <section className="panel user-detail-panel">
+        <div className="admin-panel-header">
+          <div>
+            <h2>User Details</h2>
+            <span>{editingUser ? editingUser.displayName : "Select View on a user"}</span>
+          </div>
+        </div>
+        {!editingUser && <div className="empty-state small">Click View next to a user to update login details.</div>}
+        {editingUser && (
+          <div className="inline-form stack">
+            <label className="field-label">
+              <span>Username</span>
+              <TextInput value={editUser.username} onChange={(username: string) => setEditUser({ ...editUser, username })} placeholder="username" />
+            </label>
+            <label className="field-label">
+              <span>Display name</span>
+              <TextInput value={editUser.displayName} onChange={(displayName: string) => setEditUser({ ...editUser, displayName })} placeholder="Display name" />
+            </label>
+            <label className="field-label">
+              <span>Role</span>
+              <select value={editUser.role} onChange={(event) => setEditUser({ ...editUser, role: event.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select>
+            </label>
+            <label className="field-label">
+              <span>New password</span>
+              <TextInput type="password" value={editUser.password} onChange={(password: string) => setEditUser({ ...editUser, password })} placeholder="Leave blank to keep current password" />
+            </label>
+            <button
+              onClick={() => updateUser.mutate()}
+              disabled={!editUser.username.trim() || !editUser.displayName.trim() || updateUser.isPending}
+            >
+              {updateUser.isPending ? "Saving" : "Save user"}
+            </button>
+            <p className="form-note">Current passwords cannot be viewed. Enter a new password here only when you want to reset it.</p>
+          </div>
+        )}
+      </section>
+      <ScopeAccessPanel user={selectedUser} />
       <ChannelAccessPanel user={selectedUser} />
     </div>
+  );
+}
+
+function ScopeAccessPanel({ user }: { user: any }) {
+  const queryClient = useQueryClient();
+  const scopesQuery = useQuery({
+    queryKey: ["admin-user-scopes", user?.id],
+    enabled: Boolean(user?.id),
+    queryFn: () => api<any>(`/api/admin/users/${user.id}/scopes`)
+  });
+  const [selected, setSelected] = useState({ departments: new Set<string>(), machineGroups: new Set<string>(), machines: new Set<string>() });
+  const data = scopesQuery.data?.data;
+
+  useEffect(() => {
+    const scopes = data?.scopes ?? [];
+    setSelected({
+      departments: new Set(scopes.filter((scope: any) => scope.scopeType === "DEPARTMENT").map((scope: any) => scope.scopeId)),
+      machineGroups: new Set(scopes.filter((scope: any) => scope.scopeType === "MACHINE_GROUP").map((scope: any) => scope.scopeId)),
+      machines: new Set(scopes.filter((scope: any) => scope.scopeType === "MACHINE").map((scope: any) => scope.scopeId))
+    });
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => api(`/api/admin/users/${user.id}/scopes`, {
+      method: "PUT",
+      body: JSON.stringify({
+        departmentIds: Array.from(selected.departments),
+        machineGroupIds: Array.from(selected.machineGroups),
+        machineIds: Array.from(selected.machines)
+      })
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-user-scopes", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["admin"] });
+    }
+  });
+
+  if (!user) return <section className="panel"><div className="empty-state">Create a user first.</div></section>;
+
+  const toggle = (group: "departments" | "machineGroups" | "machines", id: string) => {
+    setSelected((current) => {
+      const nextGroup = new Set(current[group]);
+      if (nextGroup.has(id)) nextGroup.delete(id);
+      else nextGroup.add(id);
+      return { ...current, [group]: nextGroup };
+    });
+  };
+
+  const renderChecks = (title: string, items: any[], group: "departments" | "machineGroups" | "machines", detail?: (item: any) => string) => (
+    <div className="scope-section">
+      <h3>{title}</h3>
+      <div className="scope-check-grid">
+        {items.map((item: any) => (
+          <label key={item.id} className="scope-check">
+            <input type="checkbox" checked={selected[group].has(item.id)} onChange={() => toggle(group, item.id)} />
+            <span>{item.name}</span>
+            {detail && <em>{detail(item)}</em>}
+          </label>
+        ))}
+        {items.length === 0 && <div className="empty-state small">No items configured.</div>}
+      </div>
+    </div>
+  );
+
+  return (
+    <section className="panel">
+      <div className="admin-panel-header">
+        <div>
+          <h2>User Access</h2>
+          <span>{user.displayName}</span>
+        </div>
+        <button onClick={() => save.mutate()} disabled={save.isPending || !scopesQuery.data}>{save.isPending ? "Saving" : "Save"}</button>
+      </div>
+      {scopesQuery.isLoading && <div className="empty-state small">Loading access.</div>}
+      {data && (
+        <div className="scope-access-grid">
+          {renderChecks("Department Access", data.departments ?? [], "departments")}
+          {renderChecks("Machine Group Access", data.machineGroups ?? [], "machineGroups")}
+          {renderChecks("Machine Access", data.machines ?? [], "machines", (machine) => machine.machineGroup?.name ?? "")}
+        </div>
+      )}
+    </section>
   );
 }
 

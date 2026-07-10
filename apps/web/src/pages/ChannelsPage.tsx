@@ -18,7 +18,8 @@ type ChannelMessage = {
   seq: number;
   body: string;
   clientMessageId?: string | null;
-  user: { id: string; displayName: string; username: string };
+  actorNameText?: string | null;
+  user: { id: string; displayName: string; username: string } | null;
   createdAt: string;
   pending?: boolean;
 };
@@ -151,11 +152,12 @@ export function ChannelsPage() {
             <div className="channel-message-scroll">
               {messagesQuery.hasNextPage && <button className="channel-load-more" onClick={() => messagesQuery.fetchNextPage()} disabled={messagesQuery.isFetchingNextPage}>Load older</button>}
               {messages.map((item) => {
-                const mine = item.user.id === session?.user.id;
+                const mine = Boolean(item.user?.id && item.user.id === session?.user.id);
+                const actorName = item.user?.displayName ?? item.actorNameText ?? "System";
                 return (
                   <article key={`${item.id}-${item.clientMessageId ?? item.seq}`} className={classNames("channel-message", mine && "mine", item.pending && "pending")}>
                     <div>
-                      <strong>{item.user.displayName}</strong>
+                      <strong>{actorName}</strong>
                       <span>{item.pending ? "sending..." : timeLabel(item.createdAt)}</span>
                     </div>
                     <p>{item.body}</p>

@@ -55,11 +55,24 @@ export const authPlugin = fp(async (app) => {
   app.decorate("authenticate", async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify<SessionToken>();
-      request.session = request.user as SessionToken;
-      const membership = await getMembershipContext(request.session.membershipId);
-      if (!membership || !membership.active || !membership.user.active || !membership.company.active) {
+      const token = request.user as SessionToken;
+      const membership = await getMembershipContext(token.membershipId);
+      if (
+        !membership
+        || !membership.active
+        || !membership.user.active
+        || !membership.company.active
+        || membership.userId !== token.userId
+        || membership.companyId !== token.companyId
+      ) {
         return reply.code(401).send({ success: false, error: "Session is no longer active." });
       }
+      request.session = {
+        userId: membership.userId,
+        membershipId: membership.id,
+        companyId: membership.companyId,
+        role: membership.role as Role
+      };
       request.membershipContext = membership;
     } catch {
       return reply.code(401).send({ success: false, error: "Authentication required." });
@@ -69,7 +82,7 @@ export const authPlugin = fp(async (app) => {
   app.decorate("requireAdmin", async (request: FastifyRequest, reply: FastifyReply) => {
     await app.authenticate(request, reply);
     if (reply.sent) return;
-    if (request.session.role !== "ADMIN") {
+    if (request.membershipContext?.role !== "ADMIN") {
       return reply.code(403).send({ success: false, error: "Admin role required." });
     }
   });
@@ -77,7 +90,7 @@ export const authPlugin = fp(async (app) => {
   app.decorate("requireManagerOrAdmin", async (request: FastifyRequest, reply: FastifyReply) => {
     await app.authenticate(request, reply);
     if (reply.sent) return;
-    if (!["ADMIN", "MANAGER"].includes(request.session.role)) {
+    if (!["ADMIN", "MANAGER"].includes(request.membershipContext?.role ?? "")) {
       return reply.code(403).send({ success: false, error: "Manager or admin role required." });
     }
   });

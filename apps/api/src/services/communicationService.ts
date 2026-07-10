@@ -23,13 +23,32 @@ type ChannelWithMembership = CommunicationChannel & {
 };
 
 type MessageWithUser = CommunicationMessage & {
-  user: { id: string; username: string; displayName: string };
+  user: { id: string; username: string; displayName: string } | null;
 };
 
 function httpError(message: string, statusCode: number) {
   const error = new Error(message) as Error & { statusCode?: number };
   error.statusCode = statusCode;
   return error;
+}
+
+function isUniqueConflict(error: unknown) {
+  return typeof error === "object" && error !== null && (error as any).code === "P2002";
+}
+
+async function createChannelRaceSafe(db: Prisma.TransactionClient, data: Prisma.CommunicationChannelUncheckedCreateInput) {
+  try {
+    return await db.communicationChannel.create({ data });
+  } catch (error) {
+    if (!isUniqueConflict(error)) throw error;
+    const channel = await db.communicationChannel.findUniqueOrThrow({
+      where: { companyId_canonicalKey: { companyId: data.companyId, canonicalKey: data.canonicalKey } }
+    });
+    if (!channel.active || channel.archivedAt) {
+      throw httpError("The communication channel is disabled.", 409);
+    }
+    return channel;
+  }
 }
 
 export function serializeChannel(channel: ChannelWithMembership, member?: CommunicationChannelMember | null) {
@@ -64,6 +83,7 @@ export function serializeChannel(channel: ChannelWithMembership, member?: Commun
 }
 
 export function serializeMessage(message: MessageWithUser) {
+  const actorNameText = (message as any).actorNameText ?? message.user?.displayName ?? "System";
   return {
     id: message.id,
     channelId: message.channelId,
@@ -73,11 +93,12 @@ export function serializeMessage(message: MessageWithUser) {
     body: message.deletedAt ? "" : message.body,
     deletedAt: message.deletedAt,
     clientMessageId: message.clientMessageId,
-    user: {
+    actorNameText,
+    user: message.user ? {
       id: message.user.id,
       username: message.user.username,
       displayName: message.user.displayName
-    },
+    } : null,
     createdAt: message.createdAt,
     updatedAt: message.updatedAt
   };
@@ -114,14 +135,12 @@ export async function ensureMachineCommunicationChannel(db: Prisma.TransactionCl
     return existing;
   }
 
-  return db.communicationChannel.create({
-    data: {
-      companyId,
-      canonicalKey,
-      type: CommunicationChannelType.MACHINE,
-      name: machine.name,
-      machineId: machine.id
-    }
+  return createChannelRaceSafe(db, {
+    companyId,
+    canonicalKey,
+    type: CommunicationChannelType.MACHINE,
+    name: machine.name,
+    machineId: machine.id
   });
 }
 
@@ -156,26 +175,29 @@ export async function ensureDepartmentCommunicationChannel(db: Prisma.Transactio
     return existing;
   }
 
-  return db.communicationChannel.create({
-    data: {
-      companyId,
-      canonicalKey,
-      type: CommunicationChannelType.DEPARTMENT,
-      name: department.name,
-      departmentId: department.id
-    }
+  return createChannelRaceSafe(db, {
+    companyId,
+    canonicalKey,
+    type: CommunicationChannelType.DEPARTMENT,
+    name: department.name,
+    departmentId: department.id
   });
 }
 
 export async function createCommunicationMessage(db: Prisma.TransactionClient, input: {
   companyId: string;
   channelId: string;
-  userId: string;
+  userId?: string | null;
   body: string;
   clientMessageId?: string | null;
   alertId?: string | null;
   messageType?: string;
+  actorNameText?: string | null;
 }) {
+  const messageType = input.messageType ?? "TEXT";
+  if (messageType === "TEXT" && !input.userId) {
+    throw httpError("User is required for text messages.", 400);
+  }
   const channel = await db.communicationChannel.update({
     where: { id: input.channelId, companyId: input.companyId },
     data: { lastMessageSeq: { increment: 1 } }
@@ -185,36 +207,40 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
       companyId: input.companyId,
       channelId: input.channelId,
       seq: channel.lastMessageSeq,
-      userId: input.userId,
+      userId: input.userId ?? null,
       body: input.body,
-      messageType: input.messageType ?? "TEXT",
+      messageType,
       clientMessageId: input.clientMessageId ?? null,
-      alertId: input.alertId ?? null
+      alertId: input.alertId ?? null,
+      actorNameText: input.actorNameText ?? null
     } as any,
     include: { user: { select: { id: true, username: true, displayName: true } } }
   });
 
-  await db.communicationChannelMember.updateMany({
-    where: {
-      companyId: input.companyId,
-      channelId: input.channelId,
-      userId: input.userId,
-      lastReadSeq: { lt: channel.lastMessageSeq }
-    },
-    data: { lastReadSeq: channel.lastMessageSeq }
-  });
+  if (input.userId) {
+    await db.communicationChannelMember.updateMany({
+      where: {
+        companyId: input.companyId,
+        channelId: input.channelId,
+        userId: input.userId,
+        lastReadSeq: { lt: channel.lastMessageSeq }
+      },
+      data: { lastReadSeq: channel.lastMessageSeq }
+    });
+  }
 
   return message;
 }
 
 export async function createAlertSystemMessages(db: Prisma.TransactionClient, input: {
   companyId: string;
-  userId: string;
+  userId?: string | null;
   machineId: string;
   departmentId: string;
   alertId: string;
   body: string;
   clientMessageKey: string;
+  actorNameText?: string | null;
 }) {
   const machineChannel = await ensureMachineCommunicationChannel(db, input.companyId, input.machineId);
   const departmentChannel = await ensureDepartmentCommunicationChannel(db, input.companyId, input.departmentId);
@@ -233,6 +259,7 @@ export async function createAlertSystemMessages(db: Prisma.TransactionClient, in
       body: input.body,
       alertId: input.alertId,
       messageType: "SYSTEM",
+      actorNameText: input.actorNameText ?? null,
       clientMessageId: `${input.clientMessageKey}:${input.alertId}:${suffix}`
     });
     notifications.push({ channelId: channel.id, message });

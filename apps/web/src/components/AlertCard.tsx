@@ -17,7 +17,7 @@ export function AlertCard({ alert, compact = false, actionMode = "queue", now }:
     queryClient.invalidateQueries({ queryKey: ["operator-snapshot"] });
   };
   const mutate = useMutation({
-    mutationFn: (action: string) => postJson(`/api/alerts/${alert.id}/${action}`, { responderNameText: "Web" }),
+    mutationFn: (action: string) => postJson(`/api/alerts/${alert.id}/${action}`, {}),
     onSuccess: refresh
   });
   const sendMessage = useMutation({
@@ -30,7 +30,7 @@ export function AlertCard({ alert, compact = false, actionMode = "queue", now }:
       refresh();
     }
   });
-  const events = [...((alert.messages?.length ? alert.messages : alert.events) ?? [])].filter((event: any) => event.eventType === "NOTE");
+  const events = [...(alert.events ?? [])].filter((event: any) => event.eventType === "NOTE");
   const activeTimerStartedAt = new Date(alert.activeTimerStartedAt ?? alert.createdAt).getTime();
   const currentTime = now ?? localNow;
   const activeElapsedSeconds = Number.isNaN(activeTimerStartedAt) ? alert.elapsedSeconds : Math.max(0, Math.floor((currentTime - activeTimerStartedAt) / 1000));

@@ -443,19 +443,50 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.patch("/api/admin/users/:id", adminWriteOptions, async (request, reply) => {
     const params = request.params as { id: string };
-    const body = request.body as { active?: boolean };
+    const body = request.body as { active?: boolean; username?: string; displayName?: string; password?: string; role?: any };
     const active = optionalBoolean(body.active);
-    if (active === null || active === undefined) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+
+    const username = body.username === undefined ? undefined : cleanString(body.username).toLowerCase();
+    const displayName = body.displayName === undefined ? undefined : cleanString(body.displayName);
+    const role = body.role === undefined ? undefined : optionalRole(body.role);
+    const password = body.password === undefined ? undefined : String(body.password);
+    if (body.username !== undefined && !username) return reply.code(400).send({ success: false, error: "Username is required." });
+    if (body.displayName !== undefined && !displayName) return reply.code(400).send({ success: false, error: "Display name is required." });
+    if (role === null) return reply.code(400).send({ success: false, error: "Role is invalid." });
+    if (password !== undefined && password.length > 0 && password.length < 8) return reply.code(400).send({ success: false, error: "Password must be at least 8 characters." });
+
+    const userData: any = {};
+    if (username !== undefined) userData.username = username;
+    if (displayName !== undefined) userData.displayName = displayName;
+    if (password) userData.passwordHash = await bcrypt.hash(password, 10);
+
+    const membershipData: any = {};
+    if (active !== undefined) membershipData.active = active;
+    if (role !== undefined) membershipData.role = role;
+
+    if (Object.keys(userData).length === 0 && Object.keys(membershipData).length === 0) {
+      return reply.code(400).send({ success: false, error: "No changes provided." });
+    }
+
     const allowed = await prisma.membership.findFirst({ where: { userId: params.id, companyId: request.session.companyId }, select: { id: true } });
     if (!allowed) return reply.code(404).send({ success: false, error: "User not found." });
-    const item = await prisma.$transaction(async (tx) => {
-      await tx.membership.update({ where: { id: allowed.id }, data: { active } });
-      if (active) await tx.user.update({ where: { id: params.id }, data: { active: true } });
-      const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
-      return { ...user, active: user.active && Boolean(user.memberships[0]?.active) };
-    });
-    changed(request.session.companyId);
-    return { success: true, data: item };
+    try {
+      const item = await prisma.$transaction(async (tx) => {
+        if (Object.keys(membershipData).length) await tx.membership.update({ where: { id: allowed.id }, data: membershipData });
+        if (Object.keys(userData).length) await tx.user.update({ where: { id: params.id }, data: userData });
+        if (active) await tx.user.update({ where: { id: params.id }, data: { active: true } });
+        const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
+        return { ...user, active: user.active && Boolean(user.memberships[0]?.active) };
+      });
+      changed(request.session.companyId);
+      return { success: true, data: item };
+    } catch (error: any) {
+      if (error?.code === "P2002") {
+        return reply.code(409).send({ success: false, error: "That username is already in use." });
+      }
+      throw error;
+    }
   });
 
   app.delete("/api/admin/users/:id", adminWriteOptions, async (request, reply) => {
@@ -469,6 +500,67 @@ export async function adminRoutes(app: FastifyInstance) {
     });
     changed(request.session.companyId);
     return { success: true, data: item };
+  });
+
+  app.get("/api/admin/users/:userId/scopes", { preHandler: app.requireAdmin }, async (request, reply) => {
+    const params = request.params as { userId: string };
+    const companyId = request.session.companyId;
+    const membership = await prisma.membership.findFirst({
+      where: { userId: params.userId, companyId },
+      include: { scopes: true }
+    });
+    if (!membership) return reply.code(404).send({ success: false, error: "User not found." });
+    const [departments, machineGroups, machines] = await Promise.all([
+      prisma.department.findMany({ where: { companyId }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+      prisma.machineGroup.findMany({ where: { companyId }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+      prisma.machine.findMany({ where: { companyId }, include: { machineGroup: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] })
+    ]);
+    return {
+      success: true,
+      data: {
+        scopes: membership.scopes,
+        departments,
+        machineGroups,
+        machines
+      }
+    };
+  });
+
+  app.put("/api/admin/users/:userId/scopes", adminWriteOptions, async (request, reply) => {
+    const params = request.params as { userId: string };
+    const companyId = request.session.companyId;
+    const body = request.body as { departmentIds?: unknown; machineGroupIds?: unknown; machineIds?: unknown };
+    const departmentIds = Array.isArray(body.departmentIds) ? body.departmentIds.map(cleanString).filter(Boolean) : [];
+    const machineGroupIds = Array.isArray(body.machineGroupIds) ? body.machineGroupIds.map(cleanString).filter(Boolean) : [];
+    const machineIds = Array.isArray(body.machineIds) ? body.machineIds.map(cleanString).filter(Boolean) : [];
+    if (departmentIds.length !== new Set(departmentIds).size || machineGroupIds.length !== new Set(machineGroupIds).size || machineIds.length !== new Set(machineIds).size) {
+      return reply.code(400).send({ success: false, error: "Duplicate scopes are not allowed." });
+    }
+
+    const membership = await prisma.membership.findFirst({ where: { userId: params.userId, companyId }, select: { id: true } });
+    if (!membership) return reply.code(404).send({ success: false, error: "User not found." });
+
+    const [departmentCount, machineGroupCount, machineCount] = await Promise.all([
+      departmentIds.length ? prisma.department.count({ where: { companyId, id: { in: departmentIds } } }) : 0,
+      machineGroupIds.length ? prisma.machineGroup.count({ where: { companyId, id: { in: machineGroupIds } } }) : 0,
+      machineIds.length ? prisma.machine.count({ where: { companyId, id: { in: machineIds } } }) : 0
+    ]);
+    if (departmentCount !== departmentIds.length) return reply.code(400).send({ success: false, error: "One or more departments are invalid." });
+    if (machineGroupCount !== machineGroupIds.length) return reply.code(400).send({ success: false, error: "One or more machine groups are invalid." });
+    if (machineCount !== machineIds.length) return reply.code(400).send({ success: false, error: "One or more machines are invalid." });
+
+    const scopes = [
+      ...departmentIds.map((scopeId) => ({ membershipId: membership.id, scopeType: "DEPARTMENT" as const, scopeId })),
+      ...machineGroupIds.map((scopeId) => ({ membershipId: membership.id, scopeType: "MACHINE_GROUP" as const, scopeId })),
+      ...machineIds.map((scopeId) => ({ membershipId: membership.id, scopeType: "MACHINE" as const, scopeId }))
+    ];
+    const saved = await prisma.$transaction(async (tx) => {
+      await tx.membershipScope.deleteMany({ where: { membershipId: membership.id } });
+      if (scopes.length) await tx.membershipScope.createMany({ data: scopes });
+      return tx.membershipScope.findMany({ where: { membershipId: membership.id }, orderBy: [{ scopeType: "asc" }, { scopeId: "asc" }] });
+    });
+    changed(companyId);
+    return { success: true, data: { scopes: saved } };
   });
 
   app.post("/api/admin/pager-devices", adminWriteOptions, async (request, reply) => {

@@ -400,18 +400,19 @@ model CommunicationMessage {
   companyId       String   @map("company_id")
   channelId       String   @map("channel_id")
   seq             Int
-  userId          String   @map("user_id")
+  userId          String?  @map("user_id")
   messageType     String   @default("TEXT") @map("message_type")
   body            String
   clientMessageId String?  @map("client_message_id")
   alertId         String?  @map("alert_id")
+  actorNameText   String?  @map("actor_name_text")
   deletedAt       DateTime? @map("deleted_at")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   channel CommunicationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   alert   AndonAlert?          @relation(fields: [alertId], references: [id], onDelete: SetNull)
 
   @@unique([channelId, seq])

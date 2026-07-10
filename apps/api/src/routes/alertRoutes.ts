@@ -77,9 +77,7 @@ export async function alertRoutes(app: FastifyInstance) {
     const body = (request.body ?? {}) as { note?: string; responderNameText?: string; clientMessageId?: string };
     const alertId = cleanString(params.id);
     if (!alertId) return reply.code(400).send({ success: false, error: "Alert id is required." });
-    const responderNameText = cleanString(body.responderNameText);
     const actionNote = typeof body.note === "string" ? body.note.trim() : null;
-    if (responderNameText.length > 120) return reply.code(400).send({ success: false, error: "Responder name is too long." });
     if (actionNote && actionNote.length > 4000) return reply.code(400).send({ success: false, error: "Note is too long." });
 
     const alert = await prisma.andonAlert.findFirst({ where: { id: alertId, companyId: ctx.companyId } });
@@ -155,7 +153,7 @@ export async function alertRoutes(app: FastifyInstance) {
           action,
           actorUserId: ctx.userId,
           actorNameText: ctx.user.displayName,
-          responderNameText: responderNameText || ctx.user.displayName,
+          responderNameText: ctx.user.displayName,
           note: actionNote
         });
 

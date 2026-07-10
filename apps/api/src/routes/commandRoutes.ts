@@ -6,6 +6,14 @@ import { createAlertSystemMessages, serializeMessage } from "../services/communi
 import { canUseMachine, ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 
+type PendingSystemPost = {
+  machineId: string;
+  departmentId: string;
+  alertId: string;
+  body: string;
+  clientMessageKey: string;
+};
+
 export async function commandRoutes(app: FastifyInstance) {
   app.post("/api/commands", { preHandler: app.authenticate }, async (request, reply) => {
     const ctx = request.membershipContext!;
@@ -128,7 +136,7 @@ export async function commandRoutes(app: FastifyInstance) {
 
       const createdAlerts: any[] = [];
       const existingAlerts: any[] = [];
-      const channelNotifications: Array<{ channelId: string; message: any }> = [];
+      const pendingSystemPosts: PendingSystemPost[] = [];
 
       for (const target of targets) {
         const issueType = issueByTarget.get(`${target.departmentId}:${target.issueTypeId}`)!;
@@ -180,16 +188,13 @@ export async function commandRoutes(app: FastifyInstance) {
           command: { commandLabel, commandTemplateId: templateId }
         });
         const alertMessage = `${alertLabel} alert created on ${machine.name}${machine.code ? ` (${machine.code})` : ""}.`;
-        const notifications = await createAlertSystemMessages(tx, {
-          companyId: ctx.companyId,
-          userId: ctx.userId,
+        pendingSystemPosts.push({
           machineId: body.machineId!,
           departmentId: target.departmentId,
           alertId: alert.id,
           body: alertMessage,
           clientMessageKey: "alert-created"
         });
-        channelNotifications.push(...notifications);
         createdAlerts.push(alert);
       }
 
@@ -198,12 +203,26 @@ export async function commandRoutes(app: FastifyInstance) {
         where: { id: command.id },
         include: { machine: { include: { machineGroup: true } }, alerts: { include: includeAlert() } }
       });
-      return { command: commandWithAlerts, createdAlerts, existingAlerts, channelNotifications };
+      return { command: commandWithAlerts, createdAlerts, existingAlerts, pendingSystemPosts };
     });
+
+    const channelNotifications: Array<{ channelId: string; message: any }> = [];
+    for (const post of result.pendingSystemPosts) {
+      try {
+        const notifications = await prisma.$transaction((tx) => createAlertSystemMessages(tx, {
+          companyId: ctx.companyId,
+          userId: ctx.userId,
+          ...post
+        }));
+        channelNotifications.push(...notifications);
+      } catch (error) {
+        request.log.warn({ err: error, alertId: post.alertId }, "alert created but communication system post failed");
+      }
+    }
 
     emitCompany(ctx.companyId, "command.changed", { commandId: result.command.id });
     emitCompany(ctx.companyId, "alert.changed", { commandId: result.command.id });
-    for (const notification of result.channelNotifications) {
+    for (const notification of channelNotifications) {
       emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message));
     }
 

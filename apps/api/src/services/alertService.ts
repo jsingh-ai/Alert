@@ -112,13 +112,13 @@ export function serializeAlert(alert: IncludedAlert) {
     alertId: (message as any).alertId ?? alert.id,
     seq: message.seq,
     eventType: "NOTE",
-    actorNameText: message.user.displayName,
+    actorNameText: (message as any).actorNameText ?? message.user?.displayName ?? "System",
     note: message.body,
-    user: {
+    user: message.user ? {
       id: message.user.id,
       username: message.user.username,
       displayName: message.user.displayName
-    },
+    } : null,
     clientMessageId: message.clientMessageId,
     createdAt: message.createdAt
   }));

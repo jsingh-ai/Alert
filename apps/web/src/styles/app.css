@@ -1496,6 +1496,17 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .admin-actions button { width: auto; white-space: nowrap; }
 .admin-actions .danger, .admin-row button.danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
 .admin-actions .danger:hover, .admin-row button.danger:hover { background: #dc2626; border-color: #dc2626; color: white; filter: none; }
+.user-detail-panel .inline-form { margin-bottom: 0; }
+.field-label { display: grid; gap: 0.3rem; }
+.field-label > span { color: #475569; font-size: 0.72rem; font-weight: 950; text-transform: uppercase; letter-spacing: 0.05em; }
+.form-note { margin: 0; color: #64748b; font-size: 0.78rem; font-weight: 800; line-height: 1.35; }
+.scope-access-grid { display: grid; gap: 0.8rem; }
+.scope-section { display: grid; gap: 0.45rem; }
+.scope-section h3 { margin: 0; color: #334155; font-size: 0.86rem; font-weight: 950; }
+.scope-check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.45rem; }
+.scope-check { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 0.45rem; row-gap: 0.12rem; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 11px; background: #f8fafc; cursor: pointer; }
+.scope-check span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0f172a; font-size: 0.78rem; font-weight: 900; }
+.scope-check em { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #64748b; font-size: 0.68rem; font-style: normal; font-weight: 800; }
 .admin-status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; align-items: start; }
 .admin-status-hero { grid-column: 1 / -1; }
 .status-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; }
