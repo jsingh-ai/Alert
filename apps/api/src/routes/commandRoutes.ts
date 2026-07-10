@@ -2,8 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { nanoid } from "nanoid";
 import { prisma } from "../db.js";
 import { includeAlert, recalculateCommandStatus, serializeAlert } from "../services/alertService.js";
+import { createCommunicationMessage, ensureDepartmentCommunicationChannel, serializeMessage } from "../services/communicationService.js";
 import { canUseMachine, ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
-import { emitCompany } from "../services/realtime.js";
+import { emitChannel, emitCompany } from "../services/realtime.js";
 
 export async function commandRoutes(app: FastifyInstance) {
   app.post("/api/commands", { preHandler: app.authenticate }, async (request, reply) => {
@@ -96,6 +97,7 @@ export async function commandRoutes(app: FastifyInstance) {
 
       const createdAlerts: any[] = [];
       const existingAlerts: any[] = [];
+      const departmentNotifications: Array<{ channelId: string; message: any }> = [];
 
       for (const target of targets) {
         const issueType = await tx.issueType.findFirst({
@@ -147,6 +149,18 @@ export async function commandRoutes(app: FastifyInstance) {
             metadata: { commandId: command.id, commandLabel }
           }
         });
+        const departmentChannel = await ensureDepartmentCommunicationChannel(tx, ctx.companyId, target.departmentId);
+        const alertMessage = `${commandLabel} alert created on ${machine.name}${machine.code ? ` (${machine.code})` : ""}.`;
+        const departmentMessage = await createCommunicationMessage(tx, {
+          companyId: ctx.companyId,
+          channelId: departmentChannel.id,
+          userId: ctx.userId,
+          body: alertMessage,
+          alertId: alert.id,
+          messageType: "SYSTEM",
+          clientMessageId: `alert-created:${alert.id}`
+        });
+        departmentNotifications.push({ channelId: departmentChannel.id, message: departmentMessage });
         createdAlerts.push(alert);
       }
 
@@ -155,11 +169,14 @@ export async function commandRoutes(app: FastifyInstance) {
         where: { id: command.id },
         include: { machine: { include: { machineGroup: true } }, alerts: { include: includeAlert() } }
       });
-      return { command: commandWithAlerts, createdAlerts, existingAlerts };
+      return { command: commandWithAlerts, createdAlerts, existingAlerts, departmentNotifications };
     });
 
     emitCompany(ctx.companyId, "command.changed", { commandId: result.command.id });
     emitCompany(ctx.companyId, "alert.changed", { commandId: result.command.id });
+    for (const notification of result.departmentNotifications) {
+      emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message));
+    }
 
     return reply.code(201).send({
       success: true,

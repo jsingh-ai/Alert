@@ -125,6 +125,48 @@ export async function ensureMachineCommunicationChannel(db: Prisma.TransactionCl
   });
 }
 
+export async function ensureDepartmentCommunicationChannel(db: Prisma.TransactionClient, companyId: string, departmentId: string) {
+  const department = await db.department.findFirst({
+    where: { id: departmentId, companyId },
+    select: { id: true, name: true }
+  });
+  if (!department) throw httpError("Department not found.", 404);
+
+  const canonicalKey = `department:${department.id}`;
+  const existing = await db.communicationChannel.findUnique({
+    where: { companyId_canonicalKey: { companyId, canonicalKey } }
+  });
+
+  if (existing) {
+    if (!existing.active || existing.archivedAt) {
+      throw httpError("The department communication channel is disabled.", 409);
+    }
+    if (existing.name !== department.name || existing.departmentId !== department.id || existing.type !== CommunicationChannelType.DEPARTMENT) {
+      return db.communicationChannel.update({
+        where: { id: existing.id },
+        data: {
+          type: CommunicationChannelType.DEPARTMENT,
+          name: department.name,
+          departmentId: department.id,
+          machineGroupId: null,
+          machineId: null
+        }
+      });
+    }
+    return existing;
+  }
+
+  return db.communicationChannel.create({
+    data: {
+      companyId,
+      canonicalKey,
+      type: CommunicationChannelType.DEPARTMENT,
+      name: department.name,
+      departmentId: department.id
+    }
+  });
+}
+
 export async function createCommunicationMessage(db: Prisma.TransactionClient, input: {
   companyId: string;
   channelId: string;
@@ -132,6 +174,7 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
   body: string;
   clientMessageId?: string | null;
   alertId?: string | null;
+  messageType?: string;
 }) {
   const channel = await db.communicationChannel.update({
     where: { id: input.channelId, companyId: input.companyId },
@@ -144,6 +187,7 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
       seq: channel.lastMessageSeq,
       userId: input.userId,
       body: input.body,
+      messageType: input.messageType ?? "TEXT",
       clientMessageId: input.clientMessageId ?? null,
       alertId: input.alertId ?? null
     } as any,

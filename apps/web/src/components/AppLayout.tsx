@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
+import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { NavItem } from "../lib/types";
 
@@ -91,6 +93,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const nav = useMemo(() => orderedNav(session?.nav ?? [], order), [session?.nav, order]);
   const communicationItem = nav.find((item) => item.id === "channels");
   const mainNav = nav.filter((item) => item.id !== "channels");
+  const channelsQuery = useQuery({
+    queryKey: ["channels"],
+    queryFn: () => api<any>("/api/channels"),
+    enabled: Boolean(communicationItem),
+    refetchInterval: 30000
+  });
+  const communicationUnread = ((channelsQuery.data?.data ?? []) as any[]).reduce(
+    (total, channel) => total + Math.max(0, Number(channel.membership?.unreadCount ?? 0)),
+    0
+  );
 
   useEffect(() => localStorage.setItem("pg_sidebar_collapsed", String(collapsed)), [collapsed]);
   useEffect(() => localStorage.setItem("pg_sidebar_width", String(width)), [width]);
@@ -156,6 +168,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             >
               <span className="nav-icon">{navIconContent(communicationItem)}</span>
               {!collapsed && <span>{communicationItem.label}</span>}
+              {communicationUnread > 0 && <em className="nav-badge">{communicationUnread > 99 ? "99+" : communicationUnread}</em>}
             </NavLink>
           )}
           <button className="ghost signout-button" onClick={logout}>{collapsed ? "X" : "Sign out"}</button>
