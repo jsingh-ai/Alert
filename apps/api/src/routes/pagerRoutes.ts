@@ -78,8 +78,8 @@ export async function pagerRoutes(app: FastifyInstance) {
     if (note.length > 1000) return reply.code(400).send({ success: false, error: "Note is too long." });
 
     try {
-      const result = await prisma.$transaction(async (tx) => {
-        const updated = await transitionAlert(tx, {
+      const updated = await prisma.$transaction(async (tx) => {
+        return transitionAlert(tx, {
           alertId,
           companyId: pager.companyId,
           departmentId: pager.departmentId,
@@ -89,12 +89,15 @@ export async function pagerRoutes(app: FastifyInstance) {
           responderNameText,
           note: note || `${action} from ${pager.name}`
         });
+      });
 
-        const notifications: Array<{ channelId: string; message: any }> = [];
-        if (action === "resolve") {
-          const commandLabel = alertCommandLabel(updated);
-          const message = `${commandLabel} alert resolved on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
-          notifications.push(...await createAlertSystemMessages(tx, {
+      const notifications: Array<{ channelId: string; message: any }> = [];
+      if (action === "acknowledge" || action === "resolve") {
+        const commandLabel = alertCommandLabel(updated);
+        const actionText = action === "acknowledge" ? "acknowledged" : "resolved";
+        const message = `${commandLabel} ${updated.department.name} alert ${actionText} on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
+        try {
+          notifications.push(...await prisma.$transaction((tx) => createAlertSystemMessages(tx, {
             companyId: pager.companyId,
             userId: null,
             actorNameText: responderNameText,
@@ -102,15 +105,15 @@ export async function pagerRoutes(app: FastifyInstance) {
             departmentId: updated.departmentId,
             alertId: updated.id,
             body: message,
-            clientMessageKey: "alert-resolved"
-          }));
+            clientMessageKey: action === "acknowledge" ? "alert-acknowledged" : "alert-resolved"
+          })));
+        } catch (error) {
+          request.log.warn({ err: error, alertId: updated.id, action, source: "pager" }, "pager action completed but communication system post failed");
         }
+      }
 
-        return { updated, notifications };
-      });
-      const updated = result.updated;
       emitCompany(pager.companyId, "alert.changed", { alertId: updated.id, commandId: updated.commandId, action, source: "pager" });
-      for (const notification of result.notifications) {
+      for (const notification of notifications) {
         emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message as any));
       }
       return { success: true, data: serializePagerAlert(updated as any) };

@@ -24,7 +24,8 @@ export async function alertRoutes(app: FastifyInstance) {
     }
 
     const accessFilters: Array<{ departmentId?: { in: string[] }; machineId?: { in: string[] } }> = [];
-    if (!["ADMIN", "MANAGER"].includes(ctx.role)) {
+    const managerHasGlobalAlertAccess = ctx.role === "MANAGER" && ctx.scopes.length === 0;
+    if (ctx.role !== "ADMIN" && !managerHasGlobalAlertAccess) {
       const departmentIds = scopedDepartmentIds(ctx);
       if (departmentIds.length) accessFilters.push({ departmentId: { in: departmentIds } });
 
@@ -89,7 +90,8 @@ export async function alertRoutes(app: FastifyInstance) {
       if (!note) return reply.code(400).send({ success: false, error: "Message is required." });
       if (note.length > 4000) return reply.code(400).send({ success: false, error: "Message is too long." });
 
-      const canWriteAlertConversation = ["ADMIN", "MANAGER"].includes(ctx.role)
+      const canWriteAlertConversation = ctx.role === "ADMIN"
+        || (ctx.role === "MANAGER" && (canSeeDepartment(ctx, alert.departmentId) || await canUseMachine(ctx, alert.machineId, prisma)))
         || (ctx.role === "RESPONDER" && canSeeDepartment(ctx, alert.departmentId))
         || await canUseMachine(ctx, alert.machineId, prisma);
       if (!canWriteAlertConversation) {
@@ -159,9 +161,10 @@ export async function alertRoutes(app: FastifyInstance) {
       });
 
       const notifications: Array<{ channelId: string; message: any }> = [];
-      if (action === "resolve") {
+      if (action === "acknowledge" || action === "resolve") {
         const commandLabel = alertCommandLabel(updated);
-        const message = `${commandLabel} alert resolved on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
+        const actionText = action === "acknowledge" ? "acknowledged" : "resolved";
+        const message = `${commandLabel} ${updated.department.name} alert ${actionText} on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
         try {
           notifications.push(...await prisma.$transaction((tx) => createAlertSystemMessages(tx, {
             companyId: ctx.companyId,
@@ -170,10 +173,10 @@ export async function alertRoutes(app: FastifyInstance) {
             departmentId: updated.departmentId,
             alertId: updated.id,
             body: message,
-            clientMessageKey: "alert-resolved"
+            clientMessageKey: action === "acknowledge" ? "alert-acknowledged" : "alert-resolved"
           })));
         } catch (error) {
-          request.log.warn({ err: error, alertId: updated.id }, "alert resolved but communication system post failed");
+          request.log.warn({ err: error, alertId: updated.id, action }, "alert action completed but communication system post failed");
         }
       }
 

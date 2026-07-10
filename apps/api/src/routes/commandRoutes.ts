@@ -187,7 +187,7 @@ export async function commandRoutes(app: FastifyInstance) {
           issueType,
           command: { commandLabel, commandTemplateId: templateId }
         });
-        const alertMessage = `${alertLabel} alert created on ${machine.name}${machine.code ? ` (${machine.code})` : ""}.`;
+        const alertMessage = `${alertLabel} ${alert.department.name} alert created on ${machine.name}${machine.code ? ` (${machine.code})` : ""}.`;
         pendingSystemPosts.push({
           machineId: body.machineId!,
           departmentId: target.departmentId,
