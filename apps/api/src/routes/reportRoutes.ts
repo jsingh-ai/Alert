@@ -1,8 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
+import { alertCommandLabel } from "../services/alertService.js";
 import { departmentWhereForContext, machineWhereForContext } from "../services/permissions.js";
 import { dayKeyInTimeZone, parseDateInputEnd, parseDateInputStart } from "../utils/time.js";
+
+const MAX_REPORT_RANGE_DAYS = 90;
+const MAX_REPORT_ALERTS_LOADED = 25_000;
+const dateInputPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function secondsBetween(start: Date | null, end: Date | null) {
   if (!start || !end) return null;
@@ -25,13 +30,32 @@ function hourKeyInTimeZone(date: Date, timeZone: string) {
   return `${parts.find((part) => part.type === "hour")?.value ?? "00"}:00`;
 }
 
+function parseReportBoundary(value: unknown, fallback: Date, timeZone: string, boundary: "start" | "end") {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const parsed = dateInputPattern.test(trimmed)
+    ? boundary === "start"
+      ? parseDateInputStart(trimmed, fallback, timeZone)
+      : parseDateInputEnd(trimmed, fallback, timeZone)
+    : new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export async function reportRoutes(app: FastifyInstance) {
-  app.get("/api/reports/summary", { preHandler: app.authenticate }, async (request) => {
+  app.get("/api/reports/summary", { preHandler: app.authenticate }, async (request, reply) => {
     const ctx = request.membershipContext!;
     const query = request.query as { start?: string; end?: string; departmentId?: string; machineGroupId?: string; machineId?: string };
     const timeZone = config.reportTimeZone;
-    const end = parseDateInputEnd(query.end, new Date(), timeZone);
-    const start = parseDateInputStart(query.start, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), timeZone);
+    const end = parseReportBoundary(query.end, new Date(), timeZone, "end");
+    const start = parseReportBoundary(query.start, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), timeZone, "start");
+    if (!start || !end) return reply.code(400).send({ success: false, error: "Report dates are invalid." });
+    if (start.getTime() > end.getTime()) return reply.code(400).send({ success: false, error: "Report start date must be before end date." });
+    const rangeDays = (end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000);
+    if (rangeDays > MAX_REPORT_RANGE_DAYS) {
+      return reply.code(400).send({ success: false, error: `Report range cannot exceed ${MAX_REPORT_RANGE_DAYS} days.` });
+    }
+
     const machineWhere = {
       ...machineWhereForContext(ctx),
       ...(query.machineGroupId ? { machineGroupId: query.machineGroupId } : {}),
@@ -45,8 +69,12 @@ export async function reportRoutes(app: FastifyInstance) {
     const alerts = await prisma.andonAlert.findMany({
       where: { companyId: ctx.companyId, createdAt: { gte: start, lte: end }, machine: machineWhere, department: departmentWhere },
       include: { machine: { include: { machineGroup: true } }, department: true, issueType: true, command: true },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      take: MAX_REPORT_ALERTS_LOADED + 1
     });
+    if (alerts.length > MAX_REPORT_ALERTS_LOADED) {
+      return reply.code(413).send({ success: false, error: `Report result is too large. Narrow the filters or date range below ${MAX_REPORT_ALERTS_LOADED} alerts.` });
+    }
 
     const byDepartment = new Map<string, { id: string; name: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
     const byMachine = new Map<string, { id: string; name: string; code: string; groupId: string; groupName: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
@@ -128,7 +156,7 @@ export async function reportRoutes(app: FastifyInstance) {
         alerts: alerts.map((alert) => ({
           id: alert.id,
           commandId: alert.commandId,
-          commandLabel: alert.command?.commandLabel ?? alert.issueType?.name ?? "Help Call",
+          commandLabel: alertCommandLabel(alert),
           machine: {
             id: alert.machine.id,
             name: alert.machine.name,

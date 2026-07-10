@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { nanoid } from "nanoid";
 import { prisma } from "../db.js";
-import { includeAlert, recalculateCommandStatus, serializeAlert } from "../services/alertService.js";
-import { createCommunicationMessage, ensureDepartmentCommunicationChannel, serializeMessage } from "../services/communicationService.js";
+import { alertCommandLabel, includeAlert, recalculateCommandStatus, serializeAlert } from "../services/alertService.js";
+import { createAlertSystemMessages, serializeMessage } from "../services/communicationService.js";
 import { canUseMachine, ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 
@@ -128,7 +128,7 @@ export async function commandRoutes(app: FastifyInstance) {
 
       const createdAlerts: any[] = [];
       const existingAlerts: any[] = [];
-      const departmentNotifications: Array<{ channelId: string; message: any }> = [];
+      const channelNotifications: Array<{ channelId: string; message: any }> = [];
 
       for (const target of targets) {
         const issueType = issueByTarget.get(`${target.departmentId}:${target.issueTypeId}`)!;
@@ -175,18 +175,21 @@ export async function commandRoutes(app: FastifyInstance) {
             metadata: { commandId: command.id, commandLabel }
           }
         });
-        const departmentChannel = await ensureDepartmentCommunicationChannel(tx, ctx.companyId, target.departmentId);
-        const alertMessage = `${commandLabel} alert created on ${machine.name}${machine.code ? ` (${machine.code})` : ""}.`;
-        const departmentMessage = await createCommunicationMessage(tx, {
-          companyId: ctx.companyId,
-          channelId: departmentChannel.id,
-          userId: ctx.userId,
-          body: alertMessage,
-          alertId: alert.id,
-          messageType: "SYSTEM",
-          clientMessageId: `alert-created:${alert.id}`
+        const alertLabel = alertCommandLabel({
+          issueType,
+          command: { commandLabel, commandTemplateId: templateId }
         });
-        departmentNotifications.push({ channelId: departmentChannel.id, message: departmentMessage });
+        const alertMessage = `${alertLabel} alert created on ${machine.name}${machine.code ? ` (${machine.code})` : ""}.`;
+        const notifications = await createAlertSystemMessages(tx, {
+          companyId: ctx.companyId,
+          userId: ctx.userId,
+          machineId: body.machineId!,
+          departmentId: target.departmentId,
+          alertId: alert.id,
+          body: alertMessage,
+          clientMessageKey: "alert-created"
+        });
+        channelNotifications.push(...notifications);
         createdAlerts.push(alert);
       }
 
@@ -195,12 +198,12 @@ export async function commandRoutes(app: FastifyInstance) {
         where: { id: command.id },
         include: { machine: { include: { machineGroup: true } }, alerts: { include: includeAlert() } }
       });
-      return { command: commandWithAlerts, createdAlerts, existingAlerts, departmentNotifications };
+      return { command: commandWithAlerts, createdAlerts, existingAlerts, channelNotifications };
     });
 
     emitCompany(ctx.companyId, "command.changed", { commandId: result.command.id });
     emitCompany(ctx.companyId, "alert.changed", { commandId: result.command.id });
-    for (const notification of result.departmentNotifications) {
+    for (const notification of result.channelNotifications) {
       emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message));
     }
 

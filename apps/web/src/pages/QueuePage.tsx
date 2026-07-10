@@ -117,7 +117,7 @@ export function QueuePage() {
             </header>
             <div className="queue-list">
               {items.length === 0 && <div className="empty-state small">No {label.toLowerCase()} alerts.</div>}
-              {items.map((alert) => <AlertCard key={alert.id} alert={alert} />)}
+              {items.map((alert) => <AlertCard key={alert.id} alert={alert} now={now} />)}
             </div>
           </section>
         ))}

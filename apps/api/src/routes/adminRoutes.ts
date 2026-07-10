@@ -1,16 +1,59 @@
 import type { FastifyInstance } from "fastify";
+import { performance } from "node:perf_hooks";
 import bcrypt from "bcryptjs";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { generatePagerToken, sha256, tokenFingerprint } from "../utils/crypto.js";
-import { emitCompany } from "../services/realtime.js";
+import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
+import { emitCompany, getRealtimeStats } from "../services/realtime.js";
+import { startOfDayInTimeZone } from "../utils/time.js";
 
 function cleanString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function optionalString(value: unknown) {
+  if (value === undefined) return undefined;
+  const text = cleanString(value);
+  return text || undefined;
+}
+
+function optionalBoolean(value: unknown) {
+  if (value === undefined) return undefined;
+  return typeof value === "boolean" ? value : null;
+}
+
+function optionalSortOrder(value: unknown, fallback?: number) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1_000_000) return null;
+  return parsed;
+}
+
+function optionalPriority(value: unknown) {
+  if (value === undefined) return undefined;
+  return ["LOW", "NORMAL", "HIGH", "CRITICAL"].includes(String(value)) ? value : null;
+}
+
+function normalizedPriority(value: unknown) {
+  const priority = optionalPriority(value);
+  return priority === null ? null : priority ?? "NORMAL";
+}
+
+function optionalRole(value: unknown) {
+  return ["ADMIN", "MANAGER", "OPERATOR", "RESPONDER", "VIEWER"].includes(String(value)) ? value : null;
+}
+
 function changed(companyId: string) {
   emitCompany(companyId, "admin.changed", { at: new Date().toISOString() });
+}
+
+function pagerStatus(lastSeenAt: Date | null) {
+  if (!lastSeenAt) return "never";
+  const ageMs = Date.now() - lastSeenAt.getTime();
+  if (ageMs <= 2 * 60_000) return "online";
+  if (ageMs <= 15 * 60_000) return "recent";
+  return "offline";
 }
 
 async function deleteOrConflict(reply: any, action: () => Promise<any>, companyId: string) {
@@ -51,14 +94,103 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.user.findMany({ where: { memberships: { some: { companyId } } }, include: { memberships: { where: { companyId }, include: { scopes: true } } }, orderBy: { username: "asc" } }),
       prisma.pagerDevice.findMany({ where: { companyId }, include: { department: true }, orderBy: { name: "asc" } })
     ]);
-    return { success: true, data: { machineGroups, machines, departments, issueTypes, commandTemplates, users, pagerDevices } };
+    const scopedUsers = users.map((user) => ({
+      ...user,
+      active: user.active && Boolean(user.memberships[0]?.active)
+    }));
+    return { success: true, data: { machineGroups, machines, departments, issueTypes, commandTemplates, users: scopedUsers, pagerDevices } };
+  });
+
+  app.get("/api/admin/status", { preHandler: app.requireAdmin }, async (request, reply) => {
+    const companyId = request.session.companyId;
+    const dbStart = performance.now();
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch {
+      return reply.code(503).send({ success: false, error: "Database is unavailable." });
+    }
+    const dbLatencyMs = Math.round(performance.now() - dbStart);
+    const todayStart = startOfDayInTimeZone(new Date(), config.reportTimeZone);
+    const [
+      realtime,
+      activeAlerts,
+      alertsCreatedToday,
+      alertsResolvedToday,
+      machineCount,
+      departmentCount,
+      userCount,
+      channelCount,
+      messageCount,
+      pagers
+    ] = await Promise.all([
+      getRealtimeStats(companyId),
+      prisma.andonAlert.count({ where: { companyId, status: { in: [...ACTIVE_ALERT_STATUSES] } } }),
+      prisma.andonAlert.count({ where: { companyId, createdAt: { gte: todayStart } } }),
+      prisma.andonAlert.count({ where: { companyId, resolvedAt: { gte: todayStart } } }),
+      prisma.machine.count({ where: { companyId } }),
+      prisma.department.count({ where: { companyId } }),
+      prisma.user.count({ where: { memberships: { some: { companyId } } } }),
+      prisma.communicationChannel.count({ where: { companyId, archivedAt: null } }),
+      prisma.communicationMessage.count({ where: { companyId } }),
+      prisma.pagerDevice.findMany({
+        where: { companyId },
+        select: { id: true, name: true, active: true, lastSeenAt: true, department: { select: { name: true } } },
+        orderBy: { name: "asc" }
+      })
+    ]);
+
+    const memory = process.memoryUsage();
+    return {
+      success: true,
+      data: {
+        server: {
+          now: new Date().toISOString(),
+          nodeEnv: config.nodeEnv,
+          nodeVersion: process.version,
+          uptimeSeconds: Math.floor(process.uptime()),
+          reportTimeZone: config.reportTimeZone,
+          memory: {
+            rssBytes: memory.rss,
+            heapUsedBytes: memory.heapUsed,
+            heapTotalBytes: memory.heapTotal
+          }
+        },
+        database: {
+          status: "ok",
+          latencyMs: dbLatencyMs
+        },
+        realtime,
+        activity: {
+          activeAlerts,
+          alertsCreatedToday,
+          alertsResolvedToday
+        },
+        storage: {
+          machines: machineCount,
+          departments: departmentCount,
+          users: userCount,
+          channels: channelCount,
+          messages: messageCount
+        },
+        pagers: pagers.map((pager) => ({
+          id: pager.id,
+          name: pager.name,
+          departmentName: pager.department.name,
+          active: pager.active,
+          lastSeenAt: pager.lastSeenAt,
+          status: pager.active ? pagerStatus(pager.lastSeenAt) : "disabled"
+        }))
+      }
+    };
   });
 
   app.post("/api/admin/machine-groups", adminWriteOptions, async (request, reply) => {
     const body = request.body as { name?: string; sortOrder?: number };
     const name = cleanString(body.name);
+    const sortOrder = optionalSortOrder(body.sortOrder, 0);
     if (!name) return reply.code(400).send({ success: false, error: "Name is required." });
-    const item = await prisma.machineGroup.create({ data: { companyId: request.session.companyId, name, sortOrder: body.sortOrder ?? 0 } });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
+    const item = await prisma.machineGroup.create({ data: { companyId: request.session.companyId, name, sortOrder } });
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -66,7 +198,13 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch("/api/admin/machine-groups/:id", adminWriteOptions, async (request, reply) => {
     const body = request.body as { name?: string; active?: boolean; sortOrder?: number };
     const params = request.params as { id: string };
-    const item = await updateOwned(reply, prisma.machineGroup, request.session.companyId, params.id, { name: body.name, active: body.active, sortOrder: body.sortOrder });
+    const active = optionalBoolean(body.active);
+    const sortOrder = optionalSortOrder(body.sortOrder);
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
+    const data = { name: optionalString(body.name), active, sortOrder };
+    if (Object.values(data).every((value) => value === undefined)) return reply.code(400).send({ success: false, error: "No changes provided." });
+    const item = await updateOwned(reply, prisma.machineGroup, request.session.companyId, params.id, data);
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -80,10 +218,12 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = request.body as { name?: string; code?: string; machineGroupId?: string; sortOrder?: number };
     const name = cleanString(body.name);
     const code = cleanString(body.code).toUpperCase();
+    const sortOrder = optionalSortOrder(body.sortOrder, 0);
     if (!name || !code || !body.machineGroupId) return reply.code(400).send({ success: false, error: "Name, code, and machine group are required." });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
     const group = await prisma.machineGroup.findFirst({ where: { id: body.machineGroupId, companyId: request.session.companyId }, select: { id: true } });
     if (!group) return reply.code(400).send({ success: false, error: "Machine group is not valid for this company." });
-    const item = await prisma.machine.create({ data: { companyId: request.session.companyId, name, code, machineGroupId: body.machineGroupId, sortOrder: body.sortOrder ?? 0 } });
+    const item = await prisma.machine.create({ data: { companyId: request.session.companyId, name, code, machineGroupId: body.machineGroupId, sortOrder } });
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -95,7 +235,19 @@ export async function adminRoutes(app: FastifyInstance) {
       const group = await prisma.machineGroup.findFirst({ where: { id: body.machineGroupId, companyId: request.session.companyId }, select: { id: true } });
       if (!group) return reply.code(400).send({ success: false, error: "Machine group is not valid for this company." });
     }
-    const item = await updateOwned(reply, prisma.machine, request.session.companyId, params.id, body);
+    const active = optionalBoolean(body.active);
+    const sortOrder = optionalSortOrder(body.sortOrder);
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
+    const data = {
+      name: optionalString(body.name),
+      code: optionalString(body.code)?.toUpperCase(),
+      machineGroupId: body.machineGroupId,
+      active,
+      sortOrder
+    };
+    if (Object.values(data).every((value) => value === undefined)) return reply.code(400).send({ success: false, error: "No changes provided." });
+    const item = await updateOwned(reply, prisma.machine, request.session.companyId, params.id, data);
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -108,8 +260,10 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post("/api/admin/departments", adminWriteOptions, async (request, reply) => {
     const body = request.body as { name?: string; color?: string; sortOrder?: number };
     const name = cleanString(body.name);
+    const sortOrder = optionalSortOrder(body.sortOrder, 0);
     if (!name) return reply.code(400).send({ success: false, error: "Name is required." });
-    const item = await prisma.department.create({ data: { companyId: request.session.companyId, name, color: body.color || "#2563eb", sortOrder: body.sortOrder ?? 0 } });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
+    const item = await prisma.department.create({ data: { companyId: request.session.companyId, name, color: optionalString(body.color) || "#2563eb", sortOrder } });
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -117,7 +271,13 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch("/api/admin/departments/:id", adminWriteOptions, async (request, reply) => {
     const body = request.body as { name?: string; color?: string; active?: boolean; sortOrder?: number };
     const params = request.params as { id: string };
-    const item = await updateOwned(reply, prisma.department, request.session.companyId, params.id, body);
+    const active = optionalBoolean(body.active);
+    const sortOrder = optionalSortOrder(body.sortOrder);
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
+    const data = { name: optionalString(body.name), color: optionalString(body.color), active, sortOrder };
+    if (Object.values(data).every((value) => value === undefined)) return reply.code(400).send({ success: false, error: "No changes provided." });
+    const item = await updateOwned(reply, prisma.department, request.session.companyId, params.id, data);
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -130,10 +290,14 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post("/api/admin/issue-types", adminWriteOptions, async (request, reply) => {
     const body = request.body as { name?: string; departmentId?: string; defaultPriority?: any; sortOrder?: number };
     const name = cleanString(body.name);
+    const defaultPriority = normalizedPriority(body.defaultPriority);
+    const sortOrder = optionalSortOrder(body.sortOrder, 0);
     if (!name || !body.departmentId) return reply.code(400).send({ success: false, error: "Name and department are required." });
+    if (defaultPriority === null) return reply.code(400).send({ success: false, error: "Priority is not valid." });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
     const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId }, select: { id: true } });
     if (!department) return reply.code(400).send({ success: false, error: "Department is not valid for this company." });
-    const item = await prisma.issueType.create({ data: { companyId: request.session.companyId, departmentId: body.departmentId, name, defaultPriority: body.defaultPriority ?? "NORMAL", sortOrder: body.sortOrder ?? 0 } });
+    const item = await prisma.issueType.create({ data: { companyId: request.session.companyId, departmentId: body.departmentId, name, defaultPriority: defaultPriority as any, sortOrder } });
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -145,7 +309,15 @@ export async function adminRoutes(app: FastifyInstance) {
       const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId }, select: { id: true } });
       if (!department) return reply.code(400).send({ success: false, error: "Department is not valid for this company." });
     }
-    const item = await updateOwned(reply, prisma.issueType, request.session.companyId, params.id, body);
+    const active = optionalBoolean(body.active);
+    const defaultPriority = optionalPriority(body.defaultPriority);
+    const sortOrder = optionalSortOrder(body.sortOrder);
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    if (defaultPriority === null) return reply.code(400).send({ success: false, error: "Priority is not valid." });
+    if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
+    const data = { name: optionalString(body.name), departmentId: body.departmentId, defaultPriority, active, sortOrder };
+    if (Object.values(data).every((value) => value === undefined)) return reply.code(400).send({ success: false, error: "No changes provided." });
+    const item = await updateOwned(reply, prisma.issueType, request.session.companyId, params.id, data);
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -158,7 +330,11 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post("/api/admin/command-templates", adminWriteOptions, async (request, reply) => {
     const body = request.body as { name?: string; buttonLabel?: string; color?: string; targets?: Array<{ departmentId: string; issueTypeId: string; targetMessage?: string; priority?: any }> };
     const name = cleanString(body.name);
-    if (!name || !body.targets?.length) return reply.code(400).send({ success: false, error: "Name and at least one target are required." });
+    if (!name || !Array.isArray(body.targets) || !body.targets.length) return reply.code(400).send({ success: false, error: "Name and at least one target are required." });
+    const targetPriorities = body.targets.map((target) => normalizedPriority(target.priority));
+    if (targetPriorities.some((priority) => priority === null)) {
+      return reply.code(400).send({ success: false, error: "One or more command target priorities are not valid." });
+    }
     const validTargets = await prisma.issueType.findMany({
       where: {
         companyId: request.session.companyId,
@@ -174,13 +350,13 @@ export async function adminRoutes(app: FastifyInstance) {
         companyId: request.session.companyId,
         name,
         buttonLabel: cleanString(body.buttonLabel) || name,
-        color: body.color || "#ef4444",
+        color: optionalString(body.color) || "#ef4444",
         targets: {
           create: body.targets.map((target, index) => ({
             departmentId: target.departmentId,
             issueTypeId: target.issueTypeId,
             targetMessage: target.targetMessage || null,
-            priority: target.priority ?? "NORMAL",
+            priority: targetPriorities[index] as any,
             sortOrder: (index + 1) * 10
           }))
         }
@@ -194,7 +370,21 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch("/api/admin/command-templates/:id", adminWriteOptions, async (request, reply) => {
     const params = request.params as { id: string };
     const body = request.body as { name?: string; buttonLabel?: string; color?: string; active?: boolean; targets?: Array<{ departmentId: string; issueTypeId: string; targetMessage?: string; priority?: any }> };
+    const active = optionalBoolean(body.active);
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    const templateData = { name: optionalString(body.name), buttonLabel: optionalString(body.buttonLabel), color: optionalString(body.color), active };
+    if (!body.targets && Object.values(templateData).every((value) => value === undefined)) {
+      return reply.code(400).send({ success: false, error: "No changes provided." });
+    }
+    let targetPriorities: Array<unknown> | null = null;
     if (body.targets) {
+      if (!Array.isArray(body.targets) || !body.targets.length) {
+        return reply.code(400).send({ success: false, error: "At least one target is required." });
+      }
+      targetPriorities = body.targets.map((target) => normalizedPriority(target.priority));
+      if (targetPriorities.some((priority) => priority === null)) {
+        return reply.code(400).send({ success: false, error: "One or more command target priorities are not valid." });
+      }
       const validTargets = await prisma.issueType.findMany({
         where: {
           companyId: request.session.companyId,
@@ -209,14 +399,14 @@ export async function adminRoutes(app: FastifyInstance) {
     const item = await prisma.$transaction(async (tx) => {
       const updated = await tx.commandTemplate.updateMany({
         where: { id: params.id, companyId: request.session.companyId },
-        data: { name: body.name, buttonLabel: body.buttonLabel, color: body.color, active: body.active }
+        data: templateData
       });
       if (updated.count === 0) return null;
       const template = await tx.commandTemplate.findFirstOrThrow({ where: { id: params.id, companyId: request.session.companyId } });
       if (body.targets) {
         await tx.commandTemplateTarget.deleteMany({ where: { commandTemplateId: template.id } });
         if (body.targets.length) {
-          await tx.commandTemplateTarget.createMany({ data: body.targets.map((target, index) => ({ commandTemplateId: template.id, departmentId: target.departmentId, issueTypeId: target.issueTypeId, targetMessage: target.targetMessage ?? null, priority: target.priority ?? "NORMAL", sortOrder: (index + 1) * 10 })) });
+          await tx.commandTemplateTarget.createMany({ data: body.targets.map((target, index) => ({ commandTemplateId: template.id, departmentId: target.departmentId, issueTypeId: target.issueTypeId, targetMessage: cleanString(target.targetMessage) || null, priority: targetPriorities![index] as any, sortOrder: (index + 1) * 10 })) });
         }
       }
       return tx.commandTemplate.findUniqueOrThrow({ where: { id: template.id }, include: { targets: true } });
@@ -234,14 +424,17 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post("/api/admin/users", adminWriteOptions, async (request, reply) => {
     const body = request.body as { username?: string; password?: string; displayName?: string; role?: any };
     const username = cleanString(body.username).toLowerCase();
-    if (!username || !body.password || !body.displayName || !body.role) return reply.code(400).send({ success: false, error: "Username, password, displayName, and role are required." });
+    const displayName = cleanString(body.displayName);
+    const role = optionalRole(body.role);
+    if (!username || !body.password || !displayName || !role) return reply.code(400).send({ success: false, error: "Username, password, displayName, and valid role are required." });
+    if (body.password.length < 8) return reply.code(400).send({ success: false, error: "Password must be at least 8 characters." });
     const passwordHash = await bcrypt.hash(body.password, 10);
     const item = await prisma.user.create({
       data: {
         username,
         passwordHash,
-        displayName: body.displayName,
-        memberships: { create: { companyId: request.session.companyId, role: body.role } }
+        displayName,
+        memberships: { create: { companyId: request.session.companyId, role: role as any } }
       }
     });
     changed(request.session.companyId);
@@ -251,9 +444,16 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch("/api/admin/users/:id", adminWriteOptions, async (request, reply) => {
     const params = request.params as { id: string };
     const body = request.body as { active?: boolean };
+    const active = optionalBoolean(body.active);
+    if (active === null || active === undefined) return reply.code(400).send({ success: false, error: "Active must be true or false." });
     const allowed = await prisma.membership.findFirst({ where: { userId: params.id, companyId: request.session.companyId }, select: { id: true } });
     if (!allowed) return reply.code(404).send({ success: false, error: "User not found." });
-    const item = await prisma.user.update({ where: { id: params.id }, data: { active: body.active } });
+    const item = await prisma.$transaction(async (tx) => {
+      await tx.membership.update({ where: { id: allowed.id }, data: { active } });
+      if (active) await tx.user.update({ where: { id: params.id }, data: { active: true } });
+      const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
+      return { ...user, active: user.active && Boolean(user.memberships[0]?.active) };
+    });
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -262,7 +462,11 @@ export async function adminRoutes(app: FastifyInstance) {
     const params = request.params as { id: string };
     const allowed = await prisma.membership.findFirst({ where: { userId: params.id, companyId: request.session.companyId }, select: { id: true } });
     if (!allowed) return reply.code(404).send({ success: false, error: "User not found." });
-    const item = await prisma.user.update({ where: { id: params.id }, data: { active: false } });
+    const item = await prisma.$transaction(async (tx) => {
+      await tx.membership.update({ where: { id: allowed.id }, data: { active: false } });
+      const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
+      return { ...user, active: false };
+    });
     changed(request.session.companyId);
     return { success: true, data: item };
   });
@@ -284,6 +488,8 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch("/api/admin/pager-devices/:id", adminWriteOptions, async (request, reply) => {
     const params = request.params as { id: string };
     const body = request.body as { name?: string; active?: boolean; departmentId?: string; rotate?: boolean };
+    const active = optionalBoolean(body.active);
+    if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
     const existing = await prisma.pagerDevice.findFirst({ where: { id: params.id, companyId: request.session.companyId }, select: { id: true } });
     if (!existing) return reply.code(404).send({ success: false, error: "Pager not found." });
     if (body.departmentId) {
@@ -292,11 +498,15 @@ export async function adminRoutes(app: FastifyInstance) {
     }
     if (body.rotate) {
       const token = generatePagerToken();
-      const item = await prisma.pagerDevice.update({ where: { id: params.id }, data: { tokenHash: sha256(token), tokenFingerprint: tokenFingerprint(token) } });
+      await prisma.pagerDevice.updateMany({ where: { id: params.id, companyId: request.session.companyId }, data: { tokenHash: sha256(token), tokenFingerprint: tokenFingerprint(token) } });
+      const item = await prisma.pagerDevice.findFirstOrThrow({ where: { id: params.id, companyId: request.session.companyId } });
       changed(request.session.companyId);
       return { success: true, data: { ...item, rawToken: token } };
     }
-    const item = await prisma.pagerDevice.update({ where: { id: params.id }, data: { name: body.name, active: body.active, departmentId: body.departmentId } });
+    const data = { name: optionalString(body.name), active, departmentId: body.departmentId };
+    if (Object.values(data).every((value) => value === undefined)) return reply.code(400).send({ success: false, error: "No changes provided." });
+    await prisma.pagerDevice.updateMany({ where: { id: params.id, companyId: request.session.companyId }, data });
+    const item = await prisma.pagerDevice.findFirstOrThrow({ where: { id: params.id, companyId: request.session.companyId } });
     changed(request.session.companyId);
     return { success: true, data: item };
   });

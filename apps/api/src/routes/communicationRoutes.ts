@@ -16,6 +16,13 @@ function cleanString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
+}
+
 function changed(companyId: string) {
   emitCompany(companyId, "admin.changed", { at: new Date().toISOString() });
 }
@@ -46,8 +53,12 @@ export async function communicationRoutes(app: FastifyInstance) {
     const membership = await findReadableMembership(companyId, userId, params.channelId);
     if (!membership) return reply.code(403).send({ success: false, error: "You do not have access to this channel." });
 
-    const beforeSeq = Number(query.beforeSeq ?? 0);
-    const limit = Math.max(1, Math.min(100, Number(query.limit ?? 50)));
+    const beforeSeq = boundedInteger(query.beforeSeq, 0, 0, Number.MAX_SAFE_INTEGER);
+    const limit = boundedInteger(query.limit, 50, 1, 100);
+    if (beforeSeq === null || limit === null) {
+      return reply.code(400).send({ success: false, error: "Invalid message pagination." });
+    }
+
     const messages = await prisma.communicationMessage.findMany({
       where: {
         companyId,
@@ -107,7 +118,10 @@ export async function communicationRoutes(app: FastifyInstance) {
     const body = request.body as { lastReadSeq?: number };
     const membership = await findReadableMembership(companyId, userId, params.channelId);
     if (!membership) return reply.code(403).send({ success: false, error: "You do not have access to this channel." });
-    const requestedSeq = Math.max(0, Number(body.lastReadSeq ?? membership.channel.lastMessageSeq));
+    const requestedSeq = boundedInteger(body.lastReadSeq, membership.channel.lastMessageSeq, 0, membership.channel.lastMessageSeq);
+    if (requestedSeq === null) {
+      return reply.code(400).send({ success: false, error: "Invalid read position." });
+    }
     const lastReadSeq = Math.max(membership.lastReadSeq, Math.min(requestedSeq, membership.channel.lastMessageSeq));
     const updated = await prisma.communicationChannelMember.update({
       where: { channelId_userId: { channelId: params.channelId, userId } },

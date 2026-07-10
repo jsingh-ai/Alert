@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatElapsed } from "../lib/format";
@@ -10,6 +10,7 @@ const naturalMachineSort = new Intl.Collator(undefined, { numeric: true, sensiti
 export function FloorPage() {
   const [onlyActive, setOnlyActive] = useState(false);
   const [machineGroup, setMachineGroup] = useState("all");
+  const [now, setNow] = useState(() => Date.now());
   const floor = useQuery({ queryKey: ["floor"], queryFn: () => api<any>("/api/floor/active"), refetchInterval: 7000 });
   const commands = (floor.data?.data?.commands ?? []) as CommandGroup[];
   const machines = (floor.data?.data?.machines ?? []) as any[];
@@ -45,6 +46,11 @@ export function FloorPage() {
       )
     })).sort((a, b) => naturalMachineSort.compare(a.name, b.name));
   }, [visibleMachines]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <div className="page-stack floor-page">
@@ -122,7 +128,7 @@ export function FloorPage() {
         </div>
         <div className="command-list floor-command-list">
           {commands.length === 0 && <div className="empty-state">All clear. No active commands.</div>}
-          {commands.map((command) => <CommandGroupCard key={command.id} command={command} actionMode="floor" />)}
+          {commands.map((command) => <CommandGroupCard key={command.id} command={command} actionMode="floor" now={now} />)}
         </div>
       </section>
     </div>

@@ -14,7 +14,11 @@ export function OperatorPage() {
   const [now, setNow] = useState(() => Date.now());
 
   const bootstrap = useQuery({ queryKey: ["operator-bootstrap"], queryFn: () => api<any>("/api/operator/bootstrap") });
-  const snapshot = useQuery({ queryKey: ["operator-snapshot"], queryFn: () => api<any>("/api/operator/snapshot"), refetchInterval: 10000 });
+  const snapshot = useQuery({
+    queryKey: ["operator-snapshot", machineId],
+    queryFn: () => api<any>(`/api/operator/snapshot${machineId ? `?machineId=${machineId}` : ""}`),
+    refetchInterval: 10000
+  });
 
   const data = bootstrap.data?.data;
   const machines = (data?.machines ?? []) as any[];
@@ -241,17 +245,46 @@ export function OperatorPage() {
         {manualOpen && (
           <div className="collapse-body">
             <div className="manual-grid">
-              {(data?.departments ?? []).map((department: any) => (
-                <label key={department.id} className="manual-row">
-                  <span>{department.name}</span>
-                  <select value={manualDepartments[department.id] ?? ""} onChange={(event) => setManualDepartments((current) => ({ ...current, [department.id]: event.target.value }))}>
-                    <option value="">Do not call</option>
-                    {(data?.issueTypes ?? []).filter((issue: any) => issue.departmentId === department.id).map((issue: any) => <option key={issue.id} value={issue.id}>{issue.name}</option>)}
-                  </select>
-                </label>
-              ))}
+              {(data?.departments ?? []).map((department: any) => {
+                const departmentIssues = (data?.issueTypes ?? []).filter((issue: any) => issue.departmentId === department.id);
+                const selectedIssueId = manualDepartments[department.id] ?? "";
+                return (
+                  <div key={department.id} className="manual-row">
+                    <div className="manual-department-label">
+                      <strong>{department.name}</strong>
+                      <span>{selectedIssueId ? "Will call" : "No call selected"}</span>
+                    </div>
+                    <div className="manual-radio-group" role="radiogroup" aria-label={`${department.name} manual call option`}>
+                      <label className={`manual-radio-option ${!selectedIssueId ? "selected" : ""}`}>
+                        <input
+                          type="radio"
+                          name={`manual-${department.id}`}
+                          value=""
+                          checked={!selectedIssueId}
+                          onChange={() => setManualDepartments((current) => ({ ...current, [department.id]: "" }))}
+                        />
+                        <span className="manual-radio-dot" aria-hidden="true" />
+                        <span>No call</span>
+                      </label>
+                      {departmentIssues.map((issue: any) => (
+                        <label key={issue.id} className={`manual-radio-option ${selectedIssueId === issue.id ? "selected issue-selected" : ""}`}>
+                          <input
+                            type="radio"
+                            name={`manual-${department.id}`}
+                            value={issue.id}
+                            checked={selectedIssueId === issue.id}
+                            onChange={() => setManualDepartments((current) => ({ ...current, [department.id]: issue.id }))}
+                          />
+                          <span className="manual-radio-dot" aria-hidden="true" />
+                          <span>{issue.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <button onClick={sendManual} disabled={createCommand.isPending}>Send manual call</button>
+            <button className="manual-call-button" onClick={sendManual} disabled={createCommand.isPending}>Call</button>
           </div>
         )}
       </section>
@@ -276,7 +309,7 @@ export function OperatorPage() {
                 </div>
                 <div className="command-list operator-command-list">
                   {openCommands.length === 0 && <div className="empty-state small">No open calls.</div>}
-                  {openCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" />)}
+                  {openCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" now={now} />)}
                 </div>
               </div>
               <div className="operator-active-column acknowledged">
@@ -286,7 +319,7 @@ export function OperatorPage() {
                 </div>
                 <div className="command-list operator-command-list">
                   {acknowledgedCommands.length === 0 && <div className="empty-state small">No calls waiting to resolve.</div>}
-                  {acknowledgedCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" />)}
+                  {acknowledgedCommands.map((command: any) => <CommandGroupCard key={command.id} command={command} actionMode="operator" now={now} />)}
                 </div>
               </div>
             </>

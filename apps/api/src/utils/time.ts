@@ -42,6 +42,13 @@ export function parseDateInputStart(value: unknown, fallback: Date, timeZone: st
   return zonedDateTimeToUtc(Number(match[1]), Number(match[2]), Number(match[3]), 0, 0, 0, 0, timeZone);
 }
 
+export function startOfDayInTimeZone(date: Date, timeZone: string) {
+  const key = dayKeyInTimeZone(date, timeZone);
+  const match = key.match(dateInputPattern);
+  if (!match) return new Date(date);
+  return zonedDateTimeToUtc(Number(match[1]), Number(match[2]), Number(match[3]), 0, 0, 0, 0, timeZone);
+}
+
 export function parseDateInputEnd(value: unknown, fallback: Date, timeZone: string) {
   if (typeof value !== "string") return fallback;
   const match = value.match(dateInputPattern);

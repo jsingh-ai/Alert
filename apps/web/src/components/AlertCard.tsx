@@ -7,10 +7,10 @@ import { StatusBadge } from "./StatusBadge";
 
 type ActionMode = "queue" | "operator" | "floor";
 
-export function AlertCard({ alert, compact = false, actionMode = "queue" }: { alert: Alert; compact?: boolean; actionMode?: ActionMode }) {
+export function AlertCard({ alert, compact = false, actionMode = "queue", now }: { alert: Alert; compact?: boolean; actionMode?: ActionMode; now?: number }) {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState("");
-  const [now, setNow] = useState(() => Date.now());
+  const [localNow, setLocalNow] = useState(() => Date.now());
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["active-alerts"] });
     queryClient.invalidateQueries({ queryKey: ["floor"] });
@@ -32,14 +32,16 @@ export function AlertCard({ alert, compact = false, actionMode = "queue" }: { al
   });
   const events = [...((alert.messages?.length ? alert.messages : alert.events) ?? [])].filter((event: any) => event.eventType === "NOTE");
   const activeTimerStartedAt = new Date(alert.activeTimerStartedAt ?? alert.createdAt).getTime();
-  const activeElapsedSeconds = Number.isNaN(activeTimerStartedAt) ? alert.elapsedSeconds : Math.max(0, Math.floor((now - activeTimerStartedAt) / 1000));
+  const currentTime = now ?? localNow;
+  const activeElapsedSeconds = Number.isNaN(activeTimerStartedAt) ? alert.elapsedSeconds : Math.max(0, Math.floor((currentTime - activeTimerStartedAt) / 1000));
   const canResolve = alert.status === "ACKNOWLEDGED" || alert.status === "ARRIVED";
   const queueAction = actionMode === "queue" && alert.status === "OPEN" ? "acknowledge" : actionMode === "queue" && canResolve ? "resolve" : "";
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    if (now !== undefined) return;
+    const timer = window.setInterval(() => setLocalNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [now]);
 
   return (
     <article className={`alert-card priority-${alert.priority.toLowerCase()} ${actionMode === "queue" ? "queue-alert" : ""} ${actionMode === "queue" ? `queue-alert-${alert.status.toLowerCase()}` : ""} ${actionMode === "floor" ? "floor-alert" : ""} ${actionMode === "operator" ? "operator-active-alert" : ""} ${actionMode === "operator" && alert.status === "ACKNOWLEDGED" ? "operator-acknowledged-alert" : ""}`}>

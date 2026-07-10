@@ -180,7 +180,7 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
     where: { id: input.channelId, companyId: input.companyId },
     data: { lastMessageSeq: { increment: 1 } }
   });
-  return db.communicationMessage.create({
+  const message = await db.communicationMessage.create({
     data: {
       companyId: input.companyId,
       channelId: input.channelId,
@@ -193,6 +193,52 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
     } as any,
     include: { user: { select: { id: true, username: true, displayName: true } } }
   });
+
+  await db.communicationChannelMember.updateMany({
+    where: {
+      companyId: input.companyId,
+      channelId: input.channelId,
+      userId: input.userId,
+      lastReadSeq: { lt: channel.lastMessageSeq }
+    },
+    data: { lastReadSeq: channel.lastMessageSeq }
+  });
+
+  return message;
+}
+
+export async function createAlertSystemMessages(db: Prisma.TransactionClient, input: {
+  companyId: string;
+  userId: string;
+  machineId: string;
+  departmentId: string;
+  alertId: string;
+  body: string;
+  clientMessageKey: string;
+}) {
+  const machineChannel = await ensureMachineCommunicationChannel(db, input.companyId, input.machineId);
+  const departmentChannel = await ensureDepartmentCommunicationChannel(db, input.companyId, input.departmentId);
+
+  const channels = [
+    { channel: machineChannel, suffix: "machine" },
+    { channel: departmentChannel, suffix: "department" }
+  ];
+  const notifications: Array<{ channelId: string; message: MessageWithUser }> = [];
+
+  for (const { channel, suffix } of channels) {
+    const message = await createCommunicationMessage(db, {
+      companyId: input.companyId,
+      channelId: channel.id,
+      userId: input.userId,
+      body: input.body,
+      alertId: input.alertId,
+      messageType: "SYSTEM",
+      clientMessageId: `${input.clientMessageKey}:${input.alertId}:${suffix}`
+    });
+    notifications.push({ channelId: channel.id, message });
+  }
+
+  return notifications;
 }
 
 export async function findReadableMembership(companyId: string, userId: string, channelId: string) {
@@ -278,22 +324,18 @@ export async function syncGeneratedCommunicationChannels(companyId: string) {
       where: { companyId_canonicalKey: { companyId, canonicalKey: source.canonicalKey } }
     });
 
-    if (!existing) {
-      created += 1;
-      channels.push(await prisma.communicationChannel.create({ data: source }));
-      continue;
-    }
-
-    updated += 1;
-    channels.push(await prisma.communicationChannel.update({
-      where: { id: existing.id },
-      data: {
+    channels.push(await prisma.communicationChannel.upsert({
+      where: { companyId_canonicalKey: { companyId, canonicalKey: source.canonicalKey } },
+      create: source,
+      update: {
         name: source.name,
         departmentId: source.departmentId,
         machineGroupId: source.machineGroupId,
         machineId: source.machineId
       }
     }));
+    if (existing) updated += 1;
+    else created += 1;
   }
 
   return { created, updated, channels };
@@ -319,12 +361,27 @@ export async function replaceUserChannelMemberships(companyId: string, userId: s
   });
   const allowedChannelIds = new Set(channels.map((channel) => channel.id));
   const validMemberships = memberships.filter((membership) => allowedChannelIds.has(membership.channelId) && membership.canRead !== false);
+  const validChannelIds = validMemberships.map((membership) => membership.channelId);
 
   await prisma.$transaction(async (tx) => {
-    await tx.communicationChannelMember.deleteMany({ where: { companyId, userId } });
-    if (validMemberships.length) {
-      await tx.communicationChannelMember.createMany({
-        data: validMemberships.map((membership) => ({
+    await tx.communicationChannelMember.deleteMany({
+      where: {
+        companyId,
+        userId,
+        ...(validChannelIds.length ? { channelId: { notIn: validChannelIds } } : {})
+      }
+    });
+
+    for (const membership of validMemberships) {
+      await tx.communicationChannelMember.upsert({
+        where: { channelId_userId: { channelId: membership.channelId, userId } },
+        update: {
+          role: membership.role ?? CommunicationMemberRole.MEMBER,
+          canRead: membership.canRead ?? true,
+          canWrite: membership.canWrite ?? true,
+          muted: membership.muted ?? false
+        },
+        create: {
           companyId,
           userId,
           channelId: membership.channelId,
@@ -332,7 +389,7 @@ export async function replaceUserChannelMemberships(companyId: string, userId: s
           canRead: membership.canRead ?? true,
           canWrite: membership.canWrite ?? true,
           muted: membership.muted ?? false
-        }))
+        }
       });
     }
   });

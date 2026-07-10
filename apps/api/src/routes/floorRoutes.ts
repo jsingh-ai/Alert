@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
+import { config } from "../config.js";
 import { prisma } from "../db.js";
-import { includeAlert, serializeAlert } from "../services/alertService.js";
+import { alertCommandLabel, includeAlert, serializeAlert } from "../services/alertService.js";
 import { ACTIVE_ALERT_STATUSES, machineWhereForContext } from "../services/permissions.js";
+import { startOfDayInTimeZone } from "../utils/time.js";
 
 function groupCommands(alerts: any[]) {
   const grouped = new Map<string, any>();
@@ -11,7 +13,7 @@ function groupCommands(alerts: any[]) {
       grouped.set(key, {
         id: key,
         realCommandId: alert.commandId,
-        commandLabel: alert.command?.commandLabel ?? alert.issueType?.name ?? "Help Call",
+        commandLabel: alertCommandLabel(alert),
         status: alert.command?.status ?? alert.status,
         machine: {
           id: alert.machine.id,
@@ -32,9 +34,16 @@ function groupCommands(alerts: any[]) {
 export async function floorRoutes(app: FastifyInstance) {
   app.get("/api/floor/active", { preHandler: app.authenticate }, async (request) => {
     const ctx = request.membershipContext!;
-    const machineIds = (await prisma.machine.findMany({ where: machineWhereForContext(ctx), select: { id: true } })).map((machine) => machine.id);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const machines = await prisma.machine.findMany({
+      where: machineWhereForContext(ctx),
+      include: { machineGroup: true },
+      orderBy: [{ machineGroup: { sortOrder: "asc" } }, { sortOrder: "asc" }]
+    });
+    const machineIds = machines.map((machine) => machine.id);
+    const todayStart = startOfDayInTimeZone(new Date(), config.reportTimeZone);
+    if (machineIds.length === 0) {
+      return { success: true, data: { commands: [], machines: [], machineStats: {} } };
+    }
     const alerts = await prisma.andonAlert.findMany({
       where: { companyId: ctx.companyId, machineId: { in: machineIds }, status: { in: [...ACTIVE_ALERT_STATUSES] } },
       include: includeAlert(),
@@ -49,11 +58,6 @@ export async function floorRoutes(app: FastifyInstance) {
       where: { companyId: ctx.companyId, machineId: { in: machineIds } },
       orderBy: { createdAt: "desc" },
       distinct: ["machineId"]
-    });
-    const machines = await prisma.machine.findMany({
-      where: machineWhereForContext(ctx),
-      include: { machineGroup: true },
-      orderBy: [{ machineGroup: { sortOrder: "asc" } }, { sortOrder: "asc" }]
     });
     const activeCounts = new Map<string, number>();
     for (const alert of alerts) activeCounts.set(alert.machineId, (activeCounts.get(alert.machineId) ?? 0) + 1);
@@ -72,6 +76,6 @@ export async function floorRoutes(app: FastifyInstance) {
       lastAlert: latestByMachine.get(machineId) ?? null
     }]));
 
-    return { success: true, data: { commands: groupCommands(alerts), alerts: alerts.map(serializeAlert), machines, machineStats } };
+    return { success: true, data: { commands: groupCommands(alerts), machines, machineStats } };
   });
 }

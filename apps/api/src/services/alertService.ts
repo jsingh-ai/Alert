@@ -23,6 +23,15 @@ type IncludedAlert = Prisma.AndonAlertGetPayload<{
   };
 }>;
 
+type IncludedPagerAlert = Prisma.AndonAlertGetPayload<{
+  include: {
+    machine: true;
+    department: true;
+    issueType: true;
+    command: true;
+  };
+}>;
+
 export function actionAvailable(alert: { status: AlertStatus | string }) {
   if (alert.status === "OPEN") return "acknowledge";
   if (alert.status === "ACKNOWLEDGED" || alert.status === "ARRIVED") return "resolve";
@@ -73,9 +82,31 @@ export function includeAlert() {
   };
 }
 
+export function includePagerAlert() {
+  return {
+    machine: true,
+    department: true,
+    issueType: true,
+    command: true
+  };
+}
+
+export function alertCommandLabel(alert: {
+  issueType?: { name: string } | null;
+  command?: { commandLabel?: string | null; commandTemplateId?: string | null } | null;
+}) {
+  const issueName = alert.issueType?.name ?? "Help Call";
+  const commandLabel = alert.command?.commandLabel?.trim();
+  if (!commandLabel) return issueName;
+  if (!alert.command?.commandTemplateId && commandLabel.toLowerCase() === "manual help call") {
+    return issueName;
+  }
+  return commandLabel;
+}
+
 export function serializeAlert(alert: IncludedAlert) {
   const issueName = alert.issueType?.name ?? "General help";
-  const messages = [...alert.communicationMessages].reverse().map((message) => ({
+  const messages = [...alert.communicationMessages].reverse().filter((message) => message.messageType === "TEXT").map((message) => ({
     id: message.id,
     channelId: message.channelId,
     alertId: (message as any).alertId ?? alert.id,
@@ -103,7 +134,7 @@ export function serializeAlert(alert: IncludedAlert) {
   return {
     id: alert.id,
     commandId: alert.commandId,
-    commandLabel: alert.command?.commandLabel ?? issueName,
+    commandLabel: alertCommandLabel(alert),
     machine: {
       id: alert.machine.id,
       name: alert.machine.name,
@@ -153,12 +184,12 @@ export function serializeAlert(alert: IncludedAlert) {
   };
 }
 
-export function serializePagerAlert(alert: IncludedAlert) {
+export function serializePagerAlert(alert: IncludedPagerAlert) {
   const issueName = alert.issueType?.name ?? "General help";
   return {
     id: alert.id,
     command_id: alert.commandId,
-    command_label: alert.command?.commandLabel ?? issueName,
+    command_label: alertCommandLabel(alert),
     machine: {
       id: alert.machine.id,
       name: alert.machine.name,

@@ -6,6 +6,24 @@ import { api, postJson, patchJson, deleteJson } from "../lib/api";
 const priorities = ["LOW", "NORMAL", "HIGH", "CRITICAL"];
 const roles = ["ADMIN", "MANAGER", "OPERATOR", "RESPONDER", "VIEWER"];
 
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes)) return "-";
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds)) return "-";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 function useAdmin() {
   return useQuery({ queryKey: ["admin"], queryFn: () => api<any>("/api/admin/bootstrap") });
 }
@@ -31,14 +49,94 @@ export function AdminPage() {
     <div className="page-stack admin-page">
       <header className="page-header"><div><h1>Admin Setup</h1><p>Configure machines, departments, issue buttons, command buttons, users, and M5 pagers.</p></div></header>
       <div className="tab-row">
-        {["machines", "departments", "commands", "users", "communication", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
+        {["status", "machines", "departments", "commands", "users", "communication", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
       </div>
+      {tab === "status" && <StatusAdmin />}
       {tab === "machines" && <MachinesAdmin data={data} />}
       {tab === "departments" && <DepartmentsAdmin data={data} />}
       {tab === "commands" && <CommandsAdmin data={data} />}
       {tab === "users" && <UsersAdmin data={data} />}
       {tab === "communication" && <CommunicationChannelsAdmin />}
       {tab === "pagers" && <PagersAdmin data={data} />}
+    </div>
+  );
+}
+
+function StatusMetric({ label, value, detail }: { label: string; value: ReactNode; detail?: ReactNode }) {
+  return (
+    <div className="status-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {detail && <em>{detail}</em>}
+    </div>
+  );
+}
+
+function StatusAdmin() {
+  const status = useQuery({ queryKey: ["admin-status"], queryFn: () => api<any>("/api/admin/status"), refetchInterval: 30000 });
+  const data = status.data?.data;
+  const pagers = data?.pagers ?? [];
+  const onlinePagers = pagers.filter((pager: any) => pager.status === "online").length;
+
+  return (
+    <div className="admin-status-grid">
+      <section className="panel admin-status-hero">
+        <div className="admin-panel-header">
+          <div>
+            <h2>System Status</h2>
+            <span>{data ? `Updated ${new Date(data.server.now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Loading status"}</span>
+          </div>
+          <button onClick={() => status.refetch()} disabled={status.isFetching}>{status.isFetching ? "Refreshing" : "Refresh"}</button>
+        </div>
+        {status.isError && <div className="empty-state small">Status is unavailable.</div>}
+        {data && (
+          <div className="status-metric-grid">
+            <StatusMetric label="Database" value={data.database.status.toUpperCase()} detail={`${data.database.latencyMs} ms`} />
+            <StatusMetric label="API Uptime" value={formatDuration(data.server.uptimeSeconds)} detail={data.server.nodeEnv} />
+            <StatusMetric label="Connected Users" value={data.realtime.connectedUsers} detail={`${data.realtime.connectedSockets} sockets`} />
+            <StatusMetric label="Active Alerts" value={data.activity.activeAlerts} detail={`${data.activity.alertsCreatedToday} created today`} />
+          </div>
+        )}
+      </section>
+
+      {data && (
+        <>
+          <section className="panel">
+            <div className="admin-panel-header"><h2>Storage</h2><span>Current company</span></div>
+            <div className="status-metric-grid compact">
+              <StatusMetric label="Machines" value={data.storage.machines} />
+              <StatusMetric label="Departments" value={data.storage.departments} />
+              <StatusMetric label="Users" value={data.storage.users} />
+              <StatusMetric label="Channels" value={data.storage.channels} />
+              <StatusMetric label="Messages" value={data.storage.messages} />
+              <StatusMetric label="Heap Used" value={formatBytes(data.server.memory.heapUsedBytes)} detail={`${formatBytes(data.server.memory.rssBytes)} RSS`} />
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="admin-panel-header"><h2>Pager Devices</h2><span>{onlinePagers}/{pagers.length} online</span></div>
+            <div className="admin-list">
+              {pagers.map((pager: any) => (
+                <div key={pager.id} className="admin-row status-pager-row">
+                  <strong>{pager.name}</strong>
+                  <span>{pager.departmentName} | {pager.lastSeenAt ? new Date(pager.lastSeenAt).toLocaleString() : "never seen"}</span>
+                  <em className={`status-pill ${pager.status}`}>{pager.status}</em>
+                </div>
+              ))}
+              {pagers.length === 0 && <div className="empty-state small">No pager devices configured.</div>}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="admin-panel-header"><h2>Runtime</h2><span>{data.server.nodeVersion}</span></div>
+            <div className="status-runtime-list">
+              <div><span>Server time</span><strong>{new Date(data.server.now).toLocaleString()}</strong></div>
+              <div><span>Report timezone</span><strong>{data.server.reportTimeZone}</strong></div>
+              <div><span>Resolved today</span><strong>{data.activity.alertsResolvedToday}</strong></div>
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }

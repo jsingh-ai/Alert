@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db.js";
-import { includeAlert, serializeAlert } from "../services/alertService.js";
-import { ACTIVE_ALERT_STATUSES, machineWhereForContext } from "../services/permissions.js";
+import { alertCommandLabel, includeAlert, serializeAlert } from "../services/alertService.js";
+import { ACTIVE_ALERT_STATUSES, canUseMachine, machineWhereForContext } from "../services/permissions.js";
+
+function cleanString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
 
 function groupCommands(alerts: any[]) {
   const map = new Map<string, any>();
@@ -12,7 +16,7 @@ function groupCommands(alerts: any[]) {
         id: key,
         realCommandId: alert.commandId,
         commandTemplateId: alert.command?.commandTemplateId ?? null,
-        commandLabel: alert.command?.commandLabel ?? alert.issueType?.name ?? "Help Call",
+        commandLabel: alertCommandLabel(alert),
         status: alert.status,
         machine: alert.machine,
         sharedNote: alert.command?.sharedNote ?? alert.operatorNote,
@@ -54,10 +58,21 @@ export async function operatorRoutes(app: FastifyInstance) {
     return { success: true, data: { machines, machineGroups, departments, issueTypes, commandTemplates } };
   });
 
-  app.get("/api/operator/snapshot", { preHandler: app.authenticate }, async (request) => {
+  app.get("/api/operator/snapshot", { preHandler: app.authenticate }, async (request, reply) => {
     const ctx = request.membershipContext!;
-    const machines = await prisma.machine.findMany({ where: machineWhereForContext(ctx), select: { id: true } });
-    const machineIds = machines.map((machine) => machine.id);
+    const query = request.query as { machineId?: string };
+    const requestedMachineId = cleanString(query.machineId);
+    let machineIds: string[];
+    if (requestedMachineId) {
+      if (!(await canUseMachine(ctx, requestedMachineId, prisma))) {
+        return reply.code(403).send({ success: false, error: "Machine is outside your scope." });
+      }
+      machineIds = [requestedMachineId];
+    } else {
+      const machines = await prisma.machine.findMany({ where: machineWhereForContext(ctx), select: { id: true } });
+      machineIds = machines.map((machine) => machine.id);
+    }
+    if (machineIds.length === 0) return { success: true, data: { commands: [], alerts: [] } };
     const alerts = await prisma.andonAlert.findMany({
       where: { companyId: ctx.companyId, machineId: { in: machineIds }, status: { in: [...ACTIVE_ALERT_STATUSES] } },
       include: includeAlert(),

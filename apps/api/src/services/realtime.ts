@@ -122,3 +122,14 @@ export async function refreshUserChannelRooms(companyId: string, userId: string)
   const sockets = await io.in(userRoom(companyId, userId)).fetchSockets();
   await Promise.all(sockets.map((socket) => joinReadableChannelRooms(socket as any, companyId, userId)));
 }
+
+export async function getRealtimeStats(companyId: string) {
+  if (!io) return { connectedSockets: 0, connectedUsers: 0 };
+  const sockets = await io.in(`company:${companyId}`).fetchSockets();
+  const users = new Set<string>();
+  for (const socket of sockets) {
+    const session = socket.data.session as SessionToken | undefined;
+    if (session?.companyId === companyId) users.add(session.userId);
+  }
+  return { connectedSockets: sockets.length, connectedUsers: users.size };
+}

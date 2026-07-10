@@ -1,27 +1,48 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db.js";
-import { includeAlert, serializeAlert, transitionAlert } from "../services/alertService.js";
-import { createCommunicationMessage, ensureMachineCommunicationChannel, serializeMessage } from "../services/communicationService.js";
-import { ACTIVE_ALERT_STATUSES, canActAsResponder, canSeeDepartment, canUseMachine, machineWhereForContext } from "../services/permissions.js";
+import { alertCommandLabel, includeAlert, serializeAlert, transitionAlert } from "../services/alertService.js";
+import { createAlertSystemMessages, createCommunicationMessage, ensureMachineCommunicationChannel, serializeMessage } from "../services/communicationService.js";
+import { ACTIVE_ALERT_STATUSES, canActAsResponder, canSeeDepartment, canUseMachine, machineWhereForContext, scopedDepartmentIds } from "../services/permissions.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
+
+function cleanString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
 
 export async function alertRoutes(app: FastifyInstance) {
   app.get("/api/alerts/active", { preHandler: app.authenticate }, async (request, reply) => {
     const ctx = request.membershipContext!;
     const query = request.query as { departmentId?: string; machineId?: string };
+    const departmentId = cleanString(query.departmentId) || undefined;
+    const machineId = cleanString(query.machineId) || undefined;
 
-    if (query.departmentId && !canSeeDepartment(ctx, query.departmentId)) {
+    if (departmentId && !canSeeDepartment(ctx, departmentId)) {
       return reply.code(403).send({ success: false, error: "Department is outside your scope." });
     }
+    if (machineId && !(await canUseMachine(ctx, machineId, prisma))) {
+      return reply.code(403).send({ success: false, error: "Machine is outside your scope." });
+    }
 
-    const machineIds = (await prisma.machine.findMany({ where: machineWhereForContext(ctx), select: { id: true } })).map((m) => m.id);
+    const accessFilters: Array<{ departmentId?: { in: string[] }; machineId?: { in: string[] } }> = [];
+    if (!["ADMIN", "MANAGER"].includes(ctx.role)) {
+      const departmentIds = scopedDepartmentIds(ctx);
+      if (departmentIds.length) accessFilters.push({ departmentId: { in: departmentIds } });
+
+      const machineIds = (await prisma.machine.findMany({ where: machineWhereForContext(ctx), select: { id: true } })).map((m) => m.id);
+      if (machineIds.length) accessFilters.push({ machineId: { in: machineIds } });
+
+      if (accessFilters.length === 0) {
+        return { success: true, data: [] };
+      }
+    }
+
     const alerts = await prisma.andonAlert.findMany({
       where: {
         companyId: ctx.companyId,
-        machineId: { in: machineIds },
         status: { in: [...ACTIVE_ALERT_STATUSES] },
-        ...(query.departmentId ? { departmentId: query.departmentId } : {}),
-        ...(query.machineId ? { machineId: query.machineId } : {})
+        ...(accessFilters.length ? { OR: accessFilters } : {}),
+        ...(departmentId ? { departmentId } : {}),
+        ...(machineId ? { machineId } : {})
       },
       include: includeAlert(),
       orderBy: [{ status: "asc" }, { createdAt: "asc" }]
@@ -53,9 +74,15 @@ export async function alertRoutes(app: FastifyInstance) {
   async function runAction(request: any, reply: any, action: "acknowledge" | "arrive" | "resolve" | "cancel" | "note") {
     const ctx = request.membershipContext!;
     const params = request.params as { id: string };
-    const body = request.body as { note?: string; responderNameText?: string; clientMessageId?: string };
+    const body = (request.body ?? {}) as { note?: string; responderNameText?: string; clientMessageId?: string };
+    const alertId = cleanString(params.id);
+    if (!alertId) return reply.code(400).send({ success: false, error: "Alert id is required." });
+    const responderNameText = cleanString(body.responderNameText);
+    const actionNote = typeof body.note === "string" ? body.note.trim() : null;
+    if (responderNameText.length > 120) return reply.code(400).send({ success: false, error: "Responder name is too long." });
+    if (actionNote && actionNote.length > 4000) return reply.code(400).send({ success: false, error: "Note is too long." });
 
-    const alert = await prisma.andonAlert.findFirst({ where: { id: params.id, companyId: ctx.companyId } });
+    const alert = await prisma.andonAlert.findFirst({ where: { id: alertId, companyId: ctx.companyId } });
     if (!alert) return reply.code(404).send({ success: false, error: "Alert not found." });
 
     if (action === "note") {
@@ -121,16 +148,39 @@ export async function alertRoutes(app: FastifyInstance) {
     }
 
     try {
-      const updated = await prisma.$transaction((tx) => transitionAlert(tx, {
-        alertId: params.id,
-        companyId: ctx.companyId,
-        action,
-        actorUserId: ctx.userId,
-        actorNameText: ctx.user.displayName,
-        responderNameText: body.responderNameText ?? ctx.user.displayName,
-        note: body.note ?? null
-      }));
+      const result = await prisma.$transaction(async (tx) => {
+        const updated = await transitionAlert(tx, {
+          alertId,
+          companyId: ctx.companyId,
+          action,
+          actorUserId: ctx.userId,
+          actorNameText: ctx.user.displayName,
+          responderNameText: responderNameText || ctx.user.displayName,
+          note: actionNote
+        });
+
+        const notifications: Array<{ channelId: string; message: any }> = [];
+        if (action === "resolve") {
+          const commandLabel = alertCommandLabel(updated);
+          const message = `${commandLabel} alert resolved on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
+          notifications.push(...await createAlertSystemMessages(tx, {
+            companyId: ctx.companyId,
+            userId: ctx.userId,
+            machineId: updated.machineId,
+            departmentId: updated.departmentId,
+            alertId: updated.id,
+            body: message,
+            clientMessageKey: "alert-resolved"
+          }));
+        }
+
+        return { updated, notifications };
+      });
+      const updated = result.updated;
       emitCompany(ctx.companyId, "alert.changed", { alertId: updated.id, commandId: updated.commandId, action });
+      for (const notification of result.notifications) {
+        emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message as any));
+      }
       return { success: true, data: serializeAlert(updated as any) };
     } catch (error: any) {
       return reply.code(error.statusCode ?? 500).send({ success: false, error: error.message ?? "Action failed." });
