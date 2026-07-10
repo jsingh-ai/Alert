@@ -84,6 +84,15 @@ export function OperatorPage() {
   }, [lockedMachineId, machines]);
 
   useEffect(() => {
+    if (lockedMachineId || machines.length !== 1) return;
+    const [onlyMachine] = machines;
+    localStorage.setItem("pg_operator_locked_machine_id", onlyMachine.id);
+    setLockedMachineId(onlyMachine.id);
+    setMachineId(onlyMachine.id);
+    setMachinePickerOpen(false);
+  }, [lockedMachineId, machines]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
