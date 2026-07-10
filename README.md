@@ -212,13 +212,13 @@ HOST=0.0.0.0
 JWT_SECRET="paste-the-random-secret-here"
 DEMO_MODE=true
 SERVE_WEB=true
-CORS_ORIGIN="http://localhost:5173"
+CORS_ORIGIN="http://YOUR_SERVER_IP:5003"
 PUBLIC_URL="http://YOUR_SERVER_IP:5003"
 REPORT_TIME_ZONE="America/Chicago"
 SEED_DEMO=true
 ```
 
-Keep `DEMO_MODE=true` for first setup so you can log in easily. After you create real users, set `DEMO_MODE=false`.
+Keep `DEMO_MODE=true` only for first setup so you can log in easily. Before running with `NODE_ENV=production`, set `DEMO_MODE=false`, use a non-placeholder `JWT_SECRET` of at least 32 characters, and set `CORS_ORIGIN` to the exact browser URL that will access the app. Production startup refuses unsafe demo/CORS/JWT settings.
 
 ### 5. Install dependencies
 
@@ -228,11 +228,11 @@ npm run install:fresh
 
 ### 6. Create schema and seed data
 
-This repo currently uses Prisma schema push for setup.
+Production schema changes are applied through Prisma migrations.
 
 ```powershell
 npm run db:generate
-npm run db:push
+npm run db:migrate
 npm run db:seed
 ```
 
@@ -240,6 +240,15 @@ npm run db:seed
 
 - Demo users listed above.
 - Press and Packaging machine groups.
+
+If this is an existing database that was already created with `npm run db:push`, baseline the initial migration once after confirming the current schema is already in place:
+
+```powershell
+npx prisma migrate resolve --applied 20260710120000_init --schema prisma/schema.prisma
+npm run db:migrate
+```
+
+For a brand-new database, do not run `migrate resolve`; just run `npm run db:migrate`.
 - Quality and Supervisor departments.
 - Call Quality, Call Supervisor, and Material Clear quick commands.
 - Demo pager tokens.
@@ -370,7 +379,7 @@ Stop-Service ProcessGuardAndon
 git pull origin main
 npm run install:fresh
 npm run db:generate
-npm run db:push
+npm run db:migrate
 Restart-Service ProcessGuardAndon
 ```
 
@@ -382,7 +391,7 @@ Stop-ScheduledTask -TaskName ProcessGuardAndon
 git pull origin main
 npm run install:fresh
 npm run db:generate
-npm run db:push
+npm run db:migrate
 npm run build
 Start-ScheduledTask -TaskName ProcessGuardAndon
 ```
@@ -393,7 +402,7 @@ If you are not using the scheduled task, stop the running `npm run start` termin
 git pull origin main
 npm run install:fresh
 npm run db:generate
-npm run db:push
+npm run db:migrate
 npm run build
 npm run start
 ```
@@ -409,6 +418,8 @@ npm run db:push
 npm run db:seed
 npm run dev
 ```
+
+`db:push` is for local development only. Production should use `npm run db:migrate`.
 
 Open:
 
@@ -468,22 +479,26 @@ Use Node.js 22 or newer. Node 20 may install with warnings, but it is below the 
 
 ## M5 pager firmware settings
 
-Your posted firmware can keep these defaults except token/base URL:
+Pager Wi-Fi credentials, API URL, and bearer tokens are not stored in `app_main.c`. Create a local ignored secrets header before flashing:
+
+```powershell
+Copy-Item pager\pager_secrets.example.h pager\pager_secrets.h
+notepad pager\pager_secrets.h
+```
+
+Set these values in `pager/pager_secrets.h`:
 
 ```c
-#define CONFIG_PAGER_API_BASE_URL "http://YOUR_SERVER_IP:5003"
-#define CONFIG_PAGER_TOKEN "demo-quality-pager-token"
-#define CONFIG_PAGER_RESPONDER_NAME "Quality"
+#define PAGER_WIFI_SSID "YOUR_WIFI_SSID"
+#define PAGER_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+#define PAGER_API_BASE_URL "http://YOUR_SERVER_IP:5003"
+#define PAGER_TOKEN_VALUE "PASTE_PAGER_TOKEN_SHOWN_ONCE_IN_ADMIN"
+#define PAGER_RESPONDER_NAME_VALUE "Quality"
 ```
 
-Use the correct token per department:
+`pager/pager_secrets.h` is ignored by git. Do not commit real Wi-Fi credentials, API URLs for private networks, or pager tokens.
 
-```text
-Quality: demo-quality-pager-token
-Supervisor: demo-supervisor-pager-token
-```
-
-For production, generate pager tokens in:
+Generate production pager tokens in:
 
 ```text
 Admin Setup -> Pagers
@@ -531,7 +546,7 @@ Before using this on a real plant network:
 3. Set `DEMO_MODE=false`.
 4. Generate real pager tokens and remove demo tokens if desired.
 5. Use HTTPS or keep the app on a protected local network/VPN.
-6. Rotate any Wi-Fi passwords or bearer tokens that were pasted into shared code.
+6. Rotate any Wi-Fi passwords or bearer tokens that were previously pasted into shared code.
 7. Back up PostgreSQL.
 8. Run the app as a scheduled task or service account.
 

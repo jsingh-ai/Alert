@@ -16,7 +16,8 @@ export function machineWhereForContext(ctx: MembershipContext): Prisma.MachineWh
   const base: Prisma.MachineWhereInput = { companyId: ctx.companyId, active: true };
   const machineIds = scopeIds(ctx, "MACHINE");
   const groupIds = scopeIds(ctx, "MACHINE_GROUP");
-  if (ctx.role === "ADMIN" || (machineIds.length === 0 && groupIds.length === 0)) return base;
+  if (ctx.role === "ADMIN" || ctx.role === "MANAGER") return base;
+  if (machineIds.length === 0 && groupIds.length === 0) return { ...base, id: { in: [] } };
   return {
     ...base,
     OR: [
@@ -29,7 +30,8 @@ export function machineWhereForContext(ctx: MembershipContext): Prisma.MachineWh
 export function departmentWhereForContext(ctx: MembershipContext): Prisma.DepartmentWhereInput {
   const base: Prisma.DepartmentWhereInput = { companyId: ctx.companyId, active: true };
   const departmentIds = scopeIds(ctx, "DEPARTMENT");
-  if (ctx.role === "ADMIN" || ctx.role === "MANAGER" || departmentIds.length === 0) return base;
+  if (ctx.role === "ADMIN" || ctx.role === "MANAGER") return base;
+  if (departmentIds.length === 0) return { ...base, id: { in: [] } };
   return { ...base, id: { in: departmentIds } };
 }
 
@@ -40,7 +42,7 @@ export function scopedDepartmentIds(ctx: MembershipContext) {
 export function canSeeDepartment(ctx: MembershipContext, departmentId: string) {
   if (["ADMIN", "MANAGER"].includes(ctx.role)) return true;
   const ids = scopedDepartmentIds(ctx);
-  return ids.length === 0 || ids.includes(departmentId);
+  return ids.includes(departmentId);
 }
 
 export function canActAsResponder(ctx: MembershipContext, departmentId: string) {

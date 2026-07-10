@@ -3,6 +3,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
@@ -20,6 +22,11 @@ import { adminRoutes } from "./routes/adminRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, bodyLimit: 1_000_000 });
+
+function isAllowedOrigin(origin: string) {
+  if (!config.isProduction && config.corsOrigins.includes("*")) return true;
+  return config.corsOrigins.includes(origin);
+}
 
 app.setErrorHandler((error, request, reply) => {
   const message = error instanceof Error ? error.message : "";
@@ -44,16 +51,35 @@ app.setErrorHandler((error, request, reply) => {
 
 await app.register(cors, {
   origin: (origin, cb) => {
-    if (!origin || origin === config.corsOrigin || config.corsOrigin === "*") cb(null, true);
-    else cb(null, true);
+    if (!origin) return cb(null, true);
+    if (isAllowedOrigin(origin)) return cb(null, true);
+    return cb(new Error("CORS origin not allowed"), false);
   },
   credentials: true
+});
+
+await app.register(helmet, {
+  contentSecurityPolicy: false
+});
+
+await app.register(rateLimit, {
+  global: true,
+  max: config.rateLimit.globalMax,
+  timeWindow: config.rateLimit.timeWindow
 });
 
 await app.register(authPlugin);
 setupRealtime(app);
 
 app.get("/api/health", async () => ({ success: true, name: "ProcessGuard Andon", now: new Date().toISOString() }));
+app.get("/api/ready", async (_request, reply) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return { success: true, db: "ok", now: new Date().toISOString() };
+  } catch {
+    return reply.code(503).send({ success: false, db: "unavailable", now: new Date().toISOString() });
+  }
+});
 
 await app.register(authRoutes);
 await app.register(operatorRoutes);

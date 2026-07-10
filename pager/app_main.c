@@ -15,7 +15,7 @@
  * 9. Vibrates only for new unacknowledged OPEN alerts.
  *    ACKNOWLEDGED alerts stay visible but use the normal slower poll interval.
  *
- * Replace WIFI_PASSWORD and PAGER_TOKEN before flashing.
+ * Copy pager_secrets.example.h to pager_secrets.h and edit local values before flashing.
  */
 
 #include <stdio.h>
@@ -49,16 +49,22 @@
 #include <lvgl/lvgl.h>
 
 #include "core2forAWS.h"
+#include "pager_secrets.h"
 
-/*
- * DEBUG CONFIGURATION
- * Keep direct values for now so sdkconfig cannot silently override them.
- */
-static const char *WIFI_SSID = "Polytex";
-static const char *WIFI_PASSWORD = "9333polytex";
-static const char *API_BASE_URL = "http://10.8.10.97:5003";
-static const char *PAGER_TOKEN = "pg_vRGeQ2wCtxS3wujZRVlsdP9V-Cq-PMx4";
-static const char *PAGER_RESPONDER_NAME = "Quality";
+#if !defined(PAGER_WIFI_SSID) || !defined(PAGER_WIFI_PASSWORD) || !defined(PAGER_API_BASE_URL) || !defined(PAGER_TOKEN_VALUE)
+#error "Create pager/pager_secrets.h from pager/pager_secrets.example.h before building."
+#endif
+
+static const char *WIFI_SSID = PAGER_WIFI_SSID;
+static const char *WIFI_PASSWORD = PAGER_WIFI_PASSWORD;
+static const char *API_BASE_URL = PAGER_API_BASE_URL;
+static const char *PAGER_TOKEN = PAGER_TOKEN_VALUE;
+static const char *PAGER_RESPONDER_NAME =
+#ifdef PAGER_RESPONDER_NAME_VALUE
+    PAGER_RESPONDER_NAME_VALUE;
+#else
+    "Pager";
+#endif
 
 #define MAX_ALERTS 16
 #define MAX_TEXT 96
@@ -775,7 +781,7 @@ static esp_err_t init_http_clients(void)
     ESP_LOGI(TAG, "Initializing HTTP clients. API_BASE_URL=%s", API_BASE_URL);
 
     esp_http_client_config_t config = {
-        .url = "http://10.8.10.97:5003",
+        .url = PAGER_API_BASE_URL,
         .timeout_ms = 8000,
         .event_handler = http_event_handler,
     };

@@ -40,8 +40,6 @@ async function resetScopes(membershipId: string, scopes: Array<{ scopeType: Scop
 }
 
 async function main() {
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS andon_alert_active_machine_department_idx ON "andon_alerts" ("machine_id", "department_id") WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')`);
-
   if (process.env.SEED_DEMO === "false") {
     console.log("SEED_DEMO=false, skipping demo seed.");
     return;

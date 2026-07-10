@@ -50,7 +50,9 @@ async function sessionPayload(membershipId: string) {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post("/api/auth/login", async (request, reply) => {
+  const authRateLimit = { config: { rateLimit: { max: config.rateLimit.authMax, timeWindow: config.rateLimit.timeWindow } } };
+
+  app.post("/api/auth/login", authRateLimit, async (request, reply) => {
     const body = request.body as { username?: string; password?: string; companyId?: string };
     const username = body.username?.trim().toLowerCase();
     const password = body.password ?? "";
@@ -86,8 +88,8 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ success: true, token, session: await sessionPayload(membership.id) });
   });
 
-  app.post("/api/auth/demo", async (request, reply) => {
-    if (!config.demoMode) {
+  app.post("/api/auth/demo", authRateLimit, async (request, reply) => {
+    if (config.isProduction || !config.demoMode) {
       return reply.code(403).send({ success: false, error: "Demo mode is disabled." });
     }
 

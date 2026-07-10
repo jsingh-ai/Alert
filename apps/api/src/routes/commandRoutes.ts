@@ -19,6 +19,24 @@ export async function commandRoutes(app: FastifyInstance) {
     };
 
     if (!body.machineId) return reply.code(400).send({ success: false, error: "machineId is required." });
+    const clientRequestId = body.clientRequestId?.trim() || null;
+    if (clientRequestId) {
+      const existingCommand = await prisma.andonCommand.findFirst({
+        where: { companyId: ctx.companyId, clientRequestId },
+        include: { machine: { include: { machineGroup: true } }, alerts: { include: includeAlert() } }
+      });
+      if (existingCommand) {
+        return reply.send({
+          success: true,
+          data: {
+            command: existingCommand,
+            createdAlerts: existingCommand.alerts.map(serializeAlert),
+            existingAlerts: []
+          }
+        });
+      }
+    }
+
     if (!(await canUseMachine(ctx, body.machineId, prisma))) {
       return reply.code(403).send({ success: false, error: "Machine is outside your scope." });
     }
@@ -58,6 +76,18 @@ export async function commandRoutes(app: FastifyInstance) {
       return reply.code(400).send({ success: false, error: "At least one target department/issue is required." });
     }
 
+    const validIssueTypes = await prisma.issueType.findMany({
+      where: {
+        companyId: ctx.companyId,
+        active: true,
+        OR: targets.map((target) => ({ id: target.issueTypeId, departmentId: target.departmentId }))
+      }
+    });
+    const issueByTarget = new Map(validIssueTypes.map((issue) => [`${issue.departmentId}:${issue.id}`, issue]));
+    if (validIssueTypes.length !== targets.length || targets.some((target) => !issueByTarget.has(`${target.departmentId}:${target.issueTypeId}`))) {
+      return reply.code(400).send({ success: false, error: "One or more target department/issue pairs are invalid or inactive." });
+    }
+
     const targetDepartmentIds = [...new Set(targets.map((target) => target.departmentId))];
     const conflictingAlerts = await prisma.andonAlert.findMany({
       where: {
@@ -81,6 +111,7 @@ export async function commandRoutes(app: FastifyInstance) {
       });
     }
 
+    try {
     const result = await prisma.$transaction(async (tx) => {
       const command = await tx.andonCommand.create({
         data: {
@@ -91,7 +122,7 @@ export async function commandRoutes(app: FastifyInstance) {
           operatorUserId: ctx.userId,
           operatorNameText: ctx.user.displayName,
           sharedNote: body.sharedNote?.trim() || null,
-          clientRequestId: body.clientRequestId ?? `web-${nanoid(16)}`
+          clientRequestId: clientRequestId ?? `web-${nanoid(16)}`
         }
       });
 
@@ -100,12 +131,7 @@ export async function commandRoutes(app: FastifyInstance) {
       const departmentNotifications: Array<{ channelId: string; message: any }> = [];
 
       for (const target of targets) {
-        const issueType = await tx.issueType.findFirst({
-          where: { id: target.issueTypeId, companyId: ctx.companyId, departmentId: target.departmentId, active: true }
-        });
-        if (!issueType) {
-          continue;
-        }
+        const issueType = issueByTarget.get(`${target.departmentId}:${target.issueTypeId}`)!;
 
         const existing = await tx.andonAlert.findFirst({
           where: {
@@ -186,5 +212,11 @@ export async function commandRoutes(app: FastifyInstance) {
         existingAlerts: result.existingAlerts.map(serializeAlert)
       }
     });
+    } catch (error: any) {
+      if (error?.code === "P2002") {
+        return reply.code(409).send({ success: false, error: "This command or alert already exists. Refresh and try again." });
+      }
+      throw error;
+    }
   });
 }

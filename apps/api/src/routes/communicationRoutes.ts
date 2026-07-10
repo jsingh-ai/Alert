@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { config } from "../config.js";
 import { prisma } from "../db.js";
 import {
   createCommunicationMessage,
@@ -9,7 +10,7 @@ import {
   serializeMessage,
   syncGeneratedCommunicationChannels
 } from "../services/communicationService.js";
-import { emitChannel, emitCompany, emitUser } from "../services/realtime.js";
+import { emitChannel, emitCompany, emitUser, refreshUserChannelRooms } from "../services/realtime.js";
 
 function cleanString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -20,6 +21,9 @@ function changed(companyId: string) {
 }
 
 export async function communicationRoutes(app: FastifyInstance) {
+  const messageRateLimit = { config: { rateLimit: { max: config.rateLimit.messageMax, timeWindow: config.rateLimit.timeWindow } } };
+  const adminWriteRateLimit = { config: { rateLimit: { max: config.rateLimit.adminWriteMax, timeWindow: config.rateLimit.timeWindow } } };
+
   app.get("/api/channels", { preHandler: app.authenticate }, async (request) => {
     const { companyId, userId } = request.session;
     const memberships = await prisma.communicationChannelMember.findMany({
@@ -64,7 +68,7 @@ export async function communicationRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post("/api/channels/:channelId/messages", { preHandler: app.authenticate }, async (request, reply) => {
+  app.post("/api/channels/:channelId/messages", { preHandler: app.authenticate, ...messageRateLimit }, async (request, reply) => {
     const { companyId, userId } = request.session;
     const params = request.params as { channelId: string };
     const body = request.body as { body?: string; message?: string; clientMessageId?: string };
@@ -127,13 +131,13 @@ export async function communicationRoutes(app: FastifyInstance) {
     return { success: true, data: channels.map((channel) => serializeChannel(channel as any)) };
   });
 
-  app.post("/api/admin/communication-channels/sync", { preHandler: app.requireAdmin }, async (request) => {
+  app.post("/api/admin/communication-channels/sync", { preHandler: app.requireAdmin, ...adminWriteRateLimit }, async (request) => {
     const result = await syncGeneratedCommunicationChannels(request.session.companyId);
     changed(request.session.companyId);
     return { success: true, data: { created: result.created, updated: result.updated, channels: result.channels.map((channel) => serializeChannel(channel)) } };
   });
 
-  app.patch("/api/admin/communication-channels/:id", { preHandler: app.requireAdmin }, async (request, reply) => {
+  app.patch("/api/admin/communication-channels/:id", { preHandler: app.requireAdmin, ...adminWriteRateLimit }, async (request, reply) => {
     const params = request.params as { id: string };
     const body = request.body as { name?: string; active?: boolean };
     const data: any = {};
@@ -151,7 +155,7 @@ export async function communicationRoutes(app: FastifyInstance) {
     return { success: true, data: serializeChannel(channel) };
   });
 
-  app.patch("/api/admin/communication-channels/:id/archive", { preHandler: app.requireAdmin }, async (request) => {
+  app.patch("/api/admin/communication-channels/:id/archive", { preHandler: app.requireAdmin, ...adminWriteRateLimit }, async (request) => {
     const params = request.params as { id: string };
     const channel = await prisma.communicationChannel.update({
       where: { id: params.id, companyId: request.session.companyId },
@@ -184,13 +188,14 @@ export async function communicationRoutes(app: FastifyInstance) {
     };
   });
 
-  app.put("/api/admin/users/:userId/channel-memberships", { preHandler: app.requireAdmin }, async (request, reply) => {
+  app.put("/api/admin/users/:userId/channel-memberships", { preHandler: app.requireAdmin, ...adminWriteRateLimit }, async (request, reply) => {
     const { companyId } = request.session;
     const params = request.params as { userId: string };
     const body = request.body as { memberships?: Array<{ channelId: string; role?: "MEMBER" | "MODERATOR" | "OWNER"; canRead?: boolean; canWrite?: boolean; muted?: boolean }> };
     const memberships = await replaceUserChannelMemberships(companyId, params.userId, body.memberships ?? []);
     if (!memberships) return reply.code(404).send({ success: false, error: "User not found." });
-    emitUser(params.userId, "communication.membership.changed", { userId: params.userId, at: new Date().toISOString() });
+    await refreshUserChannelRooms(companyId, params.userId);
+    emitUser(companyId, params.userId, "communication.membership.changed", { userId: params.userId, at: new Date().toISOString() });
     changed(companyId);
     return { success: true, data: memberships };
   });

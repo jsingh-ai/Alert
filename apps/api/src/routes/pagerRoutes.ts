@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { includeAlert, serializePagerAlert, transitionAlert } from "../services/alertService.js";
 import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
@@ -48,6 +49,8 @@ async function activePagerAlerts(pager: PagerContext) {
 }
 
 export async function pagerRoutes(app: FastifyInstance) {
+  const pagerRateLimit = { config: { rateLimit: { max: config.rateLimit.pagerMax, timeWindow: config.rateLimit.timeWindow } } };
+
   async function getActive(request: FastifyRequest, reply: FastifyReply) {
     const pager = await requirePager(request, reply);
     if (!pager) return;
@@ -80,15 +83,15 @@ export async function pagerRoutes(app: FastifyInstance) {
     }
   }
 
-  app.get("/api/andon/pager/alerts/active", getActive);
-  app.get("/api/pager/alerts/active", getActive);
+  app.get("/api/andon/pager/alerts/active", pagerRateLimit, getActive);
+  app.get("/api/pager/alerts/active", pagerRateLimit, getActive);
 
-  app.post("/api/andon/pager/alerts/:id/acknowledge", (request, reply) => postAction(request, reply, "acknowledge"));
-  app.post("/api/pager/alerts/:id/acknowledge", (request, reply) => postAction(request, reply, "acknowledge"));
+  app.post("/api/andon/pager/alerts/:id/acknowledge", pagerRateLimit, (request, reply) => postAction(request, reply, "acknowledge"));
+  app.post("/api/pager/alerts/:id/acknowledge", pagerRateLimit, (request, reply) => postAction(request, reply, "acknowledge"));
 
-  app.post("/api/andon/pager/alerts/:id/arrive", (request, reply) => postAction(request, reply, "arrive"));
-  app.post("/api/pager/alerts/:id/arrive", (request, reply) => postAction(request, reply, "arrive"));
+  app.post("/api/andon/pager/alerts/:id/arrive", pagerRateLimit, (request, reply) => postAction(request, reply, "arrive"));
+  app.post("/api/pager/alerts/:id/arrive", pagerRateLimit, (request, reply) => postAction(request, reply, "arrive"));
 
-  app.post("/api/andon/pager/alerts/:id/resolve", (request, reply) => postAction(request, reply, "resolve"));
-  app.post("/api/pager/alerts/:id/resolve", (request, reply) => postAction(request, reply, "resolve"));
+  app.post("/api/andon/pager/alerts/:id/resolve", pagerRateLimit, (request, reply) => postAction(request, reply, "resolve"));
+  app.post("/api/pager/alerts/:id/resolve", pagerRateLimit, (request, reply) => postAction(request, reply, "resolve"));
 }
