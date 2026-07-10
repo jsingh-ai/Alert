@@ -40,6 +40,7 @@ export type Alert = {
   acknowledgedAt?: string | null;
   arrivedAt?: string | null;
   resolvedAt?: string | null;
+  messages?: any[];
   events?: any[];
 };
 

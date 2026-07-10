@@ -21,13 +21,16 @@ export function AlertCard({ alert, compact = false, actionMode = "queue" }: { al
     onSuccess: refresh
   });
   const sendMessage = useMutation({
-    mutationFn: (note: string) => postJson(`/api/alerts/${alert.id}/notes`, { note }),
+    mutationFn: (note: string) => postJson(`/api/alerts/${alert.id}/notes`, {
+      note,
+      clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }),
     onSuccess: () => {
       setMessage("");
       refresh();
     }
   });
-  const events = [...(alert.events ?? [])].filter((event: any) => event.eventType === "NOTE").reverse();
+  const events = [...((alert.messages?.length ? alert.messages : alert.events) ?? [])].filter((event: any) => event.eventType === "NOTE");
   const activeTimerStartedAt = new Date(alert.activeTimerStartedAt ?? alert.createdAt).getTime();
   const activeElapsedSeconds = Number.isNaN(activeTimerStartedAt) ? alert.elapsedSeconds : Math.max(0, Math.floor((now - activeTimerStartedAt) / 1000));
   const canResolve = alert.status === "ACKNOWLEDGED" || alert.status === "ARRIVED";

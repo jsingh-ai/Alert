@@ -55,6 +55,24 @@ enum Priority {
   CRITICAL
 }
 
+enum CommunicationChannelType {
+  DEPARTMENT
+  MACHINE_GROUP
+  MACHINE
+  CUSTOM
+}
+
+enum CommunicationMemberRole {
+  MEMBER
+  MODERATOR
+  OWNER
+}
+
+enum CommunicationMessageType {
+  TEXT
+  SYSTEM
+}
+
 model Company {
   id        String   @id @default(cuid())
   name      String
@@ -73,6 +91,8 @@ model Company {
   alerts           AndonAlert[]
   pagerDevices     PagerDevice[]
   preferences      UserPreference[]
+  communicationChannels CommunicationChannel[]
+  communicationMessages CommunicationMessage[]
 
   @@map("companies")
 }
@@ -98,6 +118,8 @@ model User {
   alertsCancelled     AndonAlert[]   @relation("AlertCancelledBy")
   alertEvents         AlertEvent[]
   preferences         UserPreference[]
+  communicationMembers CommunicationChannelMember[]
+  communicationMessages CommunicationMessage[]
 
   @@map("users")
 }
@@ -145,6 +167,7 @@ model MachineGroup {
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   machines Machine[]
+  communicationChannels CommunicationChannel[]
 
   @@unique([companyId, name])
   @@index([companyId, active])
@@ -167,6 +190,7 @@ model Machine {
   machineGroup MachineGroup  @relation(fields: [machineGroupId], references: [id], onDelete: Restrict)
   commands     AndonCommand[]
   alerts       AndonAlert[]
+  communicationChannels CommunicationChannel[]
 
   @@unique([companyId, code])
   @@index([companyId, active])
@@ -189,6 +213,7 @@ model Department {
   commandTargets  CommandTemplateTarget[]
   alerts          AndonAlert[]
   pagerDevices    PagerDevice[]
+  communicationChannels CommunicationChannel[]
 
   @@unique([companyId, name])
   @@index([companyId, active])
@@ -319,6 +344,7 @@ model AndonAlert {
   resolvedByUser     User?       @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
   cancelledByUser    User?       @relation("AlertCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   events           AlertEvent[]
+  communicationMessages CommunicationMessage[]
 
   @@index([companyId, status])
   @@index([departmentId, status])
@@ -376,4 +402,84 @@ model UserPreference {
 
   @@unique([userId, companyId, key])
   @@map("user_preferences")
+}
+
+model CommunicationChannel {
+  id             String                   @id @default(cuid())
+  companyId      String                   @map("company_id")
+  canonicalKey   String                   @map("canonical_key")
+  type           CommunicationChannelType
+  name           String
+  departmentId   String?                  @map("department_id")
+  machineGroupId String?                  @map("machine_group_id")
+  machineId      String?                  @map("machine_id")
+  active         Boolean                  @default(true)
+  archivedAt     DateTime?                @map("archived_at")
+  disabledAt     DateTime?                @map("disabled_at")
+  lastMessageSeq Int                      @default(0) @map("last_message_seq")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department   Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  machineGroup MachineGroup? @relation(fields: [machineGroupId], references: [id], onDelete: SetNull)
+  machine      Machine?      @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  members      CommunicationChannelMember[]
+  messages     CommunicationMessage[]
+
+  @@unique([companyId, canonicalKey])
+  @@index([companyId, type, active])
+  @@index([departmentId])
+  @@index([machineGroupId])
+  @@index([machineId])
+  @@map("communication_channels")
+}
+
+model CommunicationChannelMember {
+  id          String                  @id @default(cuid())
+  companyId   String                  @map("company_id")
+  channelId   String                  @map("channel_id")
+  userId      String                  @map("user_id")
+  role        CommunicationMemberRole @default(MEMBER)
+  canRead     Boolean                 @default(true) @map("can_read")
+  canWrite    Boolean                 @default(true) @map("can_write")
+  muted       Boolean                 @default(false)
+  lastReadSeq Int                     @default(0) @map("last_read_seq")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  channel CommunicationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([companyId, userId])
+  @@index([companyId, channelId])
+  @@map("communication_channel_members")
+}
+
+model CommunicationMessage {
+  id              String                   @id @default(cuid())
+  companyId       String                   @map("company_id")
+  channelId       String                   @map("channel_id")
+  seq             Int
+  userId          String                   @map("user_id")
+  messageType     CommunicationMessageType @default(TEXT) @map("message_type")
+  body            String
+  clientMessageId String?                  @map("client_message_id")
+  alertId         String?                  @map("alert_id")
+  deletedAt       DateTime?                @map("deleted_at")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+
+  company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  channel CommunicationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alert   AndonAlert?          @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  @@unique([channelId, seq])
+  @@unique([channelId, userId, clientMessageId])
+  @@index([companyId, channelId, seq])
+  @@index([companyId, alertId, seq])
+  @@index([companyId, userId, createdAt])
+  @@map("communication_messages")
 }

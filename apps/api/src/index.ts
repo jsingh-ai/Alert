@@ -15,6 +15,7 @@ import { alertRoutes } from "./routes/alertRoutes.js";
 import { floorRoutes } from "./routes/floorRoutes.js";
 import { pagerRoutes } from "./routes/pagerRoutes.js";
 import { reportRoutes } from "./routes/reportRoutes.js";
+import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { adminRoutes } from "./routes/adminRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,6 +62,7 @@ await app.register(alertRoutes);
 await app.register(floorRoutes);
 await app.register(pagerRoutes);
 await app.register(reportRoutes);
+await app.register(communicationRoutes);
 await app.register(adminRoutes);
 
 if (config.serveWeb) {

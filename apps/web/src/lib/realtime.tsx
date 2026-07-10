@@ -17,9 +17,18 @@ export function RealtimeBridge() {
       queryClient.invalidateQueries({ queryKey: ["reports"] });
     };
     const invalidateAdmin = () => queryClient.invalidateQueries({ queryKey: ["admin"] });
+    const invalidateChannels = () => {
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+      queryClient.invalidateQueries({ queryKey: ["channel-messages"] });
+    };
     socket.on("alert.changed", invalidateLive);
     socket.on("command.changed", invalidateLive);
     socket.on("admin.changed", invalidateAdmin);
+    socket.on("communication.message.created", () => {
+      invalidateChannels();
+      invalidateLive();
+    });
+    socket.on("communication.membership.changed", invalidateChannels);
     return () => {
       socket.disconnect();
     };

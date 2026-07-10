@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postJson, patchJson, deleteJson } from "../lib/api";
@@ -31,12 +31,13 @@ export function AdminPage() {
     <div className="page-stack admin-page">
       <header className="page-header"><div><h1>Admin Setup</h1><p>Configure machines, departments, issue buttons, command buttons, users, and M5 pagers.</p></div></header>
       <div className="tab-row">
-        {["machines", "departments", "commands", "users", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
+        {["machines", "departments", "commands", "users", "communication", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
       </div>
       {tab === "machines" && <MachinesAdmin data={data} />}
       {tab === "departments" && <DepartmentsAdmin data={data} />}
       {tab === "commands" && <CommandsAdmin data={data} />}
       {tab === "users" && <UsersAdmin data={data} />}
+      {tab === "communication" && <CommunicationChannelsAdmin />}
       {tab === "pagers" && <PagersAdmin data={data} />}
     </div>
   );
@@ -202,10 +203,148 @@ function CommandsAdmin({ data }: any) {
 function UsersAdmin({ data }: any) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState({ username: "", password: "", displayName: "", role: "OPERATOR" });
+  const [selectedUserId, setSelectedUserId] = useState("");
   const createUser = useMutation({ mutationFn: () => postJson("/api/admin/users", user), onSuccess: () => { setUser({ username: "", password: "", displayName: "", role: "OPERATOR" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggle = useMutation({ mutationFn: (item: any) => patchJson(`/api/admin/users/${item.id}`, { active: !item.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const remove = useMutation({ mutationFn: (item: any) => deleteJson(`/api/admin/users/${item.id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
-  return <section className="panel"><h2>Users</h2><div className="inline-form stack"><TextInput value={user.username} onChange={(username: string) => setUser({ ...user, username })} placeholder="jsmith" /><TextInput value={user.displayName} onChange={(displayName: string) => setUser({ ...user, displayName })} placeholder="John Smith" /><TextInput type="password" value={user.password} onChange={(password: string) => setUser({ ...user, password })} placeholder="Password" /><select value={user.role} onChange={(event) => setUser({ ...user, role: event.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select><button onClick={() => createUser.mutate()} disabled={!user.username.trim() || !user.displayName.trim() || !user.password || createUser.isPending}>Create user</button></div><AdminList items={data?.users ?? []} render={(item: any) => <><strong>{item.username}</strong><span>{item.displayName} | {item.memberships?.[0]?.role ?? "no role"} | {item.active ? "active" : "inactive"}</span><AdminActions active={item.active} onToggle={() => toggle.mutate(item)} onDelete={() => remove.mutate(item)} /></>} /></section>;
+  const users = data?.users ?? [];
+  const selectedUser = users.find((item: any) => item.id === selectedUserId) ?? users[0];
+  return (
+    <div className="admin-grid">
+      <section className="panel">
+        <h2>Users</h2>
+        <div className="inline-form stack">
+          <TextInput value={user.username} onChange={(username: string) => setUser({ ...user, username })} placeholder="jsmith" />
+          <TextInput value={user.displayName} onChange={(displayName: string) => setUser({ ...user, displayName })} placeholder="John Smith" />
+          <TextInput type="password" value={user.password} onChange={(password: string) => setUser({ ...user, password })} placeholder="Password" />
+          <select value={user.role} onChange={(event) => setUser({ ...user, role: event.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select>
+          <button onClick={() => createUser.mutate()} disabled={!user.username.trim() || !user.displayName.trim() || !user.password || createUser.isPending}>Create user</button>
+        </div>
+        <div className="admin-list">
+          {users.map((item: any) => (
+            <div key={item.id} className={`admin-row admin-group-row ${selectedUser?.id === item.id ? "selected" : ""}`} onClick={() => setSelectedUserId(item.id)}>
+              <strong>{item.username}</strong>
+              <span>{item.displayName} | {item.memberships?.[0]?.role ?? "no role"} | {item.active ? "active" : "inactive"}</span>
+              <AdminActions active={item.active} onToggle={() => toggle.mutate(item)} onDelete={() => remove.mutate(item)} />
+            </div>
+          ))}
+          {users.length === 0 && <div className="empty-state small">No items yet.</div>}
+        </div>
+      </section>
+      <ChannelAccessPanel user={selectedUser} />
+    </div>
+  );
+}
+
+function CommunicationChannelsAdmin() {
+  const queryClient = useQueryClient();
+  const channelsQuery = useQuery({ queryKey: ["admin-communication-channels"], queryFn: () => api<any>("/api/admin/communication-channels") });
+  const channels = channelsQuery.data?.data ?? [];
+  const sync = useMutation({ mutationFn: () => postJson("/api/admin/communication-channels/sync", {}), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["admin-communication-channels"] }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
+  const toggle = useMutation({ mutationFn: (channel: any) => patchJson(`/api/admin/communication-channels/${channel.id}`, { active: !channel.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-communication-channels"] }) });
+  const archive = useMutation({ mutationFn: (channel: any) => patchJson(`/api/admin/communication-channels/${channel.id}/archive`, {}), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-communication-channels"] }) });
+  const groups = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const channel of channels) map.set(channel.type, [...(map.get(channel.type) ?? []), channel]);
+    return Array.from(map, ([type, items]) => ({ type, items }));
+  }, [channels]);
+  return (
+    <section className="panel">
+      <div className="admin-panel-header">
+        <div>
+          <h2>Communication Channels</h2>
+          <span>{channels.length} channels</span>
+        </div>
+        <button onClick={() => sync.mutate()} disabled={sync.isPending}>Sync Channels</button>
+      </div>
+      <div className="communication-channel-groups">
+        {groups.map((group) => (
+          <section key={group.type} className="communication-channel-group">
+            <h3>{group.type.replace("_", " ").toLowerCase()}</h3>
+            <div className="admin-list">
+              {group.items.map((channel: any) => (
+                <div key={channel.id} className="admin-row">
+                  <strong>{channel.name}</strong>
+                  <span>{channel.active ? "active" : "disabled"} | {channel.membership?.unreadCount ?? 0} unread | {channel.memberCount ?? 0} members</span>
+                  <div className="admin-actions">
+                    <button onClick={() => toggle.mutate(channel)}>{channel.active ? "Disable" : "Enable"}</button>
+                    <button className="danger" onClick={() => window.confirm("Archive this channel?") && archive.mutate(channel)}>Archive</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+        {channels.length === 0 && <div className="empty-state">No communication channels yet. Click Sync Channels.</div>}
+      </div>
+    </section>
+  );
+}
+
+function ChannelAccessPanel({ user }: { user: any }) {
+  const queryClient = useQueryClient();
+  const membershipsQuery = useQuery({
+    queryKey: ["admin-user-channel-memberships", user?.id],
+    enabled: Boolean(user?.id),
+    queryFn: () => api<any>(`/api/admin/users/${user.id}/channel-memberships`)
+  });
+  const [selected, setSelected] = useState<Record<string, { canWrite: boolean }>>({});
+  const channels = membershipsQuery.data?.data?.channels ?? [];
+
+  useEffect(() => {
+    const next: Record<string, { canWrite: boolean }> = {};
+    for (const channel of channels) {
+      if (channel.membership?.canRead) next[channel.id] = { canWrite: channel.membership.canWrite };
+    }
+    setSelected(next);
+  }, [membershipsQuery.data]);
+
+  const save = useMutation({
+    mutationFn: () => api(`/api/admin/users/${user.id}/channel-memberships`, { method: "PUT", body: JSON.stringify({
+      memberships: Object.entries(selected).map(([channelId, value]) => ({ channelId, canRead: true, canWrite: value.canWrite }))
+    }) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-user-channel-memberships", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["admin-communication-channels"] });
+    }
+  });
+
+  if (!user) return <section className="panel"><div className="empty-state">Create a user first.</div></section>;
+
+  const toggleRead = (channelId: string) => setSelected((current) => {
+    const next = { ...current };
+    if (next[channelId]) delete next[channelId];
+    else next[channelId] = { canWrite: true };
+    return next;
+  });
+  const toggleWrite = (channelId: string) => setSelected((current) => ({ ...current, [channelId]: { canWrite: !current[channelId]?.canWrite } }));
+
+  return (
+    <section className="panel">
+      <div className="admin-panel-header">
+        <div>
+          <h2>Channel Access</h2>
+          <span>{user.displayName}</span>
+        </div>
+        <button onClick={() => save.mutate()} disabled={save.isPending || !membershipsQuery.data}>Save</button>
+      </div>
+      <div className="channel-access-list">
+        {channels.map((channel: any) => (
+          <div key={channel.id} className="channel-access-row">
+            <label className="inline-check">
+              <input type="checkbox" checked={Boolean(selected[channel.id])} onChange={() => toggleRead(channel.id)} />
+              <span>{channel.name}</span>
+            </label>
+            <label className="inline-check">
+              <input type="checkbox" checked={Boolean(selected[channel.id]?.canWrite)} disabled={!selected[channel.id]} onChange={() => toggleWrite(channel.id)} />
+              <span>Can write</span>
+            </label>
+          </div>
+        ))}
+        {channels.length === 0 && <div className="empty-state small">Sync communication channels first.</div>}
+      </div>
+    </section>
+  );
 }
 
 function PagersAdmin({ data }: any) {

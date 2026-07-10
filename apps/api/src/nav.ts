@@ -10,6 +10,7 @@ export type NavItem = {
 const items: Record<string, NavItem> = {
   operator: { id: "operator", label: "Operator", path: "/operator", icon: "radio" },
   queue: { id: "queue", label: "Department Queue", path: "/queue", icon: "inbox" },
+  channels: { id: "channels", label: "Communication", path: "/channels", icon: "text" },
   floor: { id: "floor", label: "Live Floor", path: "/floor", icon: "layout" },
   reports: { id: "reports", label: "Reports", path: "/reports", icon: "chart" },
   admin: { id: "admin", label: "Admin Setup", path: "/admin", icon: "settings" }
@@ -18,15 +19,15 @@ const items: Record<string, NavItem> = {
 export function navForRole(role: Role): NavItem[] {
   switch (role) {
     case "ADMIN":
-      return [items.floor, items.operator, items.queue, items.reports, items.admin];
+      return [items.floor, items.operator, items.queue, items.channels, items.reports, items.admin];
     case "MANAGER":
-      return [items.floor, items.operator, items.queue, items.reports];
+      return [items.floor, items.operator, items.queue, items.channels, items.reports];
     case "OPERATOR":
-      return [items.operator];
+      return [items.operator, items.channels];
     case "RESPONDER":
-      return [items.queue];
+      return [items.queue, items.channels];
     case "VIEWER":
-      return [items.floor, items.queue];
+      return [items.floor, items.queue, items.channels];
     default:
       return [items.operator];
   }

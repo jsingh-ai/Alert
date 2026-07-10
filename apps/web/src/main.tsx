@@ -12,6 +12,7 @@ import { QueuePage } from "./pages/QueuePage";
 import { FloorPage } from "./pages/FloorPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { AdminPage } from "./pages/AdminPage";
+import { ChannelsPage } from "./pages/ChannelsPage";
 import "./styles/app.css";
 
 const queryClient = new QueryClient({
@@ -37,6 +38,7 @@ function ProtectedRoutes() {
         <Route path="/login" element={<Navigate to={session.homePath} replace />} />
         <Route path="/operator" element={authorized(<OperatorPage />, "/operator")} />
         <Route path="/queue" element={authorized(<QueuePage />, "/queue")} />
+        <Route path="/channels" element={authorized(<ChannelsPage />, "/channels")} />
         <Route path="/floor" element={authorized(<FloorPage />, "/floor")} />
         <Route path="/reports" element={authorized(<ReportsPage />, "/reports")} />
         <Route path="/admin" element={authorized(<AdminPage />, "/admin")} />

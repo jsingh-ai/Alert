@@ -14,6 +14,12 @@ type IncludedAlert = Prisma.AndonAlertGetPayload<{
     issueType: true;
     command: true;
     events: { orderBy: { createdAt: "desc" }; take: 8 };
+    communicationMessages: {
+      where: { deletedAt: null };
+      orderBy: { seq: "desc" };
+      take: 20;
+      include: { user: { select: { id: true; username: true; displayName: true } } };
+    };
   };
 }>;
 
@@ -57,12 +63,43 @@ export function includeAlert() {
     department: true,
     issueType: true,
     command: true,
-    events: { orderBy: { createdAt: "desc" as const }, take: 8 }
+    events: { orderBy: { createdAt: "desc" as const }, take: 8 },
+    communicationMessages: {
+      where: { deletedAt: null },
+      orderBy: { seq: "desc" as const },
+      take: 20,
+      include: { user: { select: { id: true, username: true, displayName: true } } }
+    }
   };
 }
 
 export function serializeAlert(alert: IncludedAlert) {
   const issueName = alert.issueType?.name ?? "General help";
+  const messages = [...alert.communicationMessages].reverse().map((message) => ({
+    id: message.id,
+    channelId: message.channelId,
+    alertId: (message as any).alertId ?? alert.id,
+    seq: message.seq,
+    eventType: "NOTE",
+    actorNameText: message.user.displayName,
+    note: message.body,
+    user: {
+      id: message.user.id,
+      username: message.user.username,
+      displayName: message.user.displayName
+    },
+    clientMessageId: message.clientMessageId,
+    createdAt: message.createdAt
+  }));
+  const legacyNotes = alert.events
+    .filter((event) => event.eventType === "NOTE")
+    .map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      actorNameText: event.actorNameText,
+      note: event.note,
+      createdAt: event.createdAt
+    }));
   return {
     id: alert.id,
     commandId: alert.commandId,
@@ -104,7 +141,9 @@ export function serializeAlert(alert: IncludedAlert) {
     arrivedAt: alert.arrivedAt,
     resolvedAt: alert.resolvedAt,
     cancelledAt: alert.cancelledAt,
-    events: alert.events.map((event) => ({
+    messages,
+    events: [...legacyNotes, ...messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+    timelineEvents: alert.events.map((event) => ({
       id: event.id,
       eventType: event.eventType,
       actorNameText: event.actorNameText,
