@@ -1496,6 +1496,12 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .admin-actions button { width: auto; white-space: nowrap; }
 .admin-actions .danger, .admin-row button.danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
 .admin-actions .danger:hover, .admin-row button.danger:hover { background: #dc2626; border-color: #dc2626; color: white; filter: none; }
+.quick-login-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.65rem; }
+.quick-login-setting { display: flex; align-items: center; gap: 0.65rem; padding: 0.75rem; border: 1px solid #dbe3ee; border-radius: 14px; background: #f8fafc; cursor: pointer; }
+.quick-login-setting input { width: auto; }
+.quick-login-setting strong, .quick-login-setting em { display: block; }
+.quick-login-setting strong { color: #0f172a; }
+.quick-login-setting em { color: var(--muted); font-style: normal; font-size: 0.78rem; font-weight: 800; }
 .user-detail-panel .inline-form { margin-bottom: 0; }
 .field-label { display: grid; gap: 0.3rem; }
 .field-label > span { color: #475569; font-size: 0.72rem; font-weight: 950; text-transform: uppercase; letter-spacing: 0.05em; }

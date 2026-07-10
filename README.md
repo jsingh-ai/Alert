@@ -210,7 +210,7 @@ DATABASE_URL="postgresql://processguard:processguard_dev_password@localhost:5432
 PORT=5003
 HOST=0.0.0.0
 JWT_SECRET="paste-the-random-secret-here"
-DEMO_MODE=true
+DEMO_MODE=false
 SERVE_WEB=true
 CORS_ORIGIN="http://YOUR_SERVER_IP:5003"
 PUBLIC_URL="http://YOUR_SERVER_IP:5003"
@@ -218,7 +218,7 @@ REPORT_TIME_ZONE="America/Chicago"
 SEED_DEMO=true
 ```
 
-Keep `DEMO_MODE=true` only for first setup so you can log in easily. Before running with `NODE_ENV=production`, set `DEMO_MODE=false`, use a non-placeholder `JWT_SECRET` of at least 32 characters, and set `CORS_ORIGIN` to the exact browser URL that will access the app. Production startup refuses unsafe demo/CORS/JWT settings.
+Keep `DEMO_MODE=false` in production. Quick Login buttons are controlled in Admin Setup -> Settings and the seeded company enables Operator, Quality, Supervisor, and Manager by default. Admin is never available through Quick Login and must use username/password. Production startup refuses unsafe demo/CORS/JWT settings.
 
 ### 5. Install dependencies
 
@@ -533,11 +533,12 @@ Before using this on a real plant network:
 1. Change the PostgreSQL password.
 2. Set a strong `JWT_SECRET`.
 3. Set `DEMO_MODE=false`.
-4. Generate real pager tokens and remove demo tokens if desired.
-5. Use HTTPS or keep the app on a protected local network/VPN.
-6. Rotate any Wi-Fi passwords or bearer tokens that were previously pasted into shared code.
-7. Back up PostgreSQL.
-8. Run the app as a scheduled task or service account.
+4. Review Quick Login in Admin Setup -> Settings and disable any role buttons you do not want.
+5. Generate real pager tokens and remove demo tokens if desired.
+6. Use HTTPS or keep the app on a protected local network/VPN.
+7. Rotate any Wi-Fi passwords or bearer tokens that were previously pasted into shared code.
+8. Back up PostgreSQL.
+9. Run the app as a scheduled task or service account.
 
 ## Troubleshooting
 

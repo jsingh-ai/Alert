@@ -193,6 +193,12 @@ async function main() {
   const viewer = await user("viewer", "Board Viewer", Role.VIEWER, company.id, "viewer123");
   await prisma.user.updateMany({ where: { username: "maintenance" }, data: { active: false } });
 
+  await prisma.companyPreference.upsert({
+    where: { companyId_key: { companyId: company.id, key: "quick_login_profiles" } },
+    update: { value: ["operator", "manager", "quality", "supervisor"] },
+    create: { companyId: company.id, key: "quick_login_profiles", value: ["operator", "manager", "quality", "supervisor"] }
+  });
+
   await resetScopes(admin.membership.id, []);
   await resetScopes(manager.membership.id, []);
   await resetScopes(operator.membership.id, [{ scopeType: ScopeType.MACHINE_GROUP, scopeId: pressGroup.id }]);

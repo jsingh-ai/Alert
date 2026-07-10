@@ -91,6 +91,7 @@ model Company {
   alerts           AndonAlert[]
   pagerDevices     PagerDevice[]
   preferences      UserPreference[]
+  companyPreferences CompanyPreference[]
   communicationChannels CommunicationChannel[]
   communicationMessages CommunicationMessage[]
 
@@ -402,6 +403,19 @@ model UserPreference {
 
   @@unique([userId, companyId, key])
   @@map("user_preferences")
+}
+
+model CompanyPreference {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  key       String
+  value     Json     @map("value_json")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key])
+  @@map("company_preferences")
 }
 
 model CommunicationChannel {

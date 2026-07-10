@@ -5,6 +5,7 @@ import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { generatePagerToken, sha256, tokenFingerprint } from "../utils/crypto.js";
 import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
+import { getQuickLoginProfiles, normalizeQuickLoginProfiles, QUICK_LOGIN_PROFILES, setQuickLoginProfiles } from "../services/quickLoginService.js";
 import { emitCompany, getRealtimeStats } from "../services/realtime.js";
 import { startOfDayInTimeZone } from "../utils/time.js";
 
@@ -85,20 +86,35 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.get("/api/admin/bootstrap", { preHandler: app.requireAdmin }, async (request) => {
     const companyId = request.session.companyId;
-    const [machineGroups, machines, departments, issueTypes, commandTemplates, users, pagerDevices] = await Promise.all([
+    const [machineGroups, machines, departments, issueTypes, commandTemplates, users, pagerDevices, quickLoginProfiles] = await Promise.all([
       prisma.machineGroup.findMany({ where: { companyId }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.machine.findMany({ where: { companyId }, include: { machineGroup: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.department.findMany({ where: { companyId }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.issueType.findMany({ where: { companyId }, include: { department: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.commandTemplate.findMany({ where: { companyId }, include: { targets: { include: { department: true, issueType: true }, orderBy: { sortOrder: "asc" } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.user.findMany({ where: { memberships: { some: { companyId } } }, include: { memberships: { where: { companyId }, include: { scopes: true } } }, orderBy: { username: "asc" } }),
-      prisma.pagerDevice.findMany({ where: { companyId }, include: { department: true }, orderBy: { name: "asc" } })
+      prisma.pagerDevice.findMany({ where: { companyId }, include: { department: true }, orderBy: { name: "asc" } }),
+      getQuickLoginProfiles(companyId)
     ]);
     const scopedUsers = users.map((user) => ({
       ...user,
       active: user.active && Boolean(user.memberships[0]?.active)
     }));
-    return { success: true, data: { machineGroups, machines, departments, issueTypes, commandTemplates, users: scopedUsers, pagerDevices } };
+    return { success: true, data: { machineGroups, machines, departments, issueTypes, commandTemplates, users: scopedUsers, pagerDevices, quickLoginProfiles } };
+  });
+
+  app.put("/api/admin/quick-login", adminWriteOptions, async (request, reply) => {
+    const body = request.body as { profiles?: unknown };
+    if (!Array.isArray(body.profiles)) {
+      return reply.code(400).send({ success: false, error: "Quick login profiles must be an array." });
+    }
+    const profiles = normalizeQuickLoginProfiles(body.profiles);
+    if (profiles.length !== body.profiles.length) {
+      return reply.code(400).send({ success: false, error: "One or more quick login profiles are invalid." });
+    }
+    await setQuickLoginProfiles(request.session.companyId, profiles);
+    changed(request.session.companyId);
+    return { success: true, data: { availableProfiles: QUICK_LOGIN_PROFILES, enabledProfiles: profiles } };
   });
 
   app.get("/api/admin/status", { preHandler: app.requireAdmin }, async (request, reply) => {

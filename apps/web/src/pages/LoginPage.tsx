@@ -1,8 +1,13 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 export function LoginPage() {
   const { login, demoLogin } = useAuth();
+  const quickLogin = useQuery({ queryKey: ["quick-login"], queryFn: () => api<any>("/api/auth/quick-login") });
+  const enabledProfiles = new Set((quickLogin.data?.data?.enabledProfiles ?? []) as string[]);
+  const departmentProfiles = ["quality", "supervisor"].filter((profile) => enabledProfiles.has(profile));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [companies, setCompanies] = useState<any[]>([]);
@@ -25,6 +30,7 @@ export function LoginPage() {
   }
 
   async function demo(profile: string) {
+    if (!enabledProfiles.has(profile)) return;
     setBusy(true);
     setError("");
     if (["quality", "supervisor", "maintenance"].includes(profile)) setSelectedDepartment(profile);
@@ -58,26 +64,26 @@ export function LoginPage() {
             <span>Choose a view</span>
           </div>
           <div className="demo-grid">
-            <button className="demo-button operator" onClick={() => demo("operator")} disabled={busy}>
+            <button className="demo-button operator" onClick={() => demo("operator")} disabled={busy || !enabledProfiles.has("operator")}>
               <strong>Operator</strong>
-              <span>Call help</span>
+              <span>{enabledProfiles.has("operator") ? "Call help" : "Disabled"}</span>
             </button>
-            <button className={`demo-button department ${showDepartments ? "active" : ""}`} onClick={() => setShowDepartments((current) => !current)} disabled={busy}>
+            <button className={`demo-button department ${showDepartments ? "active" : ""}`} onClick={() => setShowDepartments((current) => !current)} disabled={busy || departmentProfiles.length === 0}>
               <strong>Department</strong>
-              <span>Queue view</span>
+              <span>{departmentProfiles.length ? "Queue view" : "Disabled"}</span>
             </button>
-            <button className="demo-button manager" onClick={() => demo("manager")} disabled={busy}>
+            <button className="demo-button manager" onClick={() => demo("manager")} disabled={busy || !enabledProfiles.has("manager")}>
               <strong>Manager</strong>
-              <span>Live floor</span>
+              <span>{enabledProfiles.has("manager") ? "Live floor" : "Disabled"}</span>
             </button>
-            <button className="demo-button admin" onClick={() => demo("admin")} disabled={busy}>
+            <button className="demo-button admin" disabled>
               <strong>Admin</strong>
-              <span>Setup</span>
+              <span>Sign in below</span>
             </button>
           </div>
           {showDepartments && (
             <div className="department-picker">
-              {["quality", "supervisor"].map((profile) => (
+              {departmentProfiles.map((profile) => (
                 <button key={profile} className={selectedDepartment === profile ? "selected" : ""} onClick={() => demo(profile)} disabled={busy}>{profile}</button>
               ))}
             </div>

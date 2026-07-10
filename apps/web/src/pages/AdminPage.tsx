@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, postJson, patchJson, deleteJson } from "../lib/api";
+import { api, postJson, patchJson, putJson, deleteJson } from "../lib/api";
 
 const priorities = ["LOW", "NORMAL", "HIGH", "CRITICAL"];
 const roles = ["ADMIN", "MANAGER", "OPERATOR", "RESPONDER", "VIEWER"];
+const quickLoginProfiles = [
+  { id: "operator", label: "Operator", detail: "Operator page" },
+  { id: "quality", label: "Quality", detail: "Department queue" },
+  { id: "supervisor", label: "Supervisor", detail: "Department queue" },
+  { id: "manager", label: "Manager", detail: "Live floor and reports" }
+];
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes)) return "-";
@@ -49,9 +55,10 @@ export function AdminPage() {
     <div className="page-stack admin-page">
       <header className="page-header"><div><h1>Admin Setup</h1><p>Configure machines, departments, issue buttons, command buttons, users, and M5 pagers.</p></div></header>
       <div className="tab-row">
-        {["status", "machines", "departments", "commands", "users", "communication", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
+        {["status", "settings", "machines", "departments", "commands", "users", "communication", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
       </div>
       {tab === "status" && <StatusAdmin />}
+      {tab === "settings" && <SettingsAdmin data={data} />}
       {tab === "machines" && <MachinesAdmin data={data} />}
       {tab === "departments" && <DepartmentsAdmin data={data} />}
       {tab === "commands" && <CommandsAdmin data={data} />}
@@ -59,6 +66,52 @@ export function AdminPage() {
       {tab === "communication" && <CommunicationChannelsAdmin />}
       {tab === "pagers" && <PagersAdmin data={data} />}
     </div>
+  );
+}
+
+function SettingsAdmin({ data }: any) {
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setSelected(new Set(data?.quickLoginProfiles ?? []));
+  }, [data?.quickLoginProfiles]);
+  const save = useMutation({
+    mutationFn: () => putJson("/api/admin/quick-login", { profiles: [...selected] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin"] });
+      queryClient.invalidateQueries({ queryKey: ["quick-login"] });
+    }
+  });
+  const toggle = (profile: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(profile)) next.delete(profile);
+      else next.add(profile);
+      return next;
+    });
+  };
+
+  return (
+    <section className="panel">
+      <div className="admin-panel-header">
+        <div>
+          <h2>Quick Login</h2>
+          <span>Admin always requires username and password.</span>
+        </div>
+        <button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving" : "Save"}</button>
+      </div>
+      <div className="quick-login-settings">
+        {quickLoginProfiles.map((profile) => (
+          <label key={profile.id} className="quick-login-setting">
+            <input type="checkbox" checked={selected.has(profile.id)} onChange={() => toggle(profile.id)} />
+            <span>
+              <strong>{profile.label}</strong>
+              <em>{profile.detail}</em>
+            </span>
+          </label>
+        ))}
+      </div>
+    </section>
   );
 }
 

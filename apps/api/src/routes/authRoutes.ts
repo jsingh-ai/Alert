@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { homeForRole, navForRole } from "../nav.js";
 import { signSession } from "../services/auth.js";
 import { departmentWhereForContext, machineWhereForContext } from "../services/permissions.js";
+import { getPublicQuickLoginProfiles, getQuickLoginProfiles, quickLoginUsernameByProfile, normalizeQuickLoginProfiles } from "../services/quickLoginService.js";
 
 function publicMembership(membership: any) {
   return {
@@ -88,31 +89,33 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ success: true, token, session: await sessionPayload(membership.id) });
   });
 
-  app.post("/api/auth/demo", authRateLimit, async (request, reply) => {
-    if (config.isProduction || !config.demoMode) {
-      return reply.code(403).send({ success: false, error: "Demo mode is disabled." });
-    }
+  app.get("/api/auth/quick-login", async () => {
+    return { success: true, data: { enabledProfiles: await getPublicQuickLoginProfiles() } };
+  });
 
+  app.post("/api/auth/demo", authRateLimit, async (request, reply) => {
     const body = request.body as { profile?: string; role?: string };
     const requested = (body.profile ?? body.role ?? "operator").toLowerCase();
-    const usernameByProfile: Record<string, string> = {
-      admin: "admin",
-      manager: "manager",
-      operator: "operator",
-      quality: "quality",
-      supervisor: "supervisor",
-      responder: "quality",
-      viewer: "viewer"
-    };
-    const username = usernameByProfile[requested] ?? "operator";
+    const [profile] = normalizeQuickLoginProfiles([requested]);
+    if (!profile) {
+      return reply.code(403).send({ success: false, error: "Quick login is not available for this profile." });
+    }
+    const username = quickLoginUsernameByProfile[profile];
 
     const user = await prisma.user.findUnique({
       where: { username },
       include: { memberships: { where: { active: true }, include: { company: true } } }
     });
-    const membership = user?.memberships.find((item) => item.company.active);
+    const activeMemberships = user?.memberships.filter((item) => item.company.active) ?? [];
+    let membership: (typeof activeMemberships)[number] | undefined;
+    for (const item of activeMemberships) {
+      if ((await getQuickLoginProfiles(item.companyId)).includes(profile)) {
+        membership = item;
+        break;
+      }
+    }
     if (!user?.active || !membership) {
-      return reply.code(404).send({ success: false, error: `Demo user ${username} not found. Run npm run db:seed.` });
+      return reply.code(403).send({ success: false, error: "Quick login is disabled for this profile." });
     }
 
     const token = signSession(app, membership);
