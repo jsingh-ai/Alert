@@ -21,13 +21,19 @@ export function RealtimeBridge() {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
       queryClient.invalidateQueries({ queryKey: ["channel-messages"] });
     };
+    const invalidateChannelMessage = (payload: { channelId?: string | null; alertId?: string | null }) => {
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+      if (payload.channelId) {
+        queryClient.invalidateQueries({ queryKey: ["channel-messages", payload.channelId] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["channel-messages"] });
+      }
+      if (payload.alertId) invalidateLive();
+    };
     socket.on("alert.changed", invalidateLive);
     socket.on("command.changed", invalidateLive);
     socket.on("admin.changed", invalidateAdmin);
-    socket.on("communication.message.created", () => {
-      invalidateChannels();
-      invalidateLive();
-    });
+    socket.on("communication.message.created", invalidateChannelMessage);
     socket.on("communication.membership.changed", invalidateChannels);
     return () => {
       socket.disconnect();

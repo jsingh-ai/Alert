@@ -146,8 +146,8 @@ export async function alertRoutes(app: FastifyInstance) {
     }
 
     try {
-      const result = await prisma.$transaction(async (tx) => {
-        const updated = await transitionAlert(tx, {
+      const updated = await prisma.$transaction(async (tx) => {
+        return transitionAlert(tx, {
           alertId,
           companyId: ctx.companyId,
           action,
@@ -156,12 +156,14 @@ export async function alertRoutes(app: FastifyInstance) {
           responderNameText: ctx.user.displayName,
           note: actionNote
         });
+      });
 
-        const notifications: Array<{ channelId: string; message: any }> = [];
-        if (action === "resolve") {
-          const commandLabel = alertCommandLabel(updated);
-          const message = `${commandLabel} alert resolved on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
-          notifications.push(...await createAlertSystemMessages(tx, {
+      const notifications: Array<{ channelId: string; message: any }> = [];
+      if (action === "resolve") {
+        const commandLabel = alertCommandLabel(updated);
+        const message = `${commandLabel} alert resolved on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
+        try {
+          notifications.push(...await prisma.$transaction((tx) => createAlertSystemMessages(tx, {
             companyId: ctx.companyId,
             userId: ctx.userId,
             machineId: updated.machineId,
@@ -169,14 +171,14 @@ export async function alertRoutes(app: FastifyInstance) {
             alertId: updated.id,
             body: message,
             clientMessageKey: "alert-resolved"
-          }));
+          })));
+        } catch (error) {
+          request.log.warn({ err: error, alertId: updated.id }, "alert resolved but communication system post failed");
         }
+      }
 
-        return { updated, notifications };
-      });
-      const updated = result.updated;
       emitCompany(ctx.companyId, "alert.changed", { alertId: updated.id, commandId: updated.commandId, action });
-      for (const notification of result.notifications) {
+      for (const notification of notifications) {
         emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message as any));
       }
       return { success: true, data: serializeAlert(updated as any) };

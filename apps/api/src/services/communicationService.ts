@@ -198,24 +198,50 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
   if (messageType === "TEXT" && !input.userId) {
     throw httpError("User is required for text messages.", 400);
   }
+  if (input.clientMessageId) {
+    const existing = await db.communicationMessage.findFirst({
+      where: {
+        companyId: input.companyId,
+        channelId: input.channelId,
+        userId: input.userId ?? null,
+        clientMessageId: input.clientMessageId
+      },
+      include: { user: { select: { id: true, username: true, displayName: true } } }
+    });
+    if (existing) return existing;
+  }
   const channel = await db.communicationChannel.update({
     where: { id: input.channelId, companyId: input.companyId },
     data: { lastMessageSeq: { increment: 1 } }
   });
-  const message = await db.communicationMessage.create({
-    data: {
-      companyId: input.companyId,
-      channelId: input.channelId,
-      seq: channel.lastMessageSeq,
-      userId: input.userId ?? null,
-      body: input.body,
-      messageType,
-      clientMessageId: input.clientMessageId ?? null,
-      alertId: input.alertId ?? null,
-      actorNameText: input.actorNameText ?? null
-    } as any,
-    include: { user: { select: { id: true, username: true, displayName: true } } }
-  });
+  let message: MessageWithUser;
+  try {
+    message = await db.communicationMessage.create({
+      data: {
+        companyId: input.companyId,
+        channelId: input.channelId,
+        seq: channel.lastMessageSeq,
+        userId: input.userId ?? null,
+        body: input.body,
+        messageType,
+        clientMessageId: input.clientMessageId ?? null,
+        alertId: input.alertId ?? null,
+        actorNameText: input.actorNameText ?? null
+      } as any,
+      include: { user: { select: { id: true, username: true, displayName: true } } }
+    });
+  } catch (error) {
+    if (!input.clientMessageId || !isUniqueConflict(error)) throw error;
+    message = await db.communicationMessage.findFirstOrThrow({
+      where: {
+        companyId: input.companyId,
+        channelId: input.channelId,
+        userId: input.userId ?? null,
+        clientMessageId: input.clientMessageId
+      },
+      include: { user: { select: { id: true, username: true, displayName: true } } }
+    });
+  }
 
   if (input.userId) {
     await db.communicationChannelMember.updateMany({
@@ -386,6 +412,9 @@ export async function replaceUserChannelMemberships(companyId: string, userId: s
     where: { companyId, id: { in: requestedChannelIds }, archivedAt: null },
     select: { id: true }
   });
+  if (channels.length !== requestedChannelIds.length) {
+    throw httpError("One or more selected channels are invalid.", 400);
+  }
   const allowedChannelIds = new Set(channels.map((channel) => channel.id));
   const validMemberships = memberships.filter((membership) => allowedChannelIds.has(membership.channelId) && membership.canRead !== false);
   const validChannelIds = validMemberships.map((membership) => membership.channelId);

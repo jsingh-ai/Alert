@@ -6,6 +6,28 @@ import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { NavItem } from "../lib/types";
 
+const MIN_SIDEBAR_WIDTH = 210;
+const MAX_SIDEBAR_WIDTH = 420;
+const DEFAULT_SIDEBAR_WIDTH = 260;
+
+function clampSidebarWidth(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_SIDEBAR_WIDTH;
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, value));
+}
+
+function readSidebarWidth() {
+  return clampSidebarWidth(Number(localStorage.getItem("pg_sidebar_width") ?? DEFAULT_SIDEBAR_WIDTH));
+}
+
+function readSidebarOrder() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("pg_sidebar_order") || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function orderedNav(items: NavItem[], order: string[]) {
   const byId = new Map(items.map((item) => [item.id, item]));
   const ordered = order.map((id) => byId.get(id)).filter(Boolean) as NavItem[];
@@ -87,9 +109,9 @@ function navIconContent(item: NavItem): ReactNode {
 export function AppLayout({ children }: { children: ReactNode }) {
   const { session, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("pg_sidebar_collapsed") === "true");
-  const [width, setWidth] = useState(() => Number(localStorage.getItem("pg_sidebar_width") ?? 260));
+  const [width, setWidth] = useState(readSidebarWidth);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [order, setOrder] = useState<string[]>(() => JSON.parse(localStorage.getItem("pg_sidebar_order") || "[]"));
+  const [order, setOrder] = useState<string[]>(readSidebarOrder);
   const nav = useMemo(() => orderedNav(session?.nav ?? [], order), [session?.nav, order]);
   const communicationItem = nav.find((item) => item.id === "channels");
   const mainNav = nav.filter((item) => item.id !== "channels");
@@ -114,7 +136,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const startResize = (event: ReactMouseEvent) => {
     const startX = event.clientX;
     const startWidth = width;
-    const onMove = (move: globalThis.MouseEvent) => setWidth(Math.min(420, Math.max(210, startWidth + move.clientX - startX)));
+    const onMove = (move: globalThis.MouseEvent) => setWidth(clampSidebarWidth(startWidth + move.clientX - startX));
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);

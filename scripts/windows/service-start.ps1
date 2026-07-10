@@ -20,16 +20,14 @@ Set-Location $Root
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 
 $env:NODE_ENV = $null
-$env:npm_config_production = "false"
 
 Write-Host "[$(Get-Date -Format o)] Service startup begin"
 
-Invoke-Checked -Command "git" -Arguments @("pull", "origin", "main")
+if (-not (Test-Path (Join-Path $Root "apps\api\dist\index.js"))) {
+  throw "Built API was not found. Run scripts\windows\deploy-update.ps1 before starting the service."
+}
 
-Invoke-Checked -Command "npm" -Arguments @("run", "install:fresh")
-Invoke-Checked -Command "npm" -Arguments @("run", "build")
-
-Write-Host "[$(Get-Date -Format o)] Build complete; starting API"
+Write-Host "[$(Get-Date -Format o)] Starting API"
 
 $env:NODE_ENV = "production"
 Invoke-Checked -Command "node" -Arguments @("apps/api/dist/index.js")

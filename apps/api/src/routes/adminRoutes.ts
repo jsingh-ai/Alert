@@ -530,9 +530,29 @@ export async function adminRoutes(app: FastifyInstance) {
     const params = request.params as { userId: string };
     const companyId = request.session.companyId;
     const body = request.body as { departmentIds?: unknown; machineGroupIds?: unknown; machineIds?: unknown };
-    const departmentIds = Array.isArray(body.departmentIds) ? body.departmentIds.map(cleanString).filter(Boolean) : [];
-    const machineGroupIds = Array.isArray(body.machineGroupIds) ? body.machineGroupIds.map(cleanString).filter(Boolean) : [];
-    const machineIds = Array.isArray(body.machineIds) ? body.machineIds.map(cleanString).filter(Boolean) : [];
+    if (!Array.isArray(body.departmentIds) || !Array.isArray(body.machineGroupIds) || !Array.isArray(body.machineIds)) {
+      return reply.code(400).send({ success: false, error: "Scope selections must be arrays." });
+    }
+    const normalizeScopeIds = (values: unknown[], label: string) => {
+      const ids: string[] = [];
+      for (const value of values) {
+        const id = cleanString(value);
+        if (!id) {
+          return { ids: [], error: `${label} contains an invalid id.` };
+        }
+        ids.push(id);
+      }
+      return { ids, error: null };
+    };
+    const departmentScope = normalizeScopeIds(body.departmentIds, "Department access");
+    const machineGroupScope = normalizeScopeIds(body.machineGroupIds, "Machine group access");
+    const machineScope = normalizeScopeIds(body.machineIds, "Machine access");
+    if (departmentScope.error || machineGroupScope.error || machineScope.error) {
+      return reply.code(400).send({ success: false, error: departmentScope.error ?? machineGroupScope.error ?? machineScope.error });
+    }
+    const departmentIds = departmentScope.ids;
+    const machineGroupIds = machineGroupScope.ids;
+    const machineIds = machineScope.ids;
     if (departmentIds.length !== new Set(departmentIds).size || machineGroupIds.length !== new Set(machineGroupIds).size || machineIds.length !== new Set(machineIds).size) {
       return reply.code(400).send({ success: false, error: "Duplicate scopes are not allowed." });
     }

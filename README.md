@@ -240,8 +240,12 @@ npm run db:seed
 
 - Demo users listed above.
 - Press and Packaging machine groups.
+- Quality and Supervisor departments.
+- Call Quality, Call Supervisor, and Material Clear quick commands.
+- Demo pager tokens.
+- A PostgreSQL partial unique index that prevents duplicate active alerts for the same machine and department.
 
-If this is an existing database that was already created with `npm run db:push`, baseline the initial migration once after confirming the current schema is already in place:
+If this is an existing database that was already created with `npm run db:push`, do not blindly baseline migrations. First back up the database, confirm the live schema already matches the initial migration, then baseline the initial migration once:
 
 ```powershell
 npx prisma migrate resolve --applied 20260710120000_init --schema prisma/schema.prisma
@@ -249,10 +253,6 @@ npm run db:migrate
 ```
 
 For a brand-new database, do not run `migrate resolve`; just run `npm run db:migrate`.
-- Quality and Supervisor departments.
-- Call Quality, Call Supervisor, and Material Clear quick commands.
-- Demo pager tokens.
-- A PostgreSQL partial unique index that prevents duplicate active alerts for the same machine and department.
 
 ### 7. Build and start
 
@@ -285,14 +285,7 @@ New-NetFirewallRule -DisplayName "ProcessGuard Andon 5003" -Direction Inbound -P
 
 For the Windows VM, the easiest production option is the included NSSM service installer. It creates a real Windows service named `ProcessGuardAndon`.
 
-On every service start or restart it will:
-
-- Pull latest code from GitHub.
-- Install dependencies.
-- Build the web and API.
-- Start the API server.
-
-It does not run database schema commands on every restart. Run those manually only when a release changes `prisma/schema.prisma`.
+The service start script only starts the already-built API. It does not pull code, install dependencies, run migrations, or build on every restart. Deploy updates intentionally with `scripts\windows\deploy-update.ps1`, then restart the service.
 
 Install and start the service from **Administrator PowerShell**:
 
@@ -304,6 +297,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-service.ps1
 Restart after pushing new code:
 
 ```powershell
+Stop-Service ProcessGuardAndon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy-update.ps1
 Restart-Service ProcessGuardAndon
 ```
 
@@ -366,21 +361,15 @@ If you installed the Windows service:
 
 ```powershell
 cd C:\Users\jsingh\Desktop\Alert
+Stop-Service ProcessGuardAndon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy-update.ps1
 Restart-Service ProcessGuardAndon
 ```
 
-The service restart pulls, builds, and starts the newest code.
-
-If the update includes a database schema change, run the database commands manually before restarting:
+If you need to test a build without applying migrations, pass `-SkipMigrate` and run migrations intentionally before releasing schema-dependent code:
 
 ```powershell
-cd C:\Users\jsingh\Desktop\Alert
-Stop-Service ProcessGuardAndon
-git pull origin main
-npm run install:fresh
-npm run db:generate
-npm run db:migrate
-Restart-Service ProcessGuardAndon
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy-update.ps1 -SkipMigrate
 ```
 
 If you installed the scheduled task:

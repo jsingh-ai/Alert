@@ -27,6 +27,10 @@ function changed(companyId: string) {
   emitCompany(companyId, "admin.changed", { at: new Date().toISOString() });
 }
 
+function isChannelMemberRole(value: unknown): value is "MEMBER" | "MODERATOR" | "OWNER" {
+  return value === undefined || value === "MEMBER" || value === "MODERATOR" || value === "OWNER";
+}
+
 export async function communicationRoutes(app: FastifyInstance) {
   const messageRateLimit = { config: { rateLimit: { max: config.rateLimit.messageMax, timeWindow: config.rateLimit.timeWindow } } };
   const adminWriteRateLimit = { config: { rateLimit: { max: config.rateLimit.adminWriteMax, timeWindow: config.rateLimit.timeWindow } } };
@@ -206,7 +210,35 @@ export async function communicationRoutes(app: FastifyInstance) {
     const { companyId } = request.session;
     const params = request.params as { userId: string };
     const body = request.body as { memberships?: Array<{ channelId: string; role?: "MEMBER" | "MODERATOR" | "OWNER"; canRead?: boolean; canWrite?: boolean; muted?: boolean }> };
-    const memberships = await replaceUserChannelMemberships(companyId, params.userId, body.memberships ?? []);
+    if (!Array.isArray(body.memberships)) {
+      return reply.code(400).send({ success: false, error: "Memberships must be an array." });
+    }
+    const requestedMemberships: Array<{ channelId: string; role?: "MEMBER" | "MODERATOR" | "OWNER"; canRead?: boolean; canWrite?: boolean; muted?: boolean }> = [];
+    for (const membership of body.memberships) {
+      if (!membership || typeof membership !== "object" || !cleanString(membership.channelId)) {
+        return reply.code(400).send({ success: false, error: "Each membership requires a channel id." });
+      }
+      if (!isChannelMemberRole(membership.role)) {
+        return reply.code(400).send({ success: false, error: "Invalid channel member role." });
+      }
+      if (membership.canRead !== undefined && typeof membership.canRead !== "boolean") {
+        return reply.code(400).send({ success: false, error: "Invalid channel read permission." });
+      }
+      if (membership.canWrite !== undefined && typeof membership.canWrite !== "boolean") {
+        return reply.code(400).send({ success: false, error: "Invalid channel write permission." });
+      }
+      if (membership.muted !== undefined && typeof membership.muted !== "boolean") {
+        return reply.code(400).send({ success: false, error: "Invalid channel muted value." });
+      }
+      requestedMemberships.push({
+        channelId: cleanString(membership.channelId),
+        role: membership.role,
+        canRead: membership.canRead,
+        canWrite: membership.canWrite,
+        muted: membership.muted
+      });
+    }
+    const memberships = await replaceUserChannelMemberships(companyId, params.userId, requestedMemberships);
     if (!memberships) return reply.code(404).send({ success: false, error: "User not found." });
     await refreshUserChannelRooms(companyId, params.userId);
     emitUser(companyId, params.userId, "communication.membership.changed", { userId: params.userId, at: new Date().toISOString() });
