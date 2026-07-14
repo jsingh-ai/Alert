@@ -4,14 +4,15 @@ import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { classNames, dateInputValue, formatElapsed } from "../lib/format";
 
-type ReportLens = { type: "department" | "machineGroup" | "machine" | "issue" | "hour" | "day"; id: string; label: string } | null;
-type ReportMode = "overview" | "departments" | "machines" | "table";
+type ReportLens = { type: "department" | "machineGroup" | "machine" | "issue" | "hour" | "day" | "responder"; id: string; label: string } | null;
+type ReportMode = "overview" | "departments" | "machines" | "responders" | "table";
 
 type ReportRow = {
   id: string;
   commandLabel: string;
   machine: { id: string; name: string; code: string; groupId: string; groupName: string };
   department: { id: string; name: string };
+  responder?: { id: string; name: string } | null;
   issueType?: { id: string; name: string } | null;
   status: string;
   priority: string;
@@ -57,19 +58,21 @@ function csvValue(value: unknown) {
 }
 
 function exportCsv(rows: ReportRow[]) {
-  const headers = ["Created", "Machine Group", "Machine", "Code", "Department", "Command", "Issue", "Status", "Priority", "Ack Time", "Clear Time", "Resolved", "Message"];
+  const headers = ["Created", "Machine Group", "Machine", "Code", "Department", "Responder", "Command", "Issue", "Status", "Priority", "Ack Time", "Clear Time", "Resolve Time", "Resolved", "Message"];
   const lines = rows.map((row) => [
     row.createdAt,
     row.machine.groupName,
     row.machine.name,
     row.machine.code,
     row.department.name,
+    row.responder?.name ?? "",
     row.commandLabel,
     row.issueType?.name ?? "General help",
     row.status,
     row.priority,
     duration(row.acknowledgeSeconds),
     duration(row.clearSeconds),
+    duration(row.resolveSeconds),
     row.resolvedAt ?? "",
     row.displayMessage ?? row.operatorNote ?? ""
   ].map(csvValue).join(","));
@@ -128,13 +131,14 @@ function TrendCard({ title, subtitle, items, valueFor, formatValue, activeLens, 
   );
 }
 
-function BreakdownCard({ title, label, items, lensType, activeLens, onSelect }: {
+function BreakdownCard({ title, label, items, lensType, activeLens, onSelect, timeMetric = "clear" }: {
   title: string;
   label: string;
   items: any[];
   lensType: NonNullable<ReportLens>["type"];
   activeLens: ReportLens;
   onSelect: (lens: ReportLens) => void;
+  timeMetric?: "clear" | "resolve";
 }) {
   const max = Math.max(1, ...items.map((item) => item.count ?? 0));
   return (
@@ -154,7 +158,7 @@ function BreakdownCard({ title, label, items, lensType, activeLens, onSelect }: 
             <button key={id} className={classNames("report-breakdown-row", selected && "selected")} onClick={() => onSelect(selected ? null : { type: lensType, id, label: item.name ?? item.hour })}>
               <div>
                 <strong>{item.name ?? item.hour}</strong>
-                <span>Avg ack {shortDuration(item.averageAcknowledgeSeconds)} / clear {shortDuration(item.averageClearSeconds)}</span>
+                <span>Avg ack {shortDuration(item.averageAcknowledgeSeconds)} / {timeMetric} {shortDuration(timeMetric === "resolve" ? item.averageResolveSeconds : item.averageClearSeconds)}</span>
               </div>
               <em>{item.count}</em>
               <i style={{ width: `${Math.max(6, ((item.count ?? 0) / max) * 100)}%` }} />
@@ -184,10 +188,12 @@ function ReportTable({ rows }: { rows: ReportRow[] }) {
               <th>Machine</th>
               <th>Group</th>
               <th>Department</th>
+              <th>Responder</th>
               <th>Command</th>
               <th>Status</th>
               <th>Ack</th>
               <th>Clear</th>
+              <th>Resolve</th>
             </tr>
           </thead>
           <tbody>
@@ -197,15 +203,17 @@ function ReportTable({ rows }: { rows: ReportRow[] }) {
                 <td><strong>{row.machine.name}</strong><span>{row.machine.code}</span></td>
                 <td>{row.machine.groupName}</td>
                 <td>{row.department.name}</td>
+                <td>{row.responder?.name ?? "-"}</td>
                 <td><strong>{row.commandLabel}</strong><span>{row.displayMessage ?? row.operatorNote ?? ""}</span></td>
                 <td><em className={`report-status ${row.status.toLowerCase()}`}>{row.status}</em></td>
                 <td>{duration(row.acknowledgeSeconds)}</td>
                 <td>{duration(row.clearSeconds)}</td>
+                <td>{duration(row.resolveSeconds)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8}><div className="empty-state small">No alert rows match the current filters.</div></td>
+                <td colSpan={10}><div className="empty-state small">No alert rows match the current filters.</div></td>
               </tr>
             )}
           </tbody>
@@ -223,6 +231,7 @@ function machineMatchesLens(row: ReportRow, lens: ReportLens) {
   if (lens.type === "issue") return (row.issueType?.id ?? "general-help") === lens.id;
   if (lens.type === "hour") return row.hourKey === lens.id;
   if (lens.type === "day") return row.dayKey === lens.id;
+  if (lens.type === "responder") return row.responder?.id === lens.id;
   return true;
 }
 
@@ -233,6 +242,7 @@ export function ReportsPage() {
   const [departmentId, setDepartmentId] = useState("");
   const [machineGroupId, setMachineGroupId] = useState("");
   const [machineId, setMachineId] = useState("");
+  const [responderId, setResponderId] = useState("");
   const [mode, setMode] = useState<ReportMode>("overview");
   const [lens, setLens] = useState<ReportLens>(null);
 
@@ -247,9 +257,10 @@ export function ReportsPage() {
   if (departmentId) params.set("departmentId", departmentId);
   if (machineGroupId) params.set("machineGroupId", machineGroupId);
   if (machineId) params.set("machineId", machineId);
+  if (responderId) params.set("responderId", responderId);
 
   const reports = useQuery({
-    queryKey: ["reports", start, end, departmentId, machineGroupId, machineId],
+    queryKey: ["reports", start, end, departmentId, machineGroupId, machineId, responderId],
     queryFn: () => api<any>(`/api/reports/summary?${params.toString()}`)
   });
   const data = reports.data?.data;
@@ -260,6 +271,7 @@ export function ReportsPage() {
 
   const selectedMachineGroupName = machineGroupId ? machineGroups.find((group: any) => group.id === machineGroupId)?.name : "All groups";
   const selectedMachineName = machineId ? machines.find((machine: any) => machine.id === machineId)?.name : "All machines";
+  const responders = data?.byResponder ?? [];
 
   return (
     <div className="page-stack reports-page">
@@ -305,6 +317,13 @@ export function ReportsPage() {
             {machines.map((machine: any) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
           </select>
         </div>
+        <div className="report-filter-box">
+          <span>Responder</span>
+          <select value={responderId} onChange={(event) => { setResponderId(event.target.value); setLens(null); }}>
+            <option value="">All responders</option>
+            {responders.map((responder: any) => <option key={responder.id} value={responder.id}>{responder.name}</option>)}
+          </select>
+        </div>
       </section>
 
       <section className="reports-mode-row">
@@ -313,6 +332,7 @@ export function ReportsPage() {
             ["overview", "Overview"],
             ["departments", "Departments"],
             ["machines", "Machines"],
+            ["responders", "Responders"],
             ["table", "Data Table"]
           ].map(([id, label]) => (
             <button key={id} className={mode === id ? "active" : ""} onClick={() => setMode(id as ReportMode)}>{label}</button>
@@ -365,6 +385,12 @@ export function ReportsPage() {
         <section className="reports-breakdown-grid expanded">
           <BreakdownCard title="Machine Groups" label="Group-Level Trend" items={data?.byMachineGroup ?? []} lensType="machineGroup" activeLens={lens} onSelect={setLens} />
           <BreakdownCard title="Machines" label="Machine-Level Detail" items={data?.byMachine ?? []} lensType="machine" activeLens={lens} onSelect={setLens} />
+        </section>
+      )}
+
+      {mode === "responders" && (
+        <section className="reports-breakdown-grid expanded">
+          <BreakdownCard title="Responder Performance" label="Acknowledged alerts and end-to-end close time" items={responders} lensType="responder" activeLens={lens} onSelect={setLens} timeMetric="resolve" />
         </section>
       )}
 

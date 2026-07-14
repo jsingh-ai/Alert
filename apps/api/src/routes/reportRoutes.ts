@@ -45,7 +45,7 @@ function parseReportBoundary(value: unknown, fallback: Date, timeZone: string, b
 export async function reportRoutes(app: FastifyInstance) {
   app.get("/api/reports/summary", { preHandler: app.authenticate }, async (request, reply) => {
     const ctx = request.membershipContext!;
-    const query = request.query as { start?: string; end?: string; departmentId?: string; machineGroupId?: string; machineId?: string };
+    const query = request.query as { start?: string; end?: string; departmentId?: string; machineGroupId?: string; machineId?: string; responderId?: string };
     const timeZone = config.reportTimeZone;
     const end = parseReportBoundary(query.end, new Date(), timeZone, "end");
     const start = parseReportBoundary(query.start, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), timeZone, "start");
@@ -67,8 +67,20 @@ export async function reportRoutes(app: FastifyInstance) {
     };
 
     const alerts = await prisma.andonAlert.findMany({
-      where: { companyId: ctx.companyId, createdAt: { gte: start, lte: end }, machine: machineWhere, department: departmentWhere },
-      include: { machine: { include: { machineGroup: true } }, department: true, issueType: true, command: true },
+      where: {
+        companyId: ctx.companyId,
+        createdAt: { gte: start, lte: end },
+        machine: machineWhere,
+        department: departmentWhere,
+        ...(query.responderId ? { acknowledgedByUserId: query.responderId } : {})
+      },
+      include: {
+        machine: { include: { machineGroup: true } },
+        department: true,
+        issueType: true,
+        command: true,
+        acknowledgedByUser: { select: { id: true, displayName: true, username: true } }
+      },
       orderBy: { createdAt: "desc" },
       take: MAX_REPORT_ALERTS_LOADED + 1
     });
@@ -80,12 +92,14 @@ export async function reportRoutes(app: FastifyInstance) {
     const byMachine = new Map<string, { id: string; name: string; code: string; groupId: string; groupName: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
     const byMachineGroup = new Map<string, { id: string; name: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
     const byIssue = new Map<string, { id: string | null; name: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
+    const byResponder = new Map<string, { id: string; name: string; count: number; resolvedCount: number; acknowledgeSeconds: Array<number | null>; resolveSeconds: Array<number | null> }>();
     const byHour = new Map<string, number>();
     const byDay = new Map<string, { count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
 
     for (const alert of alerts) {
       const acknowledgeSeconds = secondsBetween(alert.createdAt, alert.acknowledgedAt);
       const clearSeconds = secondsBetween(alert.arrivedAt ?? alert.acknowledgedAt, alert.resolvedAt);
+      const resolveSeconds = secondsBetween(alert.createdAt, alert.resolvedAt);
       const departmentStats = byDepartment.get(alert.department.id) ?? { id: alert.department.id, name: alert.department.name, count: 0, acknowledgeSeconds: [], clearSeconds: [] };
       departmentStats.count += 1;
       departmentStats.acknowledgeSeconds.push(acknowledgeSeconds);
@@ -119,6 +133,22 @@ export async function reportRoutes(app: FastifyInstance) {
       issueStats.acknowledgeSeconds.push(acknowledgeSeconds);
       issueStats.clearSeconds.push(clearSeconds);
       byIssue.set(issueKey, issueStats);
+
+      if (alert.acknowledgedByUser) {
+        const responder = byResponder.get(alert.acknowledgedByUser.id) ?? {
+          id: alert.acknowledgedByUser.id,
+          name: alert.acknowledgedByUser.displayName || alert.acknowledgedByUser.username,
+          count: 0,
+          resolvedCount: 0,
+          acknowledgeSeconds: [],
+          resolveSeconds: []
+        };
+        responder.count += 1;
+        if (alert.resolvedAt) responder.resolvedCount += 1;
+        responder.acknowledgeSeconds.push(acknowledgeSeconds);
+        responder.resolveSeconds.push(resolveSeconds);
+        byResponder.set(alert.acknowledgedByUser.id, responder);
+      }
       const hour = hourKeyInTimeZone(alert.createdAt, timeZone);
       byHour.set(hour, (byHour.get(hour) ?? 0) + 1);
       const day = dayKeyInTimeZone(alert.createdAt, timeZone);
@@ -146,6 +176,7 @@ export async function reportRoutes(app: FastifyInstance) {
         byMachine: Array.from(byMachine.values(), (stats) => ({ ...stats, averageAcknowledgeSeconds: avg(stats.acknowledgeSeconds), averageClearSeconds: avg(stats.clearSeconds), acknowledgeSeconds: undefined, clearSeconds: undefined })).sort((a, b) => b.count - a.count),
         byMachineGroup: Array.from(byMachineGroup.values(), (stats) => ({ ...stats, averageAcknowledgeSeconds: avg(stats.acknowledgeSeconds), averageClearSeconds: avg(stats.clearSeconds), acknowledgeSeconds: undefined, clearSeconds: undefined })).sort((a, b) => b.count - a.count),
         byIssue: Array.from(byIssue.values(), (stats) => ({ ...stats, averageAcknowledgeSeconds: avg(stats.acknowledgeSeconds), averageClearSeconds: avg(stats.clearSeconds), acknowledgeSeconds: undefined, clearSeconds: undefined })).sort((a, b) => b.count - a.count),
+        byResponder: Array.from(byResponder.values(), (stats) => ({ ...stats, averageAcknowledgeSeconds: avg(stats.acknowledgeSeconds), averageResolveSeconds: avg(stats.resolveSeconds), acknowledgeSeconds: undefined, resolveSeconds: undefined })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
         byHour: Array.from(byHour, ([hour, count]) => ({ hour, count })).sort((a, b) => a.hour.localeCompare(b.hour)),
         byDay: Array.from(byDay, ([day, stats]) => ({
           day,
@@ -165,6 +196,7 @@ export async function reportRoutes(app: FastifyInstance) {
             groupName: alert.machine.machineGroup.name
           },
           department: { id: alert.department.id, name: alert.department.name },
+          responder: alert.acknowledgedByUser ? { id: alert.acknowledgedByUser.id, name: alert.acknowledgedByUser.displayName || alert.acknowledgedByUser.username } : null,
           issueType: alert.issueType ? { id: alert.issueType.id, name: alert.issueType.name } : null,
           status: alert.status,
           priority: alert.priority,

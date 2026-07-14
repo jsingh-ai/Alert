@@ -1265,7 +1265,7 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .reports-hero-summary strong { color: white; font-size: 1.05rem; line-height: 1; }
 .reports-control-panel {
   display: grid;
-  grid-template-columns: minmax(260px, 1.2fr) repeat(3, minmax(150px, 0.8fr));
+  grid-template-columns: minmax(260px, 1.2fr) repeat(4, minmax(150px, 0.8fr));
   gap: 0.58rem;
   padding: 0.6rem;
   border: 1px solid #dbe3ee;
@@ -1807,7 +1807,7 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
   .reports-hero-summary div { min-width: 58px; padding: 0.32rem 0.38rem; border-radius: 9px; }
   .reports-hero-summary span { font-size: 0.54rem; }
   .reports-hero-summary strong { font-size: 0.82rem; }
-  .reports-control-panel { grid-template-columns: minmax(210px, 1.2fr) repeat(3, minmax(116px, 0.8fr)); gap: 0.42rem; padding: 0.42rem; border-radius: 13px; }
+  .reports-control-panel { grid-template-columns: minmax(210px, 1.2fr) repeat(4, minmax(116px, 0.8fr)); gap: 0.42rem; padding: 0.42rem; border-radius: 13px; }
   .report-filter-box { gap: 0.32rem; padding: 0.48rem 0.42rem 0.42rem; border-radius: 10px; }
   .report-filter-box:before { height: 3px; }
   .report-filter-box > span { font-size: 0.54rem; }
