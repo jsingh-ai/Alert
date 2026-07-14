@@ -50,7 +50,7 @@ function typeLabel(type: string) {
 }
 
 function timeLabel(value: string) {
-  return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return new Date(value).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function sizeLabel(value: number) {
@@ -124,6 +124,8 @@ export function ChannelsPage() {
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [pendingMessages, setPendingMessages] = useState<Record<string, ChannelMessage[]>>({});
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const messageScrollRef = useRef<HTMLDivElement>(null);
+  const initialScrollChannelIdRef = useRef<string | null>(null);
 
   const channelsQuery = useQuery({
     queryKey: ["channels"],
@@ -150,6 +152,20 @@ export function ChannelsPage() {
     const seenClientIds = new Set(serverMessages.map((item) => item.clientMessageId).filter(Boolean));
     return [...serverMessages, ...pending.filter((item) => !seenClientIds.has(item.clientMessageId))].sort((a, b) => a.seq - b.seq);
   }, [messagesQuery.data, pendingMessages, activeChannel?.id]);
+
+  useEffect(() => {
+    initialScrollChannelIdRef.current = null;
+  }, [activeChannel?.id]);
+
+  useEffect(() => {
+    if (!activeChannel?.id || !messagesQuery.isSuccess || !messages.length || initialScrollChannelIdRef.current === activeChannel.id) return;
+    const frame = requestAnimationFrame(() => {
+      const container = messageScrollRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+      initialScrollChannelIdRef.current = activeChannel.id;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeChannel?.id, messages.length, messagesQuery.isSuccess]);
 
   useEffect(() => {
     if (!activeChannel?.id || !messages.length) return;
@@ -260,23 +276,25 @@ export function ChannelsPage() {
                 <h2>{activeChannel.name}</h2>
               </div>
             </header>
-            <div className="channel-message-scroll">
-              {messagesQuery.hasNextPage && <button className="channel-load-more" onClick={() => messagesQuery.fetchNextPage()} disabled={messagesQuery.isFetchingNextPage}>Load older</button>}
-              {messages.map((item) => {
-                const mine = Boolean(item.user?.id && item.user.id === session?.user.id);
-                const actorName = item.user?.displayName ?? item.actorNameText ?? "System";
-                return (
-                  <article key={`${item.id}-${item.clientMessageId ?? item.seq}`} className={classNames("channel-message", mine && "mine", item.pending && "pending")}>
-                    <div>
-                      <strong>{actorName}</strong>
-                      <span>{item.pending ? "sending..." : timeLabel(item.createdAt)}</span>
-                    </div>
-                    {item.body && <p>{item.body}</p>}
-                    {item.attachments?.length ? <div className="channel-message-attachments">{item.attachments.map((attachment) => <MessageAttachment key={attachment.id} attachment={attachment} pending={item.pending} />)}</div> : null}
-                  </article>
-                );
-              })}
-              {!messages.length && <div className="empty-state small">No messages yet.</div>}
+            <div ref={messageScrollRef} className="channel-message-scroll">
+              <div className="channel-message-list">
+                {messagesQuery.hasNextPage && <button className="channel-load-more" onClick={() => messagesQuery.fetchNextPage()} disabled={messagesQuery.isFetchingNextPage}>Load older</button>}
+                {messages.map((item) => {
+                  const mine = Boolean(item.user?.id && item.user.id === session?.user.id);
+                  const actorName = item.user?.displayName ?? item.actorNameText ?? "System";
+                  return (
+                    <article key={`${item.id}-${item.clientMessageId ?? item.seq}`} className={classNames("channel-message", mine && "mine", item.pending && "pending")}>
+                      <div>
+                        <strong>{actorName}</strong>
+                        <span>{item.pending ? "sending..." : timeLabel(item.createdAt)}</span>
+                      </div>
+                      {item.body && <p>{item.body}</p>}
+                      {item.attachments?.length ? <div className="channel-message-attachments">{item.attachments.map((attachment) => <MessageAttachment key={attachment.id} attachment={attachment} pending={item.pending} />)}</div> : null}
+                    </article>
+                  );
+                })}
+                {!messages.length && <div className="empty-state small">No messages yet.</div>}
+              </div>
             </div>
             <footer className="channel-composer">
               <input ref={attachmentInputRef} className="channel-attachment-input" type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
