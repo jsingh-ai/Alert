@@ -30,6 +30,9 @@ function isAllowedOrigin(origin: string) {
 
 app.setErrorHandler((error, request, reply) => {
   const message = error instanceof Error ? error.message : "";
+  if ((error as any).code === "P2002") {
+    return reply.code(409).send({ success: false, error: "An item with that value already exists." });
+  }
   if (message.includes("the URL must start with the protocol `file:`")) {
     return reply.code(500).send({
       success: false,

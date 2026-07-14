@@ -1506,6 +1506,7 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .field-label { display: grid; gap: 0.3rem; }
 .field-label > span { color: #475569; font-size: 0.72rem; font-weight: 950; text-transform: uppercase; letter-spacing: 0.05em; }
 .form-note { margin: 0; color: #64748b; font-size: 0.78rem; font-weight: 800; line-height: 1.35; }
+.form-error { margin: 0; color: #b91c1c; font-size: 0.82rem; font-weight: 800; line-height: 1.35; }
 .scope-access-grid { display: grid; gap: 0.8rem; }
 .scope-section { display: grid; gap: 0.45rem; }
 .scope-section h3 { margin: 0; color: #334155; font-size: 0.86rem; font-weight: 950; }

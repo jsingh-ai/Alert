@@ -46,11 +46,15 @@ export async function operatorRoutes(app: FastifyInstance) {
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
     });
     const issueTypes = await prisma.issueType.findMany({
-      where: { companyId: ctx.companyId, active: true },
+      where: { companyId: ctx.companyId, active: true, department: { active: true } },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
     });
     const commandTemplates = await prisma.commandTemplate.findMany({
-      where: { companyId: ctx.companyId, active: true },
+      where: {
+        companyId: ctx.companyId,
+        active: true,
+        targets: { some: {}, every: { department: { active: true }, issueType: { active: true } } }
+      },
       include: { targets: { include: { department: true, issueType: true }, orderBy: { sortOrder: "asc" } } },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
     });

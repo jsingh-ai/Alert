@@ -150,7 +150,7 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.communicationMessage.count({ where: { companyId } }),
       prisma.pagerDevice.findMany({
         where: { companyId },
-        select: { id: true, name: true, active: true, lastSeenAt: true, department: { select: { name: true } } },
+        select: { id: true, name: true, active: true, lastSeenAt: true, department: { select: { name: true, active: true } } },
         orderBy: { name: "asc" }
       })
     ]);
@@ -194,7 +194,7 @@ export async function adminRoutes(app: FastifyInstance) {
           departmentName: pager.department.name,
           active: pager.active,
           lastSeenAt: pager.lastSeenAt,
-          status: pager.active ? pagerStatus(pager.lastSeenAt) : "disabled"
+          status: pager.active && pager.department.active ? pagerStatus(pager.lastSeenAt) : "disabled"
         }))
       }
     };
@@ -237,7 +237,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const sortOrder = optionalSortOrder(body.sortOrder, 0);
     if (!name || !code || !body.machineGroupId) return reply.code(400).send({ success: false, error: "Name, code, and machine group are required." });
     if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
-    const group = await prisma.machineGroup.findFirst({ where: { id: body.machineGroupId, companyId: request.session.companyId }, select: { id: true } });
+    const group = await prisma.machineGroup.findFirst({ where: { id: body.machineGroupId, companyId: request.session.companyId, active: true }, select: { id: true } });
     if (!group) return reply.code(400).send({ success: false, error: "Machine group is not valid for this company." });
     const item = await prisma.machine.create({ data: { companyId: request.session.companyId, name, code, machineGroupId: body.machineGroupId, sortOrder } });
     changed(request.session.companyId);
@@ -248,7 +248,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = request.body as { name?: string; code?: string; machineGroupId?: string; active?: boolean; sortOrder?: number };
     const params = request.params as { id: string };
     if (body.machineGroupId) {
-      const group = await prisma.machineGroup.findFirst({ where: { id: body.machineGroupId, companyId: request.session.companyId }, select: { id: true } });
+      const group = await prisma.machineGroup.findFirst({ where: { id: body.machineGroupId, companyId: request.session.companyId, active: true }, select: { id: true } });
       if (!group) return reply.code(400).send({ success: false, error: "Machine group is not valid for this company." });
     }
     const active = optionalBoolean(body.active);
@@ -311,7 +311,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!name || !body.departmentId) return reply.code(400).send({ success: false, error: "Name and department are required." });
     if (defaultPriority === null) return reply.code(400).send({ success: false, error: "Priority is not valid." });
     if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
-    const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId }, select: { id: true } });
+    const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId, active: true }, select: { id: true } });
     if (!department) return reply.code(400).send({ success: false, error: "Department is not valid for this company." });
     const item = await prisma.issueType.create({ data: { companyId: request.session.companyId, departmentId: body.departmentId, name, defaultPriority: defaultPriority as any, sortOrder } });
     changed(request.session.companyId);
@@ -322,7 +322,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = request.body as { name?: string; departmentId?: string; defaultPriority?: any; active?: boolean; sortOrder?: number };
     const params = request.params as { id: string };
     if (body.departmentId) {
-      const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId }, select: { id: true } });
+      const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId, active: true }, select: { id: true } });
       if (!department) return reply.code(400).send({ success: false, error: "Department is not valid for this company." });
     }
     const active = optionalBoolean(body.active);
@@ -354,6 +354,8 @@ export async function adminRoutes(app: FastifyInstance) {
     const validTargets = await prisma.issueType.findMany({
       where: {
         companyId: request.session.companyId,
+        active: true,
+        department: { active: true },
         OR: body.targets.map((target) => ({ id: target.issueTypeId, departmentId: target.departmentId }))
       },
       select: { id: true, departmentId: true }
@@ -404,6 +406,8 @@ export async function adminRoutes(app: FastifyInstance) {
       const validTargets = await prisma.issueType.findMany({
         where: {
           companyId: request.session.companyId,
+          active: true,
+          department: { active: true },
           OR: body.targets.map((target) => ({ id: target.issueTypeId, departmentId: target.departmentId }))
         },
         select: { id: true, departmentId: true }
@@ -445,16 +449,23 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!username || !body.password || !displayName || !role) return reply.code(400).send({ success: false, error: "Username, password, displayName, and valid role are required." });
     if (body.password.length < 8) return reply.code(400).send({ success: false, error: "Password must be at least 8 characters." });
     const passwordHash = await bcrypt.hash(body.password, 10);
-    const item = await prisma.user.create({
-      data: {
-        username,
-        passwordHash,
-        displayName,
-        memberships: { create: { companyId: request.session.companyId, role: role as any } }
+    try {
+      const item = await prisma.user.create({
+        data: {
+          username,
+          passwordHash,
+          displayName,
+          memberships: { create: { companyId: request.session.companyId, role: role as any } }
+        }
+      });
+      changed(request.session.companyId);
+      return { success: true, data: item };
+    } catch (error: any) {
+      if (error?.code === "P2002") {
+        return reply.code(409).send({ success: false, error: "That username is already in use." });
       }
-    });
-    changed(request.session.companyId);
-    return { success: true, data: item };
+      throw error;
+    }
   });
 
   app.patch("/api/admin/users/:id", adminWriteOptions, async (request, reply) => {
@@ -489,6 +500,16 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!allowed) return reply.code(404).send({ success: false, error: "User not found." });
     try {
       const item = await prisma.$transaction(async (tx) => {
+        const membership = await tx.membership.findUniqueOrThrow({ where: { id: allowed.id }, select: { active: true, role: true } });
+        const removesAdminAccess = membership.active && membership.role === "ADMIN" && (active === false || (role !== undefined && role !== "ADMIN"));
+        if (removesAdminAccess) {
+          const activeAdminCount = await tx.membership.count({ where: { companyId: request.session.companyId, active: true, role: "ADMIN" } });
+          if (activeAdminCount <= 1) {
+            const error = new Error("At least one active administrator is required.") as Error & { statusCode?: number };
+            error.statusCode = 400;
+            throw error;
+          }
+        }
         if (Object.keys(membershipData).length) await tx.membership.update({ where: { id: allowed.id }, data: membershipData });
         if (Object.keys(userData).length) await tx.user.update({ where: { id: params.id }, data: userData });
         if (active) await tx.user.update({ where: { id: params.id }, data: { active: true } });
@@ -510,6 +531,15 @@ export async function adminRoutes(app: FastifyInstance) {
     const allowed = await prisma.membership.findFirst({ where: { userId: params.id, companyId: request.session.companyId }, select: { id: true } });
     if (!allowed) return reply.code(404).send({ success: false, error: "User not found." });
     const item = await prisma.$transaction(async (tx) => {
+      const membership = await tx.membership.findUniqueOrThrow({ where: { id: allowed.id }, select: { active: true, role: true } });
+      if (membership.active && membership.role === "ADMIN") {
+        const activeAdminCount = await tx.membership.count({ where: { companyId: request.session.companyId, active: true, role: "ADMIN" } });
+        if (activeAdminCount <= 1) {
+          const error = new Error("At least one active administrator is required.") as Error & { statusCode?: number };
+          error.statusCode = 400;
+          throw error;
+        }
+      }
       await tx.membership.update({ where: { id: allowed.id }, data: { active: false } });
       const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
       return { ...user, active: false };
@@ -603,7 +633,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = request.body as { name?: string; departmentId?: string };
     const name = cleanString(body.name);
     if (!name || !body.departmentId) return reply.code(400).send({ success: false, error: "Name and department are required." });
-    const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId }, select: { id: true } });
+    const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId, active: true }, select: { id: true } });
     if (!department) return reply.code(400).send({ success: false, error: "Department is not valid for this company." });
     const token = generatePagerToken();
     const item = await prisma.pagerDevice.create({
@@ -621,7 +651,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const existing = await prisma.pagerDevice.findFirst({ where: { id: params.id, companyId: request.session.companyId }, select: { id: true } });
     if (!existing) return reply.code(404).send({ success: false, error: "Pager not found." });
     if (body.departmentId) {
-      const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId }, select: { id: true } });
+      const department = await prisma.department.findFirst({ where: { id: body.departmentId, companyId: request.session.companyId, active: true }, select: { id: true } });
       if (!department) return reply.code(400).send({ success: false, error: "Department is not valid for this company." });
     }
     if (body.rotate) {

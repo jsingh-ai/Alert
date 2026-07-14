@@ -197,22 +197,17 @@ function StatusAdmin() {
 function MachinesAdmin({ data }: any) {
   const queryClient = useQueryClient();
   const [groupName, setGroupName] = useState("");
-  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [groupFilterId, setGroupFilterId] = useState("");
   const [machine, setMachine] = useState({ name: "", code: "", machineGroupId: "" });
   const machineGroups = data?.machineGroups ?? [];
   const activeMachineGroups = machineGroups.filter((group: any) => group.active);
   const machines = data?.machines ?? [];
-  const selectedGroup = machineGroups.find((group: any) => group.id === selectedGroupId);
-  const visibleMachines = selectedGroupId ? machines.filter((item: any) => item.machineGroupId === selectedGroupId) : machines;
-  const selectGroup = (groupId: string) => {
-    const group = machineGroups.find((item: any) => item.id === groupId);
-    setSelectedGroupId(groupId);
-    setMachine((current) => ({ ...current, machineGroupId: group?.active ? groupId : "" }));
-  };
+  const selectedGroup = machineGroups.find((group: any) => group.id === groupFilterId);
+  const visibleMachines = groupFilterId ? machines.filter((item: any) => item.machineGroupId === groupFilterId) : machines;
   const createGroup = useMutation({ mutationFn: () => postJson("/api/admin/machine-groups", { name: groupName }), onSuccess: () => { setGroupName(""); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
-  const createMachine = useMutation({ mutationFn: () => postJson("/api/admin/machines", machine), onSuccess: () => { setMachine({ name: "", code: "", machineGroupId: selectedGroupId }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
+  const createMachine = useMutation({ mutationFn: () => postJson("/api/admin/machines", machine), onSuccess: () => { setMachine({ name: "", code: "", machineGroupId: "" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggleGroup = useMutation({ mutationFn: (group: any) => patchJson(`/api/admin/machine-groups/${group.id}`, { active: !group.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
-  const deleteGroup = useMutation({ mutationFn: (group: any) => deleteJson(`/api/admin/machine-groups/${group.id}`), onSuccess: (_result, group: any) => { if (selectedGroupId === group.id) selectGroup(""); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
+  const deleteGroup = useMutation({ mutationFn: (group: any) => deleteJson(`/api/admin/machine-groups/${group.id}`), onSuccess: (_result, group: any) => { if (groupFilterId === group.id) setGroupFilterId(""); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggleMachine = useMutation({ mutationFn: (m: any) => patchJson(`/api/admin/machines/${m.id}`, { active: !m.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const deleteMachine = useMutation({ mutationFn: (m: any) => deleteJson(`/api/admin/machines/${m.id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   return (
@@ -220,7 +215,7 @@ function MachinesAdmin({ data }: any) {
       <section className="panel">
         <div className="admin-panel-header">
           <h2>Machine groups</h2>
-          <button className={`admin-filter-pill ${selectedGroupId === "" ? "active" : ""}`} onClick={() => selectGroup("")}>All</button>
+          <button className={`admin-filter-pill ${groupFilterId === "" ? "active" : ""}`} onClick={() => setGroupFilterId("")}>All</button>
         </div>
         <div className="inline-form">
           <TextInput value={groupName} onChange={setGroupName} placeholder="Press" />
@@ -229,7 +224,7 @@ function MachinesAdmin({ data }: any) {
         <div className="admin-list">
           {machineGroups.length === 0 && <div className="empty-state small">No items yet.</div>}
           {machineGroups.map((item: any) => (
-            <div key={item.id} className={`admin-row admin-group-row ${selectedGroupId === item.id ? "selected" : ""}`} onClick={() => selectGroup(item.id)}>
+            <div key={item.id} className={`admin-row admin-group-row ${groupFilterId === item.id ? "selected" : ""}`} onClick={() => setGroupFilterId(item.id)}>
               <strong>{item.name}</strong>
               <span>{item.active ? "active" : "inactive"}</span>
               <AdminActions active={item.active} onToggle={() => toggleGroup.mutate(item)} onDelete={() => deleteGroup.mutate(item)} />
@@ -245,13 +240,13 @@ function MachinesAdmin({ data }: any) {
         <div className="inline-form stack">
           <TextInput value={machine.name} onChange={(name: string) => setMachine({ ...machine, name })} placeholder="Press 5" />
           <TextInput value={machine.code} onChange={(code: string) => setMachine({ ...machine, code })} placeholder="P5" />
-          <select value={machine.machineGroupId} onChange={(event) => selectGroup(event.target.value)}>
+          <select value={machine.machineGroupId} onChange={(event) => setMachine({ ...machine, machineGroupId: event.target.value })}>
             <option value="">Machine group</option>
             {activeMachineGroups.map((group: any) => <option key={group.id} value={group.id}>{group.name}</option>)}
           </select>
           <button onClick={() => createMachine.mutate()} disabled={!machine.name.trim() || !machine.code.trim() || !machine.machineGroupId || createMachine.isPending}>Add machine</button>
         </div>
-        <AdminList items={visibleMachines} render={(item: any) => <><strong>{item.name}</strong><span>{item.code} | {item.machineGroup?.name}</span><AdminActions active={item.active} onToggle={() => toggleMachine.mutate(item)} onDelete={() => deleteMachine.mutate(item)} /></>} />
+        <AdminList items={visibleMachines} render={(item: any) => <><strong>{item.name}</strong><span>{item.code} | {item.machineGroup?.name} | {item.active && item.machineGroup?.active ? "active" : "inactive"}</span><AdminActions active={item.active} onToggle={() => toggleMachine.mutate(item)} onDelete={() => deleteMachine.mutate(item)} /></>} />
       </section>
     </div>
   );
@@ -260,21 +255,16 @@ function MachinesAdmin({ data }: any) {
 function DepartmentsAdmin({ data }: any) {
   const queryClient = useQueryClient();
   const [department, setDepartment] = useState({ name: "" });
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState("");
+  const [departmentFilterId, setDepartmentFilterId] = useState("");
   const [issue, setIssue] = useState({ name: "", departmentId: "", defaultPriority: "NORMAL" });
   const departments = data?.departments ?? [];
   const activeDepartments = departments.filter((item: any) => item.active);
-  const selectedDepartment = departments.find((item: any) => item.id === selectedDepartmentId);
-  const visibleIssues = selectedDepartmentId ? (data?.issueTypes ?? []).filter((item: any) => item.departmentId === selectedDepartmentId) : data?.issueTypes ?? [];
-  const selectDepartment = (departmentId: string) => {
-    const selected = departments.find((item: any) => item.id === departmentId);
-    setSelectedDepartmentId(departmentId);
-    setIssue((current) => ({ ...current, departmentId: selected?.active ? departmentId : "" }));
-  };
+  const selectedDepartment = departments.find((item: any) => item.id === departmentFilterId);
+  const visibleIssues = departmentFilterId ? (data?.issueTypes ?? []).filter((item: any) => item.departmentId === departmentFilterId) : data?.issueTypes ?? [];
   const createDepartment = useMutation({ mutationFn: () => postJson("/api/admin/departments", department), onSuccess: () => { setDepartment({ name: "" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggle = useMutation({ mutationFn: (d: any) => patchJson(`/api/admin/departments/${d.id}`, { active: !d.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
-  const remove = useMutation({ mutationFn: (d: any) => deleteJson(`/api/admin/departments/${d.id}`), onSuccess: (_result, item: any) => { if (selectedDepartmentId === item.id) selectDepartment(""); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
-  const createIssue = useMutation({ mutationFn: () => postJson("/api/admin/issue-types", issue), onSuccess: () => { setIssue({ name: "", departmentId: selectedDepartmentId, defaultPriority: "NORMAL" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
+  const remove = useMutation({ mutationFn: (d: any) => deleteJson(`/api/admin/departments/${d.id}`), onSuccess: (_result, item: any) => { if (departmentFilterId === item.id) setDepartmentFilterId(""); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
+  const createIssue = useMutation({ mutationFn: () => postJson("/api/admin/issue-types", issue), onSuccess: () => { setIssue({ name: "", departmentId: "", defaultPriority: "NORMAL" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggleIssue = useMutation({ mutationFn: (item: any) => patchJson(`/api/admin/issue-types/${item.id}`, { active: !item.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const removeIssue = useMutation({ mutationFn: (item: any) => deleteJson(`/api/admin/issue-types/${item.id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   return (
@@ -282,7 +272,7 @@ function DepartmentsAdmin({ data }: any) {
       <section className="panel">
         <div className="admin-panel-header">
           <h2>Departments</h2>
-          <button className={`admin-filter-pill ${selectedDepartmentId === "" ? "active" : ""}`} onClick={() => selectDepartment("")}>All</button>
+          <button className={`admin-filter-pill ${departmentFilterId === "" ? "active" : ""}`} onClick={() => setDepartmentFilterId("")}>All</button>
         </div>
         <div className="inline-form">
           <TextInput value={department.name} onChange={(name: string) => setDepartment({ name })} placeholder="Quality" />
@@ -291,7 +281,7 @@ function DepartmentsAdmin({ data }: any) {
         <div className="admin-list">
           {departments.length === 0 && <div className="empty-state small">No items yet.</div>}
           {departments.map((item: any) => (
-            <div key={item.id} className={`admin-row admin-group-row ${selectedDepartmentId === item.id ? "selected" : ""}`} onClick={() => selectDepartment(item.id)}>
+            <div key={item.id} className={`admin-row admin-group-row ${departmentFilterId === item.id ? "selected" : ""}`} onClick={() => setDepartmentFilterId(item.id)}>
               <strong>{item.name}</strong>
               <span>{item.active ? "active" : "inactive"}</span>
               <AdminActions active={item.active} onToggle={() => toggle.mutate(item)} onDelete={() => remove.mutate(item)} />
@@ -306,14 +296,14 @@ function DepartmentsAdmin({ data }: any) {
         </div>
         <div className="inline-form stack">
           <TextInput value={issue.name} onChange={(name: string) => setIssue({ ...issue, name })} placeholder="Bad seal" />
-          <select value={issue.departmentId} onChange={(event) => selectDepartment(event.target.value)}>
+          <select value={issue.departmentId} onChange={(event) => setIssue({ ...issue, departmentId: event.target.value })}>
             <option value="">Department</option>
             {activeDepartments.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
           <select value={issue.defaultPriority} onChange={(event) => setIssue({ ...issue, defaultPriority: event.target.value })}>{priorities.map((p) => <option key={p}>{p}</option>)}</select>
           <button onClick={() => createIssue.mutate()} disabled={!issue.name.trim() || !issue.departmentId || createIssue.isPending}>Add issue</button>
         </div>
-        <AdminList items={visibleIssues} render={(item: any) => <><strong>{item.name}</strong><span>{item.department?.name} | {item.defaultPriority} | {item.active ? "active" : "inactive"}</span><AdminActions active={item.active} onToggle={() => toggleIssue.mutate(item)} onDelete={() => removeIssue.mutate(item)} /></>} />
+        <AdminList items={visibleIssues} render={(item: any) => <><strong>{item.name}</strong><span>{item.department?.name} | {item.defaultPriority} | {item.active && item.department?.active ? "active" : "inactive"}</span><AdminActions active={item.active} onToggle={() => toggleIssue.mutate(item)} onDelete={() => removeIssue.mutate(item)} /></>} />
       </section>
     </div>
   );
@@ -358,6 +348,7 @@ function UsersAdmin({ data }: any) {
   const [editingUserId, setEditingUserId] = useState("");
   const [editUser, setEditUser] = useState({ username: "", displayName: "", password: "", role: "OPERATOR" });
   const createUser = useMutation({ mutationFn: () => postJson("/api/admin/users", user), onSuccess: () => { setUser({ username: "", password: "", displayName: "", role: "OPERATOR" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
+  const createUserError = createUser.error instanceof Error ? createUser.error.message : "Unable to create the user.";
   const toggle = useMutation({ mutationFn: (item: any) => patchJson(`/api/admin/users/${item.id}`, { active: !item.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const remove = useMutation({ mutationFn: (item: any) => deleteJson(`/api/admin/users/${item.id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const updateUser = useMutation({
@@ -400,8 +391,10 @@ function UsersAdmin({ data }: any) {
           <TextInput value={user.username} onChange={(username: string) => setUser({ ...user, username })} placeholder="jsmith" />
           <TextInput value={user.displayName} onChange={(displayName: string) => setUser({ ...user, displayName })} placeholder="John Smith" />
           <TextInput type="password" value={user.password} onChange={(password: string) => setUser({ ...user, password })} placeholder="Password" />
+          <p className="form-note">Passwords must contain at least 8 characters.</p>
           <select value={user.role} onChange={(event) => setUser({ ...user, role: event.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select>
-          <button onClick={() => createUser.mutate()} disabled={!user.username.trim() || !user.displayName.trim() || !user.password || createUser.isPending}>Create user</button>
+          <button onClick={() => createUser.mutate()} disabled={!user.username.trim() || !user.displayName.trim() || user.password.length < 8 || createUser.isPending}>{createUser.isPending ? "Creating" : "Create user"}</button>
+          {createUser.isError && <p className="form-error" role="alert">{createUserError}</p>}
         </div>
         <div className="admin-list">
           {users.map((item: any) => (
@@ -446,11 +439,11 @@ function UsersAdmin({ data }: any) {
             </label>
             <button
               onClick={() => updateUser.mutate()}
-              disabled={!editUser.username.trim() || !editUser.displayName.trim() || updateUser.isPending}
+              disabled={!editUser.username.trim() || !editUser.displayName.trim() || (editUser.password.length > 0 && editUser.password.length < 8) || updateUser.isPending}
             >
               {updateUser.isPending ? "Saving" : "Save user"}
             </button>
-            <p className="form-note">Current passwords cannot be viewed. Enter a new password here only when you want to reset it.</p>
+            <p className="form-note">Current passwords cannot be viewed. Leave this blank to keep it, or enter at least 8 characters to reset it.</p>
           </div>
         )}
       </section>
@@ -656,14 +649,15 @@ function ChannelAccessPanel({ user }: { user: any }) {
 function PagersAdmin({ data }: any) {
   const queryClient = useQueryClient();
   const [pager, setPager] = useState({ name: "", departmentId: "" });
+  const [pagerDepartmentFilterId, setPagerDepartmentFilterId] = useState("");
   const [rawToken, setRawToken] = useState("");
   const activeDepartments = (data?.departments ?? []).filter((department: any) => department.active);
-  const visiblePagers = pager.departmentId ? (data?.pagerDevices ?? []).filter((item: any) => item.departmentId === pager.departmentId) : data?.pagerDevices ?? [];
+  const visiblePagers = pagerDepartmentFilterId ? (data?.pagerDevices ?? []).filter((item: any) => item.departmentId === pagerDepartmentFilterId) : data?.pagerDevices ?? [];
   const createPager = useMutation({ mutationFn: () => postJson<any>("/api/admin/pager-devices", pager), onSuccess: (result: any) => { setRawToken(result.data.rawToken); setPager({ name: "", departmentId: "" }); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const rotatePager = useMutation({ mutationFn: (id: string) => patchJson<any>(`/api/admin/pager-devices/${id}`, { rotate: true }), onSuccess: (result: any) => { setRawToken(result.data.rawToken); queryClient.invalidateQueries({ queryKey: ["admin"] }); } });
   const toggle = useMutation({ mutationFn: (item: any) => patchJson(`/api/admin/pager-devices/${item.id}`, { active: !item.active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
   const remove = useMutation({ mutationFn: (item: any) => deleteJson(`/api/admin/pager-devices/${item.id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }) });
-  return <section className="panel"><div className="admin-panel-header"><h2>M5 pager devices</h2><span>{visiblePagers.length} shown</span></div><div className="inline-form stack"><TextInput value={pager.name} onChange={(name: string) => setPager({ ...pager, name })} placeholder="Quality M5 Pager" /><select value={pager.departmentId} onChange={(event) => setPager({ ...pager, departmentId: event.target.value })}><option value="">All active departments</option>{activeDepartments.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select><button onClick={() => createPager.mutate()} disabled={!pager.name.trim() || !pager.departmentId || createPager.isPending}>Create pager token</button></div>{rawToken && <div className="token-box"><strong>Raw token shown once</strong><code>{rawToken}</code><span>Put this value in CONFIG_PAGER_TOKEN on the device.</span></div>}<AdminList items={visiblePagers} render={(item: any) => <><strong>{item.name}</strong><span>{item.department?.name} | {item.tokenFingerprint} | {item.active ? "active" : "inactive"}</span><div className="admin-actions"><button onClick={() => rotatePager.mutate(item.id)}>Rotate</button><AdminActions active={item.active} onToggle={() => toggle.mutate(item)} onDelete={() => remove.mutate(item)} /></div></>} /></section>;
+  return <section className="panel"><div className="admin-panel-header"><h2>M5 pager devices</h2><span>{visiblePagers.length} shown</span></div><div className="inline-form stack"><TextInput value={pager.name} onChange={(name: string) => setPager({ ...pager, name })} placeholder="Quality M5 Pager" /><select value={pager.departmentId} onChange={(event) => setPager({ ...pager, departmentId: event.target.value })}><option value="">Department for this pager</option>{activeDepartments.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select><button onClick={() => createPager.mutate()} disabled={!pager.name.trim() || !pager.departmentId || createPager.isPending}>Create pager token</button></div>{rawToken && <div className="token-box"><strong>Raw token shown once</strong><code>{rawToken}</code><span>Put this value in CONFIG_PAGER_TOKEN on the device.</span></div>}<div className="inline-form"><select value={pagerDepartmentFilterId} onChange={(event) => setPagerDepartmentFilterId(event.target.value)}><option value="">Show all departments</option>{(data?.departments ?? []).map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div><AdminList items={visiblePagers} render={(item: any) => <><strong>{item.name}</strong><span>{item.department?.name} | {item.tokenFingerprint} | {item.active && item.department?.active ? "active" : "inactive"}</span><div className="admin-actions"><button onClick={() => rotatePager.mutate(item.id)}>Rotate</button><AdminActions active={item.active} onToggle={() => toggle.mutate(item)} onDelete={() => remove.mutate(item)} /></div></>} /></section>;
 }
 
 function AdminList({ items, render }: { items: any[]; render: (item: any) => ReactNode }) {

@@ -88,6 +88,7 @@ export async function commandRoutes(app: FastifyInstance) {
       where: {
         companyId: ctx.companyId,
         active: true,
+        department: { active: true },
         OR: targets.map((target) => ({ id: target.issueTypeId, departmentId: target.departmentId }))
       }
     });

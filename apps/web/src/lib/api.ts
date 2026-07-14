@@ -29,7 +29,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.success === false) {
     const message = payload.error || `Request failed: ${response.status}`;
-    if (![400, 401, 403].includes(response.status)) {
+    if (path.startsWith("/api/admin/") || ![400, 401, 403].includes(response.status)) {
       notifyAppError(message);
     }
     throw new Error(message);

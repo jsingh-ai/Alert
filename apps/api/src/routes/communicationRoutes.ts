@@ -158,17 +158,17 @@ export async function communicationRoutes(app: FastifyInstance) {
   app.patch("/api/admin/communication-channels/:id", { preHandler: app.requireAdmin, ...adminWriteRateLimit }, async (request, reply) => {
     const params = request.params as { id: string };
     const body = request.body as { name?: string; active?: boolean };
+    const existing = await prisma.communicationChannel.findFirst({ where: { id: params.id, companyId: request.session.companyId }, select: { id: true, archivedAt: true } });
+    if (!existing) return reply.code(404).send({ success: false, error: "Channel not found." });
     const data: any = {};
     if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim();
     if (typeof body.active === "boolean") {
       data.active = body.active;
       data.disabledAt = body.active ? null : new Date();
+      if (body.active && existing.archivedAt) data.archivedAt = null;
     }
     if (!Object.keys(data).length) return reply.code(400).send({ success: false, error: "No changes provided." });
-    const channel = await prisma.communicationChannel.update({
-      where: { id: params.id, companyId: request.session.companyId },
-      data
-    });
+    const channel = await prisma.communicationChannel.update({ where: { id: params.id }, data });
     changed(request.session.companyId);
     return { success: true, data: serializeChannel(channel) };
   });
@@ -190,7 +190,7 @@ export async function communicationRoutes(app: FastifyInstance) {
     if (!user) return reply.code(404).send({ success: false, error: "User not found." });
     const [channels, memberships] = await Promise.all([
       prisma.communicationChannel.findMany({
-        where: { companyId, archivedAt: null },
+        where: { companyId, active: true, archivedAt: null },
         include: { _count: { select: { members: true } } },
         orderBy: [{ type: "asc" }, { name: "asc" }]
       }),

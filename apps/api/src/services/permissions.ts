@@ -13,7 +13,7 @@ export function hasScopedRestriction(ctx: MembershipContext, types: Array<"DEPAR
 }
 
 export function machineWhereForContext(ctx: MembershipContext): Prisma.MachineWhereInput {
-  const base: Prisma.MachineWhereInput = { companyId: ctx.companyId, active: true };
+  const base: Prisma.MachineWhereInput = { companyId: ctx.companyId, active: true, machineGroup: { active: true } };
   const machineIds = scopeIds(ctx, "MACHINE");
   const groupIds = scopeIds(ctx, "MACHINE_GROUP");
   if (ctx.role === "ADMIN") return base;
