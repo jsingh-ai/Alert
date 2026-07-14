@@ -1003,6 +1003,9 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .queue-alert-arrived .queue-panel-title:after { background: #cbd5e1; }
 .queue-alert .queue-action-row { margin-top: 1.05rem; padding-top: 0.85rem; border-top: 1px solid #e2e8f0; }
 .queue-alert .queue-action-row button { width: 100%; }
+/* Temporarily hide queue-only resolution while preserving the shared action behavior. */
+.queue-alert-acknowledged .queue-action-row button, .queue-alert-arrived .queue-action-row button { display: none; }
+.queue-alert-acknowledged .queue-action-row:after, .queue-alert-arrived .queue-action-row:after { content: "Go to machine to close alert"; width: 100%; color: #92400e; font-size: 0.82rem; font-weight: 900; text-align: center; }
 .queue-alert .queue-acknowledge-button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.48rem; min-height: 42px; border: 1px solid #1d4ed8; border-radius: 12px; background: #2563eb; color: white; font-weight: 950; box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18); transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease; }
 .queue-alert .queue-acknowledge-button:before { content: "✓"; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 999px; background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.3); font-size: 0.78rem; }
 .queue-alert .queue-acknowledge-button:hover { background: #1d4ed8; transform: translateY(-1px); box-shadow: 0 14px 28px rgba(37, 99, 235, 0.24); filter: none; }
