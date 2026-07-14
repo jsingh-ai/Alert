@@ -40,3 +40,4 @@ coverage/
 prisma/sqlite/*.db
 prisma/sqlite/*.db-journal
 pager/pager_secrets.h
+data/communication-attachments/

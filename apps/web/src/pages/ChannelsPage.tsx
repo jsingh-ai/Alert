@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, patchJson, postJson } from "../lib/api";
+import { api, getToken, patchJson, postJson } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { notifyAppError } from "../lib/errorToast";
 import { classNames } from "../lib/format";
 
 type Channel = {
@@ -19,10 +20,24 @@ type ChannelMessage = {
   body: string;
   clientMessageId?: string | null;
   actorNameText?: string | null;
+  attachments?: ChannelAttachment[];
   user: { id: string; displayName: string; username: string } | null;
   createdAt: string;
   pending?: boolean;
 };
+
+type ChannelAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+type AttachmentPayload = Omit<ChannelAttachment, "id"> & { dataBase64: string };
+
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACHMENTS_PER_MESSAGE = 4;
 
 function typeLabel(type: string) {
   const labels: Record<string, string> = {
@@ -38,12 +53,77 @@ function timeLabel(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function sizeLabel(value: number) {
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function encodeFile(file: File): Promise<AttachmentPayload> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const separator = result.indexOf(",");
+      if (separator < 0) return reject(new Error(`Could not encode ${file.name}.`));
+      resolve({
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+        dataBase64: result.slice(separator + 1)
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function MessageAttachment({ attachment, pending }: { attachment: ChannelAttachment; pending?: boolean }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pending || attachment.id.startsWith("pending-")) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    fetch(`/api/channels/attachments/${attachment.id}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined,
+      signal: controller.signal
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load attachment.");
+        return response.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => setUrl(null));
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.id, pending]);
+
+  const isImage = attachment.mimeType.startsWith("image/");
+  return (
+    <div className="channel-message-attachment">
+      {isImage && url && <img src={url} alt={attachment.fileName} />}
+      {url ? (
+        <a href={url} download={attachment.fileName}>{attachment.fileName} <span>{sizeLabel(attachment.sizeBytes)}</span></a>
+      ) : (
+        <span>{pending ? "Uploading attachment..." : attachment.fileName} <small>{sizeLabel(attachment.sizeBytes)}</small></span>
+      )}
+    </div>
+  );
+}
+
 export function ChannelsPage() {
   const { session } = useAuth();
   const queryClient = useQueryClient();
   const [activeChannelId, setActiveChannelId] = useState("");
   const [message, setMessage] = useState("");
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [pendingMessages, setPendingMessages] = useState<Record<string, ChannelMessage[]>>({});
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const channelsQuery = useQuery({
     queryKey: ["channels"],
@@ -82,8 +162,8 @@ export function ChannelsPage() {
   }, [activeChannel?.id, activeChannel?.membership?.lastReadSeq, messages, queryClient]);
 
   const sendMessage = useMutation({
-    mutationFn: (input: { body: string; clientMessageId: string }) => postJson<any>(`/api/channels/${activeChannel!.id}/messages`, input),
-    onMutate: ({ body, clientMessageId }) => {
+    mutationFn: (input: { body: string; clientMessageId: string; attachments: AttachmentPayload[] }) => postJson<any>(`/api/channels/${activeChannel!.id}/messages`, input),
+    onMutate: ({ body, clientMessageId, attachments }) => {
       const channelId = activeChannel!.id;
       const optimistic: ChannelMessage = {
         id: clientMessageId,
@@ -91,12 +171,23 @@ export function ChannelsPage() {
         seq: Number.MAX_SAFE_INTEGER,
         body,
         clientMessageId,
+        attachments: attachments.map((attachment, index) => ({
+          id: `pending-${clientMessageId}-${index}`,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes
+        })),
         user: { id: session?.user.id ?? "me", displayName: session?.user.displayName ?? "Me", username: session?.user.username ?? "me" },
         createdAt: new Date().toISOString(),
         pending: true
       };
       setPendingMessages((current) => ({ ...current, [channelId]: [...(current[channelId] ?? []), optimistic] }));
     },
+    onSuccess: () => {
+      setMessage("");
+      setAttachmentFiles([]);
+    },
+    onError: (error) => notifyAppError(error instanceof Error ? error.message : "Could not send message."),
     onSettled: (_result, _error, variables) => {
       const channelId = activeChannel!.id;
       setPendingMessages((current) => ({ ...current, [channelId]: (current[channelId] ?? []).filter((item) => item.clientMessageId !== variables?.clientMessageId) }));
@@ -105,11 +196,31 @@ export function ChannelsPage() {
     }
   });
 
-  const submit = () => {
+  const addAttachments = (files: FileList | null) => {
+    if (!files?.length) return;
+    const selected = Array.from(files);
+    const totalBytes = [...attachmentFiles, ...selected].reduce((total, file) => total + file.size, 0);
+    if (attachmentFiles.length + selected.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      notifyAppError(`You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files to one message.`);
+    } else if (selected.some((file) => file.size > MAX_ATTACHMENT_BYTES)) {
+      notifyAppError("Each attachment must be 5 MB or smaller.");
+    } else if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+      notifyAppError("Message attachments must total 8 MB or less.");
+    } else {
+      setAttachmentFiles((current) => [...current, ...selected]);
+    }
+    if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+  };
+
+  const submit = async () => {
     const body = message.trim();
-    if (!body || !activeChannel?.membership?.canWrite || sendMessage.isPending) return;
-    setMessage("");
-    sendMessage.mutate({ body, clientMessageId: crypto.randomUUID() });
+    if ((!body && !attachmentFiles.length) || !activeChannel?.membership?.canWrite || sendMessage.isPending) return;
+    try {
+      const attachments = await Promise.all(attachmentFiles.map(encodeFile));
+      sendMessage.mutate({ body, attachments, clientMessageId: crypto.randomUUID() });
+    } catch (error) {
+      notifyAppError(error instanceof Error ? error.message : "Could not prepare the attachment.");
+    }
   };
 
   const groupedChannels = useMemo(() => {
@@ -160,15 +271,21 @@ export function ChannelsPage() {
                       <strong>{actorName}</strong>
                       <span>{item.pending ? "sending..." : timeLabel(item.createdAt)}</span>
                     </div>
-                    <p>{item.body}</p>
+                    {item.body && <p>{item.body}</p>}
+                    {item.attachments?.length ? <div className="channel-message-attachments">{item.attachments.map((attachment) => <MessageAttachment key={attachment.id} attachment={attachment} pending={item.pending} />)}</div> : null}
                   </article>
                 );
               })}
               {!messages.length && <div className="empty-state small">No messages yet.</div>}
             </div>
             <footer className="channel-composer">
-              <textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={`Message ${activeChannel.name}`} disabled={!activeChannel.membership?.canWrite} />
-              <button onClick={submit} disabled={!message.trim() || !activeChannel.membership?.canWrite || sendMessage.isPending}>Send</button>
+              <input ref={attachmentInputRef} className="channel-attachment-input" type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
+              {attachmentFiles.length > 0 && <div className="channel-attachment-queue">{attachmentFiles.map((file, index) => <span key={`${file.name}-${index}`}>{file.name} <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachmentFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))}>Remove</button></span>)}</div>}
+              <div className="channel-composer-row">
+                <button className="channel-attach-button" type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!activeChannel.membership?.canWrite || sendMessage.isPending}>Attach</button>
+                <textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder={`Message ${activeChannel.name}`} disabled={!activeChannel.membership?.canWrite || sendMessage.isPending} />
+                <button onClick={() => void submit()} disabled={(!message.trim() && !attachmentFiles.length) || !activeChannel.membership?.canWrite || sendMessage.isPending}>Send</button>
+              </div>
             </footer>
           </>
         ) : (

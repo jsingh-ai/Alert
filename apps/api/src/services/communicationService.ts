@@ -1,4 +1,4 @@
-import type { CommunicationChannel, CommunicationChannelMember, CommunicationMessage, Prisma } from "@prisma/client";
+import type { CommunicationAttachment, CommunicationChannel, CommunicationChannelMember, CommunicationMessage, Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 
 const CommunicationChannelType = {
@@ -24,6 +24,7 @@ type ChannelWithMembership = CommunicationChannel & {
 
 type MessageWithUser = CommunicationMessage & {
   user: { id: string; username: string; displayName: string } | null;
+  attachments?: CommunicationAttachment[];
 };
 
 function httpError(message: string, statusCode: number) {
@@ -94,6 +95,12 @@ export function serializeMessage(message: MessageWithUser) {
     deletedAt: message.deletedAt,
     clientMessageId: message.clientMessageId,
     actorNameText,
+    attachments: (message.attachments ?? []).map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes
+    })),
     user: message.user ? {
       id: message.user.id,
       username: message.user.username,
@@ -193,6 +200,7 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
   alertId?: string | null;
   messageType?: string;
   actorNameText?: string | null;
+  attachments?: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; storageKey: string }>;
 }) {
   const messageType = input.messageType ?? "TEXT";
   if (messageType === "TEXT" && !input.userId) {
@@ -206,7 +214,7 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
         userId: input.userId ?? null,
         clientMessageId: input.clientMessageId
       },
-      include: { user: { select: { id: true, username: true, displayName: true } } }
+      include: { user: { select: { id: true, username: true, displayName: true } }, attachments: true }
     });
     if (existing) return existing;
   }
@@ -226,9 +234,10 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
         messageType,
         clientMessageId: input.clientMessageId ?? null,
         alertId: input.alertId ?? null,
-        actorNameText: input.actorNameText ?? null
+        actorNameText: input.actorNameText ?? null,
+        ...(input.attachments?.length ? { attachments: { create: input.attachments } } : {})
       } as any,
-      include: { user: { select: { id: true, username: true, displayName: true } } }
+      include: { user: { select: { id: true, username: true, displayName: true } }, attachments: true }
     });
   } catch (error) {
     if (!input.clientMessageId || !isUniqueConflict(error)) throw error;
@@ -239,7 +248,7 @@ export async function createCommunicationMessage(db: Prisma.TransactionClient, i
         userId: input.userId ?? null,
         clientMessageId: input.clientMessageId
       },
-      include: { user: { select: { id: true, username: true, displayName: true } } }
+      include: { user: { select: { id: true, username: true, displayName: true } }, attachments: true }
     });
   }
 

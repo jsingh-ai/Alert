@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { nanoid } from "nanoid";
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
@@ -12,8 +15,89 @@ import {
 } from "../services/communicationService.js";
 import { emitChannel, emitCompany, emitUser, refreshUserChannelRooms } from "../services/realtime.js";
 
+const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MESSAGE_ATTACHMENT_DIR = process.env.COMMUNICATION_ATTACHMENT_DIR
+  ? path.resolve(process.env.COMMUNICATION_ATTACHMENT_DIR)
+  : path.resolve(process.cwd(), "data", "communication-attachments");
+
+type PendingAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageKey: string;
+  filePath: string;
+};
+
 function cleanString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function requestError(message: string, statusCode = 400) {
+  const error = new Error(message) as Error & { statusCode?: number };
+  error.statusCode = statusCode;
+  return error;
+}
+
+function cleanFileName(value: unknown) {
+  const normalized = typeof value === "string" ? value.replace(/\0/g, "").trim() : "";
+  const fileName = path.basename(normalized).slice(0, 180);
+  return fileName || "attachment";
+}
+
+function decodeBase64(value: unknown) {
+  if (typeof value !== "string") throw requestError("Each attachment must include file data.");
+  const normalized = value.replace(/\s/g, "");
+  if (!normalized || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)) {
+    throw requestError("An attachment contains invalid file data.");
+  }
+  return Buffer.from(normalized, "base64");
+}
+
+async function persistAttachments(value: unknown): Promise<PendingAttachment[]> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw requestError("Attachments must be an array.");
+  if (value.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    throw requestError(`A message can include at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`);
+  }
+
+  const attachments: PendingAttachment[] = [];
+  let totalBytes = 0;
+  await fs.promises.mkdir(MESSAGE_ATTACHMENT_DIR, { recursive: true });
+  try {
+    for (const item of value) {
+      if (!item || typeof item !== "object") throw requestError("Each attachment must be a file.");
+      const raw = item as { fileName?: unknown; mimeType?: unknown; dataBase64?: unknown };
+      const bytes = decodeBase64(raw.dataBase64);
+      if (!bytes.length) throw requestError("Attachments cannot be empty.");
+      if (bytes.length > MAX_ATTACHMENT_BYTES) throw requestError("Each attachment must be 5 MB or smaller.");
+      totalBytes += bytes.length;
+      if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) throw requestError("Message attachments must total 8 MB or less.");
+
+      const id = nanoid();
+      const storageKey = nanoid(32);
+      const filePath = path.join(MESSAGE_ATTACHMENT_DIR, storageKey);
+      await fs.promises.writeFile(filePath, bytes, { flag: "wx" });
+      attachments.push({
+        id,
+        fileName: cleanFileName(raw.fileName),
+        mimeType: cleanString(raw.mimeType).slice(0, 120) || "application/octet-stream",
+        sizeBytes: bytes.length,
+        storageKey,
+        filePath
+      });
+    }
+    return attachments;
+  } catch (error) {
+    await Promise.all(attachments.map((attachment) => fs.promises.rm(attachment.filePath, { force: true })));
+    throw error;
+  }
+}
+
+async function removePersistedAttachments(attachments: PendingAttachment[]) {
+  await Promise.all(attachments.map((attachment) => fs.promises.rm(attachment.filePath, { force: true })));
 }
 
 function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
@@ -69,7 +153,7 @@ export async function communicationRoutes(app: FastifyInstance) {
         channelId: params.channelId,
         ...(beforeSeq > 0 ? { seq: { lt: beforeSeq } } : {})
       },
-      include: { user: { select: { id: true, username: true, displayName: true } } },
+      include: { user: { select: { id: true, username: true, displayName: true } }, attachments: true },
       orderBy: { seq: "desc" },
       take: limit
     });
@@ -83,13 +167,13 @@ export async function communicationRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post("/api/channels/:channelId/messages", { preHandler: app.authenticate, ...messageRateLimit }, async (request, reply) => {
+  app.post("/api/channels/:channelId/messages", { preHandler: app.authenticate, bodyLimit: 12 * 1024 * 1024, ...messageRateLimit }, async (request, reply) => {
     const { companyId, userId } = request.session;
     const params = request.params as { channelId: string };
-    const body = request.body as { body?: string; message?: string; clientMessageId?: string };
+    const body = request.body as { body?: string; message?: string; clientMessageId?: string; attachments?: unknown };
     const text = cleanString(body.body ?? body.message);
     const clientMessageId = cleanString(body.clientMessageId) || null;
-    if (!text) return reply.code(400).send({ success: false, error: "Message is required." });
+    if (!text && !Array.isArray(body.attachments)) return reply.code(400).send({ success: false, error: "Message or attachment is required." });
     if (text.length > 4000) return reply.code(400).send({ success: false, error: "Message is too long." });
 
     const membership = await findWritableMembership(companyId, userId, params.channelId);
@@ -98,22 +182,60 @@ export async function communicationRoutes(app: FastifyInstance) {
     if (clientMessageId) {
       const existing = await prisma.communicationMessage.findFirst({
         where: { companyId, channelId: params.channelId, userId, clientMessageId },
-        include: { user: { select: { id: true, username: true, displayName: true } } }
+        include: { user: { select: { id: true, username: true, displayName: true } }, attachments: true }
       });
       if (existing) return { success: true, data: serializeMessage(existing) };
     }
 
-    const message = await prisma.$transaction((tx) => createCommunicationMessage(tx, {
-      companyId,
-      channelId: params.channelId,
-      userId,
-      body: text,
-      clientMessageId
-    }));
+    let attachments: PendingAttachment[] = [];
+    try {
+      attachments = await persistAttachments(body.attachments);
+      if (!text && !attachments.length) return reply.code(400).send({ success: false, error: "Message or attachment is required." });
+      const message = await prisma.$transaction((tx) => createCommunicationMessage(tx, {
+        companyId,
+        channelId: params.channelId,
+        userId,
+        body: text,
+        clientMessageId,
+        attachments: attachments.map(({ filePath: _filePath, ...attachment }) => attachment)
+      }));
 
-    const payload = serializeMessage(message);
-    emitChannel(params.channelId, "communication.message.created", payload);
-    return { success: true, data: payload };
+      const savedStorageKeys = new Set((message.attachments ?? []).map((attachment) => attachment.storageKey));
+      await removePersistedAttachments(attachments.filter((attachment) => !savedStorageKeys.has(attachment.storageKey)));
+
+      const payload = serializeMessage(message);
+      emitChannel(params.channelId, "communication.message.created", payload);
+      return { success: true, data: payload };
+    } catch (error) {
+      await removePersistedAttachments(attachments);
+      throw error;
+    }
+  });
+
+  app.get("/api/channels/attachments/:attachmentId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { companyId, userId } = request.session;
+    const params = request.params as { attachmentId: string };
+    const attachment = await prisma.communicationAttachment.findFirst({
+      where: { id: params.attachmentId, companyId },
+      include: { message: { select: { channelId: true } } }
+    });
+    if (!attachment) return reply.code(404).send({ success: false, error: "Attachment not found." });
+
+    const membership = await findReadableMembership(companyId, userId, attachment.message.channelId);
+    if (!membership) return reply.code(403).send({ success: false, error: "You do not have access to this attachment." });
+
+    const filePath = path.join(MESSAGE_ATTACHMENT_DIR, attachment.storageKey);
+    try {
+      await fs.promises.access(filePath, fs.constants.R_OK);
+    } catch {
+      return reply.code(404).send({ success: false, error: "Attachment file not found." });
+    }
+
+    reply.header("X-Content-Type-Options", "nosniff");
+    const disposition = attachment.mimeType.startsWith("image/") ? "inline" : "attachment";
+    reply.header("Content-Disposition", `${disposition}; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`);
+    reply.type(attachment.mimeType || "application/octet-stream");
+    return reply.send(fs.createReadStream(filePath));
   });
 
   app.patch("/api/channels/:channelId/read", { preHandler: app.authenticate }, async (request, reply) => {

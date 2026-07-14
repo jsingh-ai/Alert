@@ -94,6 +94,7 @@ model Company {
   companyPreferences CompanyPreference[]
   communicationChannels CommunicationChannel[]
   communicationMessages CommunicationMessage[]
+  communicationAttachments CommunicationAttachment[]
 
   @@map("companies")
 }
@@ -490,6 +491,7 @@ model CommunicationMessage {
   channel CommunicationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user    User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   alert   AndonAlert?          @relation(fields: [alertId], references: [id], onDelete: SetNull)
+  attachments CommunicationAttachment[]
 
   @@unique([channelId, seq])
   @@unique([channelId, userId, clientMessageId])
@@ -497,4 +499,21 @@ model CommunicationMessage {
   @@index([companyId, alertId, seq])
   @@index([companyId, userId, createdAt])
   @@map("communication_messages")
+}
+
+model CommunicationAttachment {
+  id          String   @id
+  companyId   String   @map("company_id")
+  messageId   String   @map("message_id")
+  fileName    String   @map("file_name")
+  mimeType    String   @map("mime_type")
+  sizeBytes   Int      @map("size_bytes")
+  storageKey  String   @unique @map("storage_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  message CommunicationMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, messageId])
+  @@map("communication_attachments")
 }
