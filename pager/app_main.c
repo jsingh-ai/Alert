@@ -54,11 +54,11 @@
  * DEBUG CONFIGURATION
  * Keep direct values for now so sdkconfig cannot silently override them.
  */
-static const char *WIFI_SSID = "Polytex";
-static const char *WIFI_PASSWORD = "9333polytex";
-static const char *API_BASE_URL = "http://10.8.10.97:5003";
-static const char *PAGER_TOKEN = "pg_GWKPUArb-6o33lEQFVPZG00w8zfysRZ6";
-static const char *PAGER_RESPONDER_NAME = "Supervisor";
+static const char *WIFI_SSID = "";
+static const char *WIFI_PASSWORD = "";
+static const char *API_BASE_URL = "baseURL";
+static const char *PAGER_TOKEN = "PAGERTOKEN";
+static const char *PAGER_RESPONDER_NAME = "";
 #define MAX_ALERTS 16
 #define MAX_TEXT 96
 #define MAX_STATUS 32
