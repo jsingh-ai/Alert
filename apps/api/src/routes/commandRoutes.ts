@@ -60,10 +60,6 @@ export async function commandRoutes(app: FastifyInstance) {
       };
 
 
-      // ---------------------------------------------------------
-      // VALIDATE MACHINE ID
-      // ---------------------------------------------------------
-
       if (!body.machineId) {
         return reply.code(400).send({
           success: false,
@@ -71,10 +67,6 @@ export async function commandRoutes(app: FastifyInstance) {
         });
       }
 
-
-      // ---------------------------------------------------------
-      // CLIENT REQUEST IDEMPOTENCY
-      // ---------------------------------------------------------
 
       const clientRequestId =
         body.clientRequestId?.trim() || null;
@@ -119,10 +111,6 @@ export async function commandRoutes(app: FastifyInstance) {
       }
 
 
-      // ---------------------------------------------------------
-      // CHECK USER MACHINE ACCESS
-      // ---------------------------------------------------------
-
       if (
         !(await canUseMachine(
           ctx,
@@ -137,9 +125,6 @@ export async function commandRoutes(app: FastifyInstance) {
       }
 
 
-      // ---------------------------------------------------------
-      // GET MACHINE
-      // ---------------------------------------------------------
 
       const machine =
         await prisma.machine.findFirst({
@@ -156,10 +141,6 @@ export async function commandRoutes(app: FastifyInstance) {
         });
       }
 
-
-      // ---------------------------------------------------------
-      // BUILD COMMAND TARGETS
-      // ---------------------------------------------------------
 
       let commandLabel =
         body.commandLabel?.trim() ||
@@ -245,9 +226,6 @@ export async function commandRoutes(app: FastifyInstance) {
       }
 
 
-      // ---------------------------------------------------------
-      // VALIDATE DEPARTMENT + ISSUE PAIRS
-      // ---------------------------------------------------------
 
       const validIssueTypes =
         await prisma.issueType.findMany({
@@ -298,10 +276,6 @@ export async function commandRoutes(app: FastifyInstance) {
         });
       }
 
-
-      // ---------------------------------------------------------
-      // CHECK FOR EXISTING ACTIVE ALERTS
-      // ---------------------------------------------------------
 
       const targetDepartmentIds = [
         ...new Set(
@@ -368,17 +342,11 @@ export async function commandRoutes(app: FastifyInstance) {
 
       try {
 
-        // =====================================================
-        // DATABASE TRANSACTION
-        // =====================================================
 
         const result =
           await prisma.$transaction(
             async (tx) => {
 
-              // -----------------------------------------------
-              // CREATE COMMAND
-              // -----------------------------------------------
 
               const command =
                 await tx.andonCommand.create({
@@ -418,9 +386,6 @@ export async function commandRoutes(app: FastifyInstance) {
                 PendingSystemPost[] = [];
 
 
-              // -----------------------------------------------
-              // CREATE ALERT FOR EACH TARGET
-              // -----------------------------------------------
 
               for (const target of targets) {
 
@@ -467,9 +432,6 @@ export async function commandRoutes(app: FastifyInstance) {
                 }
 
 
-                // ---------------------------------------------
-                // CREATE ALERT
-                // ---------------------------------------------
 
                 const alert =
                   await tx.andonAlert.create({
@@ -514,10 +476,6 @@ export async function commandRoutes(app: FastifyInstance) {
                   });
 
 
-                // ---------------------------------------------
-                // CREATE ALERT EVENT
-                // ---------------------------------------------
-
                 await tx.alertEvent.create({
                   data: {
                     alertId:
@@ -545,10 +503,6 @@ export async function commandRoutes(app: FastifyInstance) {
                   }
                 });
 
-
-                // ---------------------------------------------
-                // INTERNAL SYSTEM MESSAGE
-                // ---------------------------------------------
 
                 const alertLabel =
                   alertCommandLabel({
@@ -588,10 +542,6 @@ export async function commandRoutes(app: FastifyInstance) {
                 createdAlerts.push(alert);
               }
 
-
-              // -----------------------------------------------
-              // RECALCULATE COMMAND STATUS
-              // -----------------------------------------------
 
               await recalculateCommandStatus(
                 tx,
@@ -635,11 +585,6 @@ export async function commandRoutes(app: FastifyInstance) {
           );
 
 
-        // =====================================================
-        // POWER AUTOMATE NOTIFICATION
-        // Notification only. Acknowledge/resolve inside ProcessGuard.
-        // One webhook call per newly created department alert.
-        // =====================================================
 
         for (const alert of result.createdAlerts) {
           try {
@@ -679,9 +624,6 @@ export async function commandRoutes(app: FastifyInstance) {
         }
 
 
-        // =====================================================
-        // EXISTING PROCESSGUARD COMMUNICATION SYSTEM
-        // =====================================================
         const channelNotifications:
           Array<{
             channelId: string;
@@ -734,9 +676,6 @@ export async function commandRoutes(app: FastifyInstance) {
         }
 
 
-        // =====================================================
-        // REALTIME EVENTS
-        // =====================================================
 
         emitCompany(
           ctx.companyId,
@@ -772,9 +711,6 @@ export async function commandRoutes(app: FastifyInstance) {
         }
 
 
-        // =====================================================
-        // API RESPONSE
-        // =====================================================
 
         return reply.code(201).send({
           success: true,
