@@ -626,8 +626,7 @@ For the next hardware iteration, use MQTT or long polling as a wake-up signal an
 
 ## Microsoft Teams bridge
 
-The working standalone bridge is included in [`teams-bridge`](./teams-bridge/README.md). Its existing/default Workflow URL remains supported, with optional separate Quality, Supervisor, and Maintenance Workflow URLs. Real URLs and pager tokens belong only in the ignored `teams-bridge/.env` file.
-
+The working standalone bridge is included in [`teams-bridge`](./teams-bridge/README.md). Its existing/default Workflow URL remains supported, with optional separate Quality, Supervisor, and Maintenance Workflow URLs. 
 The root application commands launch the bridge automatically:
 
 ```powershell
