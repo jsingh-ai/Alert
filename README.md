@@ -2,7 +2,6 @@
 
 ProcessGuard Andon is a modern internal manufacturing command and live alert system.
 
-It is built for the workflow you described:
 
 ```text
 Operator presses one command button
