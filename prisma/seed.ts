@@ -83,11 +83,12 @@ async function main() {
     }));
   }
 
-  const removedDepartmentNames = ["Maintenance", "Material Handler"];
+  const removedDepartmentNames = ["Material Handler"];
   const oldTemplateNames = ["Quality Hold", "Machine Down", "Bad Material", "Need Supervisor", "Safety Stop"];
   const departmentSeeds = [
     ["Quality", "#2563eb", 10],
-    ["Supervisor", "#2563eb", 20]
+    ["Supervisor", "#2563eb", 20],
+    ["Maintenance", "#f59e0b", 30]
   ] as const;
 
   const departments: Record<string, Awaited<ReturnType<typeof prisma.department.upsert>>> = {} as any;
@@ -111,7 +112,8 @@ async function main() {
     ["Quality", "Quality support", Priority.NORMAL, 10],
     ["Quality", "Material clear", Priority.NORMAL, 20],
     ["Supervisor", "Supervisor support", Priority.NORMAL, 10],
-    ["Supervisor", "Material clear", Priority.NORMAL, 20]
+    ["Supervisor", "Material clear", Priority.NORMAL, 20],
+    ["Maintenance", "Maintenance support", Priority.NORMAL, 10]
   ] as const;
 
   const issues: Record<string, Awaited<ReturnType<typeof prisma.issueType.upsert>>> = {} as any;
@@ -125,11 +127,11 @@ async function main() {
     });
   }
 
-  async function template(name: string, buttonLabel: string, color: string, targets: Array<{ department: string; issue: string; message?: string | null; priority?: Priority }>) {
+  async function template(name: string, buttonLabel: string, color: string, sortOrder: number, targets: Array<{ department: string; issue: string; message?: string | null; priority?: Priority }>) {
     const t = await prisma.commandTemplate.upsert({
       where: { companyId_name: { companyId: company.id, name } },
-      update: { buttonLabel, color, active: true },
-      create: { companyId: company.id, name, buttonLabel, color, active: true }
+      update: { buttonLabel, color, sortOrder },
+      create: { companyId: company.id, name, buttonLabel, color, sortOrder, active: true }
     });
     await prisma.commandTemplateTarget.deleteMany({ where: { commandTemplateId: t.id } });
     await prisma.commandTemplateTarget.createMany({
@@ -147,17 +149,20 @@ async function main() {
 
   await prisma.commandTemplate.updateMany({ where: { companyId: company.id, name: { in: oldTemplateNames } }, data: { active: false } });
 
-  await template("Call Quality", "Call Quality", "#2563eb", [
+  await template("Call Quality", "Call Quality", "#2563eb", 10, [
     { department: "Quality", issue: "Quality support", priority: Priority.NORMAL }
   ]);
 
-  await template("Call Supervisor", "Call Supervisor", "#2563eb", [
+  await template("Call Supervisor", "Call Supervisor", "#2563eb", 20, [
     { department: "Supervisor", issue: "Supervisor support", priority: Priority.NORMAL }
   ]);
 
-  await template("Material Clear", "Material Clear", "#2563eb", [
+  await template("Material Clear", "Material Clear", "#2563eb", 30, [
     { department: "Quality", issue: "Material clear", priority: Priority.NORMAL },
     { department: "Supervisor", issue: "Material clear", priority: Priority.NORMAL }
+  ]);
+  await template("Call Maintenance", "Call Maintenance", "#f59e0b", 40, [
+    { department: "Maintenance", issue: "Maintenance support", priority: Priority.NORMAL }
   ]);
 
   const admin = await user("admin", "Admin User", Role.ADMIN, company.id, "admin123");
@@ -165,13 +170,13 @@ async function main() {
   const operator = await user("operator", "Line Operator", Role.OPERATOR, company.id, "operator123");
   const quality = await user("quality", "Quality Pager User", Role.RESPONDER, company.id, "quality123");
   const supervisor = await user("supervisor", "Supervisor User", Role.RESPONDER, company.id, "supervisor123");
+  const maintenance = await user("maintenance", "Maintenance User", Role.RESPONDER, company.id, "maintenance123");
   const viewer = await user("viewer", "Board Viewer", Role.VIEWER, company.id, "viewer123");
-  await prisma.user.updateMany({ where: { username: "maintenance" }, data: { active: false } });
 
   await prisma.companyPreference.upsert({
     where: { companyId_key: { companyId: company.id, key: "quick_login_profiles" } },
-    update: { value: ["operator", "manager", "quality", "supervisor"] },
-    create: { companyId: company.id, key: "quick_login_profiles", value: ["operator", "manager", "quality", "supervisor"] }
+    update: { value: ["operator", "manager", "quality", "supervisor", "maintenance"] },
+    create: { companyId: company.id, key: "quick_login_profiles", value: ["operator", "manager", "quality", "supervisor", "maintenance"] }
   });
 
   await resetScopes(admin.membership.id, []);
@@ -179,6 +184,7 @@ async function main() {
   await resetScopes(operator.membership.id, [{ scopeType: ScopeType.MACHINE_GROUP, scopeId: pressGroup.id }]);
   await resetScopes(quality.membership.id, [{ scopeType: ScopeType.DEPARTMENT, scopeId: departments["Quality"].id }]);
   await resetScopes(supervisor.membership.id, [{ scopeType: ScopeType.DEPARTMENT, scopeId: departments["Supervisor"].id }]);
+  await resetScopes(maintenance.membership.id, [{ scopeType: ScopeType.DEPARTMENT, scopeId: departments["Maintenance"].id }]);
   await resetScopes(viewer.membership.id, [{ scopeType: ScopeType.DEPARTMENT, scopeId: departments["Quality"].id }]);
 
   const pagerTokens = [

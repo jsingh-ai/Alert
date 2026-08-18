@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { alertCommandLabel, includeAlert, serializeAlert, transitionAlert } from "../services/alertService.js";
 import { createAlertSystemMessages, createCommunicationMessage, ensureMachineCommunicationChannel, serializeMessage } from "../services/communicationService.js";
 import { ACTIVE_ALERT_STATUSES, canActAsResponder, canSeeDepartment, canUseMachine, machineWhereForContext, scopedDepartmentIds } from "../services/permissions.js";
+import { triggerAlertAcknowledged } from "../services/powerAutomateService.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 
 function cleanString(value: unknown) {
@@ -177,6 +178,36 @@ export async function alertRoutes(app: FastifyInstance) {
           })));
         } catch (error) {
           request.log.warn({ err: error, alertId: updated.id, action }, "alert action completed but communication system post failed");
+        }
+      }
+
+      if (action === "acknowledge" && updated.acknowledgedAt) {
+        const acknowledgeSeconds = Math.max(0, Math.floor(
+          (updated.acknowledgedAt.getTime() - updated.createdAt.getTime()) / 1000
+        ));
+        try {
+          const webhookResult = await triggerAlertAcknowledged({
+            alertId: updated.id,
+            commandId: updated.commandId,
+            departmentName: updated.department.name,
+            machineName: updated.machine.name,
+            machineCode: updated.machine.code ?? null,
+            issueName: updated.issueType?.name ?? "General help",
+            priority: updated.priority,
+            responderName: updated.responderNameText ?? ctx.user.displayName,
+            acknowledgedAt: updated.acknowledgedAt,
+            acknowledgeSeconds,
+            source: "WEB"
+          });
+          request.log.info(
+            { alertId: updated.id, webhookStatus: webhookResult.status },
+            "Power Automate acknowledgement notification SUCCESS"
+          );
+        } catch (error) {
+          request.log.error(
+            { err: error, alertId: updated.id },
+            "Alert acknowledged but Power Automate acknowledgement notification failed"
+          );
         }
       }
 

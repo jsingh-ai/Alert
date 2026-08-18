@@ -9,6 +9,7 @@ const quickLoginProfiles = [
   { id: "operator", label: "Operator", detail: "Operator page" },
   { id: "quality", label: "Quality", detail: "Department queue" },
   { id: "supervisor", label: "Supervisor", detail: "Department queue" },
+  { id: "maintenance", label: "Maintenance", detail: "Department queue" },
   { id: "manager", label: "Manager", detail: "Live floor and reports" }
 ];
 

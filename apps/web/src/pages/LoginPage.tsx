@@ -7,7 +7,7 @@ export function LoginPage() {
   const { login, demoLogin } = useAuth();
   const quickLogin = useQuery({ queryKey: ["quick-login"], queryFn: () => api<any>("/api/auth/quick-login") });
   const enabledProfiles = new Set((quickLogin.data?.data?.enabledProfiles ?? []) as string[]);
-  const departmentProfiles = ["quality", "supervisor"].filter((profile) => enabledProfiles.has(profile));
+  const departmentProfiles = ["quality", "supervisor", "maintenance"].filter((profile) => enabledProfiles.has(profile));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [companies, setCompanies] = useState<any[]>([]);

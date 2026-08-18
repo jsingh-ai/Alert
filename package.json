@@ -9,9 +9,9 @@
     "apps/web"
   ],
   "scripts": {
-    "dev": "concurrently -n API,WEB -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "dev": "concurrently -k -n API,WEB,BRIDGE -c blue,green,magenta \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm --prefix teams-bridge start\"",
     "build": "npm run build -w apps/web && npm run build -w apps/api",
-    "start": "node apps/api/dist/index.js",
+    "start": "concurrently -k -n API,BRIDGE -c blue,magenta \"node apps/api/dist/index.js\" \"npm --prefix teams-bridge start\"",
     "install:fresh": "npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:push": "prisma db push --schema prisma/schema.prisma",

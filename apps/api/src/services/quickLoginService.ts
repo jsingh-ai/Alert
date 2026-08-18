@@ -3,17 +3,18 @@ import { config } from "../config.js";
 import { prisma } from "../db.js";
 
 export const QUICK_LOGIN_PREFERENCE_KEY = "quick_login_profiles";
-export const QUICK_LOGIN_PROFILES = ["operator", "manager", "quality", "supervisor"] as const;
+export const QUICK_LOGIN_PROFILES = ["operator", "manager", "quality", "supervisor", "maintenance"] as const;
 export type QuickLoginProfile = typeof QUICK_LOGIN_PROFILES[number];
 
 const quickLoginProfileSet = new Set<string>(QUICK_LOGIN_PROFILES);
-const defaultDevProfiles: QuickLoginProfile[] = ["operator", "manager", "quality", "supervisor"];
+const defaultDevProfiles: QuickLoginProfile[] = ["operator", "manager", "quality", "supervisor", "maintenance"];
 
 export const quickLoginUsernameByProfile: Record<QuickLoginProfile, string> = {
   operator: "operator",
   manager: "manager",
   quality: "quality",
-  supervisor: "supervisor"
+  supervisor: "supervisor",
+  maintenance: "maintenance"
 };
 
 export function normalizeQuickLoginProfiles(value: unknown): QuickLoginProfile[] {

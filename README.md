@@ -212,8 +212,8 @@ HOST=0.0.0.0
 JWT_SECRET="paste-the-random-secret-here"
 DEMO_MODE=false
 SERVE_WEB=true
-CORS_ORIGIN="http://YOUR_SERVER_IP:5003"
-PUBLIC_URL="http://YOUR_SERVER_IP:5003"
+CORS_ORIGIN="http://10.8.10.97:5003"
+PUBLIC_URL="http://10.8.10.97:5003"
 REPORT_TIME_ZONE="America/Chicago"
 SEED_DEMO=true
 ```
@@ -270,7 +270,7 @@ http://localhost:5003
 Open from another device on the same network:
 
 ```text
-http://YOUR_SERVER_IP:5003
+http://10.8.10.97:5003
 ```
 
 ### 8. Open the Windows firewall port
@@ -511,7 +511,7 @@ Set these values in `pager/pager_secrets.h`:
 ```c
 #define PAGER_WIFI_SSID "YOUR_WIFI_SSID"
 #define PAGER_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-#define PAGER_API_BASE_URL "http://YOUR_SERVER_IP:5003"
+#define PAGER_API_BASE_URL "http://10.8.10.97:5003"
 #define PAGER_TOKEN_VALUE "PASTE_PAGER_TOKEN_SHOWN_ONCE_IN_ADMIN"
 #define PAGER_RESPONDER_NAME_VALUE "Quality"
 ```
@@ -623,3 +623,15 @@ Your firmware polls every 15 seconds when there are no active alerts. Reduce thi
 ```
 
 For the next hardware iteration, use MQTT or long polling as a wake-up signal and keep REST as the source-of-truth snapshot.
+
+## Microsoft Teams bridge
+
+The working standalone bridge is included in [`teams-bridge`](./teams-bridge/README.md). Its existing/default Workflow URL remains supported, with optional separate Quality, Supervisor, and Maintenance Workflow URLs. Real URLs and pager tokens belong only in the ignored `teams-bridge/.env` file.
+
+The root application commands launch the bridge automatically:
+
+```powershell
+npm.cmd run dev
+```
+
+This starts the API, web application, and Teams bridge together. `npm.cmd start` similarly starts the built API and the bridge together.

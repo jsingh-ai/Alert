@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { alertCommandLabel, includePagerAlert, serializePagerAlert, transitionAlert } from "../services/alertService.js";
 import { createAlertSystemMessages, serializeMessage } from "../services/communicationService.js";
 import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
+import { triggerAlertAcknowledged } from "../services/powerAutomateService.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 import { sha256 } from "../utils/crypto.js";
 
@@ -109,6 +110,36 @@ export async function pagerRoutes(app: FastifyInstance) {
           })));
         } catch (error) {
           request.log.warn({ err: error, alertId: updated.id, action, source: "pager" }, "pager action completed but communication system post failed");
+        }
+      }
+
+      if (action === "acknowledge" && updated.acknowledgedAt) {
+        const acknowledgeSeconds = Math.max(0, Math.floor(
+          (updated.acknowledgedAt.getTime() - updated.createdAt.getTime()) / 1000
+        ));
+        try {
+          const webhookResult = await triggerAlertAcknowledged({
+            alertId: updated.id,
+            commandId: updated.commandId,
+            departmentName: updated.department.name,
+            machineName: updated.machine.name,
+            machineCode: updated.machine.code ?? null,
+            issueName: updated.issueType?.name ?? "General help",
+            priority: updated.priority,
+            responderName: updated.responderNameText ?? responderNameText,
+            acknowledgedAt: updated.acknowledgedAt,
+            acknowledgeSeconds,
+            source: "PAGER"
+          });
+          request.log.info(
+            { alertId: updated.id, webhookStatus: webhookResult.status, source: "pager" },
+            "Power Automate acknowledgement notification SUCCESS"
+          );
+        } catch (error) {
+          request.log.error(
+            { err: error, alertId: updated.id, source: "pager" },
+            "Alert acknowledged but Power Automate acknowledgement notification failed"
+          );
         }
       }
 
