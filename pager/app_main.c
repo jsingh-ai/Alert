@@ -1,20 +1,6 @@
 /*
  * ProcessGuard / Andon Pager - app_main.c
- * Updated debug/stability version
- *
- * Key fixes in this version:
- * 1. Uses the real main/app_main.c structure for ESP-IDF PlatformIO project.
- * 2. Adds Wi-Fi/IP logging with disconnect reason descriptions.
- * 3. Removes duplicate esp_wifi_connect() direct call after esp_wifi_start().
- * 4. Adds reconnect backoff so the Core2 does not constantly hammer the AP.
- * 5. Uses Wi-Fi modem sleep for better battery life.
- * 6. Moves large filtered alert array off the task stack.
- * 7. Increases pager task stack from 10240 to 24576 bytes.
- * 8. Pager can acknowledge alerts, but cannot resolve/close them.
- *    After acknowledge, the pager tells the user to go to the machine to close.
- * 9. Vibrates only for new unacknowledged OPEN alerts.
- *    ACKNOWLEDGED alerts stay visible but use the normal slower poll interval.
- *
+ * 
  * Replace WIFI_PASSWORD and PAGER_TOKEN before flashing.
  */
 
