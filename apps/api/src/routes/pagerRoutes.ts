@@ -53,6 +53,7 @@ async function activePagerAlerts(pager: PagerContext) {
     orderBy: [{ status: "asc" }, { createdAt: "asc" }],
     take: MAX_PAGER_ACTIVE_ALERTS
   });
+
   return alerts.map(serializePagerAlert);
 }
 

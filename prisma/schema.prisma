@@ -188,10 +188,12 @@ model Machine {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  machineGroup MachineGroup  @relation(fields: [machineGroupId], references: [id], onDelete: Restrict)
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machineGroup MachineGroup @relation(fields: [machineGroupId], references: [id], onDelete: Restrict)
   commands     AndonCommand[]
   alerts       AndonAlert[]
+  pagerDevices PagerDevice[]
+
   communicationChannels CommunicationChannel[]
 
   @@unique([companyId, code])
@@ -373,21 +375,28 @@ model AlertEvent {
 }
 
 model PagerDevice {
-  id               String   @id @default(cuid())
-  companyId        String   @map("company_id")
-  departmentId     String   @map("department_id")
+  id               String    @id @default(cuid())
+  companyId        String    @map("company_id")
+  departmentId     String    @map("department_id")
+  machineId        String?   @map("machine_id")
+
   name             String
-  tokenHash        String   @unique @map("token_hash")
-  tokenFingerprint String?  @map("token_fingerprint")
-  active           Boolean  @default(true)
+  tokenHash        String    @unique @map("token_hash")
+  tokenFingerprint String?   @map("token_fingerprint")
+  active           Boolean   @default(true)
   lastSeenAt       DateTime? @map("last_seen_at")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  company    lastSeenAt       DateTime? @map("last_seen_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  machine    Machine?   @relation(fields: [machineId], references: [id], onDelete: SetNull)
 
-  @@index([companyId, departmentId, active])
+  @@index([companyId, departmentId, machineId, active])
   @@map("pager_devices")
 }
 
