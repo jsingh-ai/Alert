@@ -1,7 +1,15 @@
 import { useState } from "react";
+import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon } from "../components/icons";
+
+const DEPARTMENT_ICONS: Record<string, (props: { className?: string }) => ReactElement> = {
+  quality: ShieldCheckIcon,
+  supervisor: UsersIcon,
+  maintenance: WrenchIcon
+};
 
 export function LoginPage() {
   const { login, demoLogin } = useAuth();
@@ -65,27 +73,37 @@ export function LoginPage() {
           </div>
           <div className="demo-grid">
             <button className="demo-button operator" onClick={() => demo("operator")} disabled={busy || !enabledProfiles.has("operator")}>
+              <span className="demo-button-icon"><BoltIcon /></span>
               <strong>Operator</strong>
               <span>{enabledProfiles.has("operator") ? "Call help" : "Disabled"}</span>
             </button>
             <button className={`demo-button department ${showDepartments ? "active" : ""}`} onClick={() => setShowDepartments((current) => !current)} disabled={busy || departmentProfiles.length === 0}>
+              <span className="demo-button-icon"><LayersIcon /></span>
               <strong>Department</strong>
               <span>{departmentProfiles.length ? "Queue view" : "Disabled"}</span>
             </button>
             <button className="demo-button manager" onClick={() => demo("manager")} disabled={busy || !enabledProfiles.has("manager")}>
+              <span className="demo-button-icon"><GridIcon /></span>
               <strong>Manager</strong>
               <span>{enabledProfiles.has("manager") ? "Live floor" : "Disabled"}</span>
             </button>
             <button className="demo-button admin" disabled>
+              <span className="demo-button-icon"><ShieldIcon /></span>
               <strong>Admin</strong>
               <span>Sign in below</span>
             </button>
           </div>
           {showDepartments && (
             <div className="department-picker">
-              {departmentProfiles.map((profile) => (
-                <button key={profile} className={selectedDepartment === profile ? "selected" : ""} onClick={() => demo(profile)} disabled={busy}>{profile}</button>
-              ))}
+              {departmentProfiles.map((profile) => {
+                const Icon = DEPARTMENT_ICONS[profile] ?? ShieldIcon;
+                return (
+                  <button key={profile} className={selectedDepartment === profile ? "selected" : ""} onClick={() => demo(profile)} disabled={busy}>
+                    <span className="department-picker-icon"><Icon /></span>
+                    {profile}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
