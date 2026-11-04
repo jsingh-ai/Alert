@@ -83,7 +83,7 @@ export function buildConfig(env = process.env) {
 
   return {
     processGuardBaseUrl: requiredUrl(env.PROCESSGUARD_BASE_URL ?? "http://127.0.0.1:5003", "PROCESSGUARD_BASE_URL", ["http:", "https:"]),
-    bridgePublicUrl: requiredUrl(env.BRIDGE_PUBLIC_URL ?? "http://10.8.10.97:5010", "BRIDGE_PUBLIC_URL", ["http:", "https:"]),
+    bridgePublicUrl: requiredUrl(env.BRIDGE_PUBLIC_URL ?? "http://192.168.26.2:5010", "BRIDGE_PUBLIC_URL", ["http:", "https:"]),
     teamsWebhookUrl: defaultWebhookUrl
       ? requiredUrl(defaultWebhookUrl, "TEAMS_WORKFLOW_WEBHOOK_URL", ["https:"])
       : "",

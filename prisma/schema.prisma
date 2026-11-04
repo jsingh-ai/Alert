@@ -374,6 +374,7 @@ model AlertEvent {
   @@map("alert_events")
 }
 
+
 model PagerDevice {
   id               String    @id @default(cuid())
   companyId        String    @map("company_id")
@@ -388,10 +389,6 @@ model PagerDevice {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  company    lastSeenAt       DateTime? @map("last_seen_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   machine    Machine?   @relation(fields: [machineId], references: [id], onDelete: SetNull)
@@ -399,6 +396,7 @@ model PagerDevice {
   @@index([companyId, departmentId, machineId, active])
   @@map("pager_devices")
 }
+
 
 model UserPreference {
   id        String   @id @default(cuid())

@@ -26,8 +26,8 @@ $MaintenanceWebhook = Read-Host "Maintenance channel Workflow URL (optional; Ent
 $QualityToken = Read-Secret "Quality ProcessGuard pager/integration token (hidden)"
 $SupervisorToken = Read-Secret "Supervisor ProcessGuard pager/integration token (hidden)"
 $MaintenanceToken = Read-Secret "Maintenance ProcessGuard pager/integration token (hidden; may be blank)"
-$LanAddress = Read-Host "ProcessGuard computer LAN address [10.8.10.97]"
-if ([string]::IsNullOrWhiteSpace($LanAddress)) { $LanAddress = "10.8.10.97" }
+$LanAddress = Read-Host "ProcessGuard computer LAN address [192.168.26.2]"
+if ([string]::IsNullOrWhiteSpace($LanAddress)) { $LanAddress = "192.168.26.2" }
 
 $RandomBytes = New-Object byte[] 32
 $RandomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()

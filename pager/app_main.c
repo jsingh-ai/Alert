@@ -1,14 +1,16 @@
-/*
- * ProcessGuard / Andon Pager - app_main.c
- * 
- * Replace WIFI_PASSWORD and PAGER_TOKEN before flashing.
- */
-
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <ctype.h>
+#include <errno.h>
+#include <math.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include <lwip/sockets.h>
+#include <lwip/inet.h>
 
 #include "sdkconfig.h"
 
@@ -18,14 +20,18 @@
 #include <freertos/task.h>
 
 #include <esp_err.h>
+#include <esp_attr.h>
 #include <esp_event.h>
 #include <esp_http_client.h>
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_sleep.h>
+#include <lwip/ip4_addr.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <nvs_flash.h>
+
+#include <driver/gpio.h>
 
 #if defined(CONFIG_PM_ENABLE)
 #include <esp_pm.h>
@@ -35,16 +41,42 @@
 #include <lvgl/lvgl.h>
 
 #include "core2forAWS.h"
+#include "axp192_i2c.h"
 
 /*
+192.168.26.109	quality press 14
+192.168.26.110	supervisor press 15
+192.168.26.111	Quality press 15
+
  * DEBUG CONFIGURATION
  * Keep direct values for now so sdkconfig cannot silently override them.
+ * 
+ * Quality Press 14 pager token = "pg_DTqgAjDJ9GPyAQviYYV9Ok9n2rmfrL1R"
+ * Supervisor press 15 pager token = "pg_2Dr5Sqixt5ON8P1JY7z3cXHzCMl-VNbo"
+ * Quality Press 15 pager token = "pg_EOV7dN1td-FZI8QvdgWG81QU31w4Dq22"
+
+
+
  */
-static const char *WIFI_SSID = "";
-static const char *WIFI_PASSWORD = "";
-static const char *API_BASE_URL = "baseURL";
-static const char *PAGER_TOKEN = "PAGERTOKEN";
-static const char *PAGER_RESPONDER_NAME = "";
+static const char *WIFI_SSID = "DEV-APPS";
+static const char *WIFI_PASSWORD = "2FSM#DEV@APP1";
+static const char *API_BASE_URL = "http://192.168.26.2:5003";
+
+/* 
+ * Set to 0 to use DHCP instead. */
+#define USE_STATIC_IP 1
+static const char *STATIC_IP_ADDR = "192.168.26.109";
+static const char *STATIC_IP_GATEWAY = "192.168.26.2";
+static const char *STATIC_IP_NETMASK = "255.255.255.0";
+
+
+static const char *PAGER_TOKEN ="pg_DTqgAjDJ9GPyAQviYYV9Ok9n2rmfrL1R";
+static const char *PAGER_RESPONDER_NAME = "Quality Press 14";
+/*Local device-side machine scope. Empty string means all machines. */
+static const char *PAGER_MACHINE_FILTER = "Press 14";
+
+
+
 #define MAX_ALERTS 16
 #define MAX_TEXT 96
 #define MAX_STATUS 32
@@ -52,36 +84,97 @@ static const char *PAGER_RESPONDER_NAME = "";
 #define HTTP_BUFFER_SIZE 4096
 
 #define VISIBLE_CARDS 4
-#define UI_TICK_MS 250
-#define BATTERY_REFRESH_MS 30000
+#define UI_ACTIVE_TICK_MS 250
 
-#define POLL_WITH_UNACKED_OPEN_MS 1000
-#define POLL_IDLE_MS 20000
-#define POLL_ERROR_MS 10000
+/* With the backlight off nothing on screen needs redrawing, so the pager task
+ * can sleep far longer between wakeups. A touch or button press gives
+ * g_wake_sem, which cuts this wait short, so responsiveness is unchanged. */
+#define UI_SCREEN_OFF_TICK_MS 1000
 
-#define DISPLAY_ACTIVE_BRIGHTNESS 68
-#define DISPLAY_DIM_BRIGHTNESS 8
-#define DISPLAY_OFF_NO_ALERT_MS 10000
-#define DISPLAY_DIM_WITH_ALERT_MS 15000
-#define DISPLAY_OFF_WITH_ALERT_MS 35000
+#define TOUCH_WAKE_TASK_TICK_MS 50
+
+/*
+ * Battery / charge sampling.
+ *
+ * These used to be serviced inside pager_task, which is also the task that
+ * blocks inside esp_http_client_perform() and services Wi-Fi reconnects. The
+ * AXP192 lives on local I2C and has nothing to do with the network, so it now
+ * has its own task (power_monitor_task) and cannot be starved by HTTP, a
+ * reconnect storm, or a disconnected AP.
+ *
+ * The cadence is also much faster while the screen is on: at the old 30 s
+ * interval combined with the low-pass filter below, a real percentage change
+ * took several minutes to reach the label, which looked exactly like a frozen
+ * reading.
+ */
+#define BATTERY_REFRESH_ACTIVE_MS 5000
+#define BATTERY_REFRESH_SCREEN_OFF_MS 30000
+
+/* A single failed I2C read used to abort the whole refresh silently. */
+#define BATTERY_SAMPLE_RETRIES 3
+
+/* Usable inner width of the battery body glyph (28 px wide, 2 px border). */
+#define BATTERY_FILL_MAX_W 22
+
+#define POLL_WITH_UNACKED_OPEN_MS 45000
+#define POLL_IDLE_MS 45000
+#define POLL_ERROR_MS 15000
+
+#define DISPLAY_ACTIVE_BRIGHTNESS 100
+#define DISPLAY_DIM_BRIGHTNESS 10
+
+#define DISPLAY_OFF_NO_ALERT_MS 3000
+#define DISPLAY_DIM_WITH_ALERT_MS 5000
+#define DISPLAY_OFF_WITH_ALERT_MS 15000
 
 #define NEW_OPEN_VIBRATE_COOLDOWN_MS 2000
-#define OPEN_REPEAT_VIBRATE_MS 60000
+#define OPEN_REPEAT_VIBRATE_MS 0
+#define NEW_ALERT_VIBRATE_MS 2500
+#define ACK_SYNC_GRACE_MS 30000
 #define ACK_INSTRUCTION_MS 3000
 
-#define ENABLE_DEEP_SLEEP_WHEN_EMPTY 0
-#define DEEP_SLEEP_EMPTY_AFTER_MS 300000
-#define DEEP_SLEEP_WAKE_US (30ULL * 1000ULL * 1000ULL)
+#define ENABLE_DEEP_SLEEP_WHEN_NO_OPEN 0
+#define DEEP_SLEEP_NO_OPEN_AFTER_MS 120000
+#define DEEP_SLEEP_WAKE_US (60ULL * 1000ULL * 1000ULL)
+#define TOUCH_WAKE_GPIO GPIO_NUM_39
+
+/*
+ * Wi-Fi radio power save. This is the single largest battery item on a
+ * REST-polling pager: with WIFI_PS_NONE the radio receiver stays powered
+ * continuously between the 45 s polls even though nothing is inbound.
+ *
+ * WIFI_PS_MIN_MODEM parks the radio between AP beacons and is safe here
+ * because every transaction is initiated by the pager. WIFI_PS_MAX_MODEM
+ * saves more but skips beacons (WIFI_LISTEN_INTERVAL of them), which some
+ * plant APs handle poorly; switch to it only after testing on the real AP.
+ */
+#define WIFI_POWER_SAVE_MODE WIFI_PS_MIN_MODEM
+#define WIFI_LISTEN_INTERVAL 3
+
+/*
+ * Boot-time TCP reachability probe. Useful while bringing up a new plant
+ * network, expensive afterwards: on an isolated VLAN the two external
+ * targets each block for the full 10 s timeout with the radio at full power.
+ * Set to 1 to re-enable it for debugging.
+ */
+#define ENABLE_TCP_DIAGNOSTIC_PROBE 0
+
+/* This pager does not use the M-BUS/expansion 5 V rail. Keeping the AXP192
+ * boost output disabled avoids powering an unused rail. Set to 0 if an
+ * attached accessory actually needs 5 V from the Core2. */
+#define DISABLE_UNUSED_5V_EXPANSION 1
 
 #define RESOLVED_SUPPRESS_MS 12000
 
 /* Reconnect backoff. Prevents constant disconnect/reconnect hammering. */
-#define WIFI_RECONNECT_MIN_MS 3000
-#define WIFI_RECONNECT_MAX_MS 30000
+#define WIFI_RECONNECT_MIN_MS 5000
+#define WIFI_RECONNECT_MAX_MS 10000
 
 typedef struct {
     char id[MAX_ID];
     char machine[MAX_TEXT];
+    char machine_name[MAX_TEXT];
+    char machine_code[MAX_TEXT];
     char issue[MAX_TEXT];
     char message[MAX_TEXT];
     char status[MAX_STATUS];
@@ -103,6 +196,15 @@ static int64_t g_last_sync_ms = 0;
 
 static char g_recently_resolved_id[MAX_ID] = "";
 static int64_t g_recently_resolved_until_ms = 0;
+
+/* Prevent a just-acknowledged alert from being treated as new again while
+ * the backend is still converging from OPEN -> ACKNOWLEDGED. */
+static char g_recently_acknowledged_id[MAX_ID] = "";
+static int64_t g_recently_acknowledged_until_ms = 0;
+
+/* Non-blocking motor deadline. This keeps ACK/network/UI processing alive
+ * during a long vibration. */
+static int64_t g_vibration_until_ms = 0;
 
 static char g_prev_open_ids[MAX_ALERTS][MAX_ID];
 static size_t g_prev_open_count = 0;
@@ -151,6 +253,24 @@ static lv_obj_t *g_battery_body = NULL;
 static lv_obj_t *g_battery_tip = NULL;
 static lv_obj_t *g_battery_fill = NULL;
 static lv_obj_t *g_battery_label = NULL;
+static lv_obj_t *g_charging_icon = NULL;
+static int g_battery_percent = -1;
+static bool g_charge_status_valid = false;
+static bool g_battery_is_charging = false;
+
+/* External supply (ACIN or VBUS) present, independent of whether the charger
+ * is currently pushing current into the cell. A full pack on the charger
+ * reports "not charging" on REG00 bit 2, which previously looked identical to
+ * running on battery. */
+static bool g_external_power = false;
+
+/* Set whenever something should override the "percentage did not change"
+ * early return: display wake, charge-state transition, first sample. */
+static volatile bool g_force_battery_refresh = true;
+
+/* Discard the low-pass history instead of crawling toward a new operating
+ * point (plugging in / unplugging shifts terminal voltage immediately). */
+static volatile bool g_battery_snap_filter = true;
 
 static char g_selected_alert_id[MAX_ID] = "";
 static bool g_detail_mode = false;
@@ -159,11 +279,27 @@ static volatile bool g_ui_dirty = true;
 static volatile bool g_action_in_flight = false;
 
 static QueueHandle_t g_action_queue = NULL;
+static SemaphoreHandle_t g_display_power_mutex = NULL;
+
+/* Given by the touch task and the button handlers to cut short the pager
+ * task's idle wait. Lets the idle wait be long (battery) without making the
+ * UI feel slow (responsiveness). */
+static SemaphoreHandle_t g_wake_sem = NULL;
+
+/* Same idea for the power monitor task: a touch wake should re-read the
+ * AXP192 immediately rather than showing a value up to 30 s old. */
+static SemaphoreHandle_t g_battery_wake_sem = NULL;
 
 static int64_t g_last_user_activity_ms = 0;
-static int64_t g_empty_since_ms = 0;
-static uint8_t g_display_brightness = 255;
+static int64_t g_no_open_since_ms = 0;
+static volatile uint8_t g_display_brightness = 255;
 static int64_t g_instruction_until_ms = 0;
+static bool g_timer_wakeup_boot = false;
+static bool g_initial_sync_complete = false;
+
+/* Survives deep sleep. Supplying the last channel as a scan hint makes the
+ * once-per-minute association much shorter without locking to one BSSID. */
+RTC_DATA_ATTR static uint8_t g_saved_wifi_channel = 0;
 
 static void render_alerts(void);
 static void update_battery_indicator(void);
@@ -172,46 +308,150 @@ static void action_button_event_handler(lv_obj_t *obj, lv_event_t event);
 static void back_button_event_handler(lv_obj_t *obj, lv_event_t event);
 static void page_prev_event_handler(lv_obj_t *obj, lv_event_t event);
 static void page_next_event_handler(lv_obj_t *obj, lv_event_t event);
+static bool is_recently_acknowledged_suppressed(const char *alert_id);
 
 static int64_t now_ms(void)
 {
     return esp_timer_get_time() / 1000;
 }
 
-static void set_display_brightness(uint8_t brightness)
+static void notify_pager_wake(void)
 {
-    if (g_display_brightness == brightness) {
+    if (g_wake_sem) {
+        xSemaphoreGive(g_wake_sem);
+    }
+}
+
+/* Cut short the power monitor task's wait and make the next sample render
+ * even if the integer percentage is unchanged. */
+static void notify_battery_refresh(void)
+{
+    g_force_battery_refresh = true;
+
+    if (g_battery_wake_sem) {
+        xSemaphoreGive(g_battery_wake_sem);
+    }
+}
+
+static void pager_wait_ms(int wait_ms)
+{
+    if (wait_ms <= 0) {
         return;
     }
-    Core2ForAWS_Display_SetBrightness(brightness);
+
+    if (g_wake_sem) {
+        /* Returns early if something gave the semaphore; otherwise this is a
+         * plain blocking wait and the CPU can enter light sleep. */
+        xSemaphoreTake(g_wake_sem, pdMS_TO_TICKS(wait_ms));
+    } else {
+        vTaskDelay(pdMS_TO_TICKS(wait_ms));
+    }
+}
+
+static void set_display_brightness(uint8_t brightness)
+{
+    xSemaphoreTake(g_display_power_mutex, portMAX_DELAY);
+
+    if (g_display_brightness == brightness) {
+        xSemaphoreGive(g_display_power_mutex);
+        return;
+    }
+
+    if (brightness == 0) {
+        /* The BSP maps brightness 0 to a still-enabled 2.2 V DCDC3 rail.
+         * Turn that backlight rail off after preserving the requested value. */
+        Core2ForAWS_Display_SetBrightness(0);
+        Axp192_EnableDCDC3(0);
+    } else {
+        /* Program the requested voltage before enabling the rail so wake-up
+         * does not briefly restart at the old minimum voltage. */
+        Core2ForAWS_Display_SetBrightness(brightness);
+        Axp192_EnableDCDC3(1);
+    }
+
     g_display_brightness = brightness;
+    xSemaphoreGive(g_display_power_mutex);
+}
+
+static void mark_user_activity_now(void)
+{
+    xSemaphoreTake(g_display_power_mutex, portMAX_DELAY);
+    g_last_user_activity_ms = now_ms();
+    xSemaphoreGive(g_display_power_mutex);
+}
+
+static int64_t read_last_user_activity_ms(void)
+{
+    xSemaphoreTake(g_display_power_mutex, portMAX_DELAY);
+    int64_t activity_ms = g_last_user_activity_ms;
+    xSemaphoreGive(g_display_power_mutex);
+    return activity_ms;
 }
 
 static void record_user_activity(void)
 {
-    g_last_user_activity_ms = now_ms();
+    /* Once a person is interacting, this is no longer a maintenance-only
+     * wake and the normal no-OPEN grace period must apply. */
+    g_timer_wakeup_boot = false;
+    mark_user_activity_now();
     set_display_brightness(DISPLAY_ACTIVE_BRIGHTNESS);
+
+    /* Interrupt the pager task's idle wait so the screen repaints at once. */
+    notify_pager_wake();
+
+    /* Whoever just woke the screen is looking at the battery indicator right
+     * now, so re-read the AXP192 instead of showing a value up to one sleep
+     * interval old. */
+    notify_battery_refresh();
 }
 
 static void wake_display_for_event(void)
 {
-    g_last_user_activity_ms = now_ms();
+    mark_user_activity_now();
     set_display_brightness(DISPLAY_ACTIVE_BRIGHTNESS);
+    notify_battery_refresh();
 }
 
-static int battery_percent_from_voltage(float voltage)
+/*
+ * Li-ion discharge is strongly non-linear, so the previous straight line from
+ * 3.20 V to 4.20 V misreported most of the usable range - in particular it
+ * pushed mid-charge cells down into the <=20% red band. This is a piecewise
+ * curve for a single-cell LiPo under the Core2's light load.
+ *
+ * While the AXP192 is charging, terminal voltage sits above the cell's rested
+ * voltage. Removing a fixed offset stops the reading from jumping the moment
+ * USB is plugged in or pulled.
+ */
+static int battery_percent_from_voltage(float voltage, bool charging)
 {
-    const float v_min = 3.20f;
-    const float v_max = 4.20f;
+    static const float curve_v[] =
+        { 3.30f, 3.50f, 3.60f, 3.70f, 3.75f, 3.80f, 3.90f, 4.00f, 4.10f, 4.20f };
+    static const int curve_pct[] =
+        { 0,     10,    20,    35,    45,    55,    70,    82,    92,    100  };
 
-    if (voltage <= v_min) {
+    const size_t point_count = sizeof(curve_pct) / sizeof(curve_pct[0]);
+
+    if (charging) {
+        voltage -= 0.06f;
+    }
+
+    if (voltage <= curve_v[0]) {
         return 0;
     }
-    if (voltage >= v_max) {
+    if (voltage >= curve_v[point_count - 1]) {
         return 100;
     }
 
-    return (int)(((voltage - v_min) / (v_max - v_min)) * 100.0f + 0.5f);
+    for (size_t i = 1; i < point_count; i++) {
+        if (voltage <= curve_v[i]) {
+            float span = curve_v[i] - curve_v[i - 1];
+            float frac = (voltage - curve_v[i - 1]) / span;
+            int delta = curve_pct[i] - curve_pct[i - 1];
+            return curve_pct[i - 1] + (int)((frac * (float)delta) + 0.5f);
+        }
+    }
+
+    return 100;
 }
 
 static lv_color_t battery_color_for_percent(int pct)
@@ -273,6 +513,58 @@ static int clamp_elapsed(int elapsed_seconds)
         return 24 * 60 * 60;
     }
     return elapsed_seconds;
+}
+
+/*
+ * Normalize machine identifiers so "Press 14" also matches values such as
+ * "PRESS-14", "Press_14", or "Press #14" from the backend.
+ */
+static void normalize_machine_key(const char *input, char *out, size_t out_len)
+{
+    if (!out || out_len == 0) {
+        return;
+    }
+
+    out[0] = '\0';
+    if (!input) {
+        return;
+    }
+
+    size_t j = 0;
+    for (size_t i = 0; input[i] != '\0' && j + 1 < out_len; i++) {
+        unsigned char ch = (unsigned char)input[i];
+        if (isalnum(ch)) {
+            out[j++] = (char)tolower(ch);
+        }
+    }
+    out[j] = '\0';
+}
+
+static bool alert_matches_machine_filter(const andon_alert_t *alert)
+{
+    if (!alert) {
+        return false;
+    }
+
+    /* Empty filter means every machine already authorized by the pager token. */
+    if (!PAGER_MACHINE_FILTER || PAGER_MACHINE_FILTER[0] == '\0') {
+        return true;
+    }
+
+    char wanted[MAX_TEXT];
+    char machine_name[MAX_TEXT];
+    char machine_code[MAX_TEXT];
+
+    normalize_machine_key(PAGER_MACHINE_FILTER, wanted, sizeof(wanted));
+    normalize_machine_key(alert->machine_name, machine_name, sizeof(machine_name));
+    normalize_machine_key(alert->machine_code, machine_code, sizeof(machine_code));
+
+    if (wanted[0] == '\0') {
+        return true;
+    }
+
+    return (machine_name[0] != '\0' && strcmp(wanted, machine_name) == 0) ||
+           (machine_code[0] != '\0' && strcmp(wanted, machine_code) == 0);
 }
 
 static void set_status_text(const char *text, lv_color_t color)
@@ -381,30 +673,35 @@ static size_t count_unacknowledged_open_alerts(void)
 
 static void set_led_idle(void)
 {
+#if CONFIG_SOFTWARE_SK6812_SUPPORT
     Core2ForAWS_Sk6812_Clear();
     Core2ForAWS_Sk6812_Show();
+#endif
     Core2ForAWS_LED_Enable(0);
 }
 
 static void vibrate_pattern_new_alert(void)
 {
-    ESP_LOGI(TAG, "Vibration pattern: new alert");
+    ESP_LOGI(TAG, "Vibration pattern: strong %d ms new alert", NEW_ALERT_VIBRATE_MS);
+
+    /* Start the motor and return immediately. Do NOT vTaskDelay() here: this
+     * runs in the pager task, and blocking it would delay ACK processing. */
     Core2ForAWS_Motor_SetStrength(100);
-    vTaskDelay(pdMS_TO_TICKS(350));
-    Core2ForAWS_Motor_SetStrength(0);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    Core2ForAWS_Motor_SetStrength(100);
-    vTaskDelay(pdMS_TO_TICKS(350));
-    Core2ForAWS_Motor_SetStrength(0);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    Core2ForAWS_Motor_SetStrength(100);
-    vTaskDelay(pdMS_TO_TICKS(350));
-    Core2ForAWS_Motor_SetStrength(0);
+    g_vibration_until_ms = now_ms() + NEW_ALERT_VIBRATE_MS;
+}
+
+static void process_vibration_state(void)
+{
+    if (g_vibration_until_ms > 0 && now_ms() >= g_vibration_until_ms) {
+        Core2ForAWS_Motor_SetStrength(0);
+        g_vibration_until_ms = 0;
+    }
 }
 
 static void stop_alert_vibration(void)
 {
     Core2ForAWS_Motor_SetStrength(0);
+    g_vibration_until_ms = 0;
     g_last_repeat_vibrate_ms = now_ms();
 }
 
@@ -414,7 +711,8 @@ static void apply_alert_signal_state(void)
     size_t current_open_count = 0;
 
     for (size_t i = 0; i < g_alert_count && i < MAX_ALERTS; i++) {
-        if (alert_is_unacknowledged_open(&g_alerts[i])) {
+        if (alert_is_unacknowledged_open(&g_alerts[i]) &&
+            !is_recently_acknowledged_suppressed(g_alerts[i].id)) {
             snprintf(current_open_ids[current_open_count], MAX_ID, "%s", g_alerts[i].id);
             current_open_count++;
         }
@@ -471,6 +769,30 @@ static void process_open_reminder_vibration(void)
     vibrate_pattern_new_alert();
     g_last_repeat_vibrate_ms = now;
 #endif
+}
+
+static bool is_recently_acknowledged_suppressed(const char *alert_id)
+{
+    if (!alert_id || alert_id[0] == '\0' || g_recently_acknowledged_id[0] == '\0') {
+        return false;
+    }
+
+    int64_t now = now_ms();
+    if (now > g_recently_acknowledged_until_ms) {
+        g_recently_acknowledged_id[0] = '\0';
+        g_recently_acknowledged_until_ms = 0;
+        return false;
+    }
+
+    return strcmp(alert_id, g_recently_acknowledged_id) == 0;
+}
+
+static void clear_recent_ack_if_matches(const char *alert_id)
+{
+    if (alert_id && strcmp(alert_id, g_recently_acknowledged_id) == 0) {
+        g_recently_acknowledged_id[0] = '\0';
+        g_recently_acknowledged_until_ms = 0;
+    }
 }
 
 static bool is_recently_resolved_suppressed(const char *alert_id)
@@ -646,6 +968,9 @@ static bool parse_alert_item(cJSON *item, andon_alert_t *alert)
     get_nested_string(item, "issue_category", "name", issue_category, sizeof(issue_category), "Unknown category");
     get_nested_string(item, "issue_problem", "name", issue_problem, sizeof(issue_problem), "Unknown problem");
 
+    snprintf(alert->machine_name, sizeof(alert->machine_name), "%s", machine_name);
+    snprintf(alert->machine_code, sizeof(alert->machine_code), "%s", machine_code);
+
     if (machine_code[0] != '\0') {
         snprintf(alert->machine, sizeof(alert->machine), "%.*s (%.*s)", 56, machine_name, 32, machine_code);
     } else {
@@ -729,6 +1054,25 @@ static bool parse_alerts_json(const char *json, andon_alert_t *alerts, size_t *o
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
+    /* These were ESP_LOGI. Four UART lines per poll, every 45 s, forever is
+     * real CPU and UART power for information only needed while debugging;
+     * raise the level for this tag to DEBUG to get them back. */
+    switch (evt->event_id) {
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGD(TAG, "HTTP event: CONNECTED");   // did TCP connect succeed?
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            ESP_LOGD(TAG, "HTTP event: HEADER_SENT"); // did we send the request?
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            ESP_LOGD(TAG, "HTTP event: ON_HEADER");   // did we get response headers?
+            break;
+        case HTTP_EVENT_ON_DATA:
+            ESP_LOGD(TAG, "HTTP event: ON_DATA len=%d", evt->data_len);  // did we get body?
+            break;
+        default:
+            break;
+    }
     if (evt->event_id == HTTP_EVENT_ON_DATA && evt->data && evt->data_len > 0) {
         int remaining = HTTP_BUFFER_SIZE - 1 - g_http_response_len;
 
@@ -760,8 +1104,8 @@ static esp_err_t init_http_clients(void)
     ESP_LOGI(TAG, "Initializing HTTP clients. API_BASE_URL=%s", API_BASE_URL);
 
     esp_http_client_config_t config = {
-        .url = "http://10.8.10.97:5003",
-        .timeout_ms = 8000,
+        .url = "http://192.168.26.2:5003",
+        .timeout_ms = 5000,
         .event_handler = http_event_handler,
     };
 
@@ -818,8 +1162,10 @@ static esp_err_t http_request(const char *method, const char *path, const char *
     esp_http_client_set_url(client, url);
     esp_http_client_set_header(client, "Authorization", auth_header);
     esp_http_client_set_header(client, "Accept", "application/json");
+    /* Force Connection: close so every request opens a fresh TCP connection.
+     * The working Polytex build did this; connection reuse appears to leave a
+     * half-open socket that stalls the next handshake. */
     esp_http_client_set_header(client, "Connection", "close");
-
     if (body) {
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_post_field(client, body, strlen(body));
@@ -848,10 +1194,37 @@ static esp_err_t http_request(const char *method, const char *path, const char *
              esp_err_to_name(err));
 
     if (g_http_response_len > 0) {
-        ESP_LOGI(TAG, "HTTP response preview: %.160s", g_http_response);
+        ESP_LOGD(TAG, "HTTP response preview: %.160s", g_http_response);
     }
 
     return err;
+}
+
+/* Produces a short, on-screen-safe string identifying the actual HTTP or
+ * transport failure. The LCD's old generic status text ("API/network
+ * error") covered a dead connection, a timeout, a truncated response, and
+ * any unmapped HTTP status (401, 500, etc.) all identically - this makes
+ * the LCD itself show which one happened, not just the serial log. */
+static const char *http_err_short(esp_err_t err, int status_code)
+{
+    static char buf[40];
+
+    if (err == ESP_ERR_HTTP_CONNECT) {
+        return "Net: TCP connect fail";
+    }
+    if (err == ESP_ERR_HTTP_EAGAIN) {
+        return "Net: timeout";
+    }
+    if (err == ESP_FAIL && g_http_response_truncated) {
+        return "Net: response too large";
+    }
+    if (err != ESP_OK) {
+        snprintf(buf, sizeof(buf), "Net: %s", esp_err_to_name(err));
+        return buf;
+    }
+
+    snprintf(buf, sizeof(buf), "API HTTP %d", status_code);
+    return buf;
 }
 
 static bool fetch_alerts(void)
@@ -876,7 +1249,7 @@ static bool fetch_alerts(void)
             set_status_text("State conflict", LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
         } else {
             snprintf(g_last_http_reason, sizeof(g_last_http_reason), "net_err");
-            set_status_text("API/network error", LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
+            set_status_text(http_err_short(err, status_code), LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
         }
 
         ESP_LOGE(TAG, "Fetch failed: err=%s status=%d", esp_err_to_name(err), status_code);
@@ -897,6 +1270,35 @@ static bool fetch_alerts(void)
         if (is_recently_resolved_suppressed(g_parse_alerts[i].id)) {
             ESP_LOGW(TAG, "Suppressing recently resolved alert id=%s", g_parse_alerts[i].id);
             continue;
+        }
+
+        if (!alert_matches_machine_filter(&g_parse_alerts[i])) {
+            ESP_LOGI(TAG,
+                     "Ignoring out-of-scope machine alert id=%s machine='%s' code='%s' wanted='%s'",
+                     g_parse_alerts[i].id,
+                     g_parse_alerts[i].machine_name,
+                     g_parse_alerts[i].machine_code,
+                     PAGER_MACHINE_FILTER);
+            continue;
+        }
+
+        /* A successful ACK can take a moment to appear in the next GET.
+         * During that grace period, do not allow a stale OPEN response to
+         * revert the local state or trigger the motor again. */
+        if (is_recently_acknowledged_suppressed(g_parse_alerts[i].id)) {
+            if (strcasecmp(g_parse_alerts[i].status, "OPEN") == 0) {
+                ESP_LOGW(TAG, "Holding local ACK while backend still reports OPEN id=%s",
+                         g_parse_alerts[i].id);
+                snprintf(g_parse_alerts[i].status, sizeof(g_parse_alerts[i].status), "ACKNOWLEDGED");
+                snprintf(g_parse_alerts[i].status_label, sizeof(g_parse_alerts[i].status_label), "Acknowledged");
+                g_parse_alerts[i].action_available[0] = '\0';
+                g_parse_alerts[i].actionable = false;
+                snprintf(g_parse_alerts[i].responder_name, sizeof(g_parse_alerts[i].responder_name),
+                         "%s", PAGER_RESPONDER_NAME);
+            } else {
+                /* The backend has caught up; the grace window is no longer needed. */
+                clear_recent_ack_if_matches(g_parse_alerts[i].id);
+            }
         }
 
         g_filtered_alerts[filtered_count++] = g_parse_alerts[i];
@@ -921,6 +1323,12 @@ static bool fetch_alerts(void)
              "Unacknowledged OPEN alerts after fetch=%u",
              (unsigned int)unacked_open_count_after_fetch);
 
+    if (unacked_open_count_after_fetch > 0) {
+        /* Stay fully awake until this OPEN state is gone; after that, use the
+         * normal two-minute grace instead of immediately re-entering sleep. */
+        g_timer_wakeup_boot = false;
+    }
+
     if (changed) {
         memcpy(g_alerts, g_filtered_alerts, filtered_count * sizeof(andon_alert_t));
         g_alert_count = filtered_count;
@@ -936,7 +1344,11 @@ static bool fetch_alerts(void)
             g_page_offset = 0;
         }
 
-        wake_display_for_event();
+        /* A timer-only maintenance wake should not flash the backlight for
+         * ACKNOWLEDGED/ARRIVED state. OPEN alerts still wake it below. */
+        if (!g_timer_wakeup_boot || unacked_open_count_after_fetch > 0) {
+            wake_display_for_event();
+        }
         apply_alert_signal_state();
     } else {
         memcpy(g_alerts, g_filtered_alerts, filtered_count * sizeof(andon_alert_t));
@@ -945,10 +1357,11 @@ static bool fetch_alerts(void)
 
     g_last_sync_ms = now_ms();
     g_last_transport_error = false;
+    g_initial_sync_complete = true;
     snprintf(g_last_http_reason, sizeof(g_last_http_reason), "ok");
 
     if (g_alert_count == 0) {
-        set_status_text("No active alerts", LV_COLOR_MAKE(0x2E, 0x7D, 0x32));
+        set_status_text("No Press 14 alerts", LV_COLOR_MAKE(0x2E, 0x7D, 0x32));
     } else if (g_alert_count == 1) {
         set_status_text("1 active alert", LV_COLOR_MAKE(0x2E, 0x7D, 0x32));
     } else {
@@ -1007,7 +1420,7 @@ static bool post_alert_action(const andon_alert_t *alert)
             set_status_text("Already changed", LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
         } else {
             snprintf(g_last_http_reason, sizeof(g_last_http_reason), "post_err");
-            set_status_text("Action failed", LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
+            set_status_text(http_err_short(err, status_code), LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
         }
 
         ESP_LOGE(TAG, "POST action failed: err=%s status=%d", esp_err_to_name(err), status_code);
@@ -1052,6 +1465,9 @@ static void optimistic_apply_action(const andon_alert_t *action_alert)
     }
 
     if (strcasecmp(action_alert->action_available, "acknowledge") == 0) {
+        snprintf(g_recently_acknowledged_id, sizeof(g_recently_acknowledged_id), "%s", action_alert->id);
+        g_recently_acknowledged_until_ms = now_ms() + ACK_SYNC_GRACE_MS;
+
         snprintf(g_alerts[index].status, sizeof(g_alerts[index].status), "ACKNOWLEDGED");
         snprintf(g_alerts[index].status_label, sizeof(g_alerts[index].status_label), "Acknowledged");
         /*
@@ -1113,6 +1529,8 @@ static void process_action_queue(void)
     bool ok = post_alert_action(&action_alert);
 
     if (!ok) {
+        /* Let the real OPEN state return so the user can retry the ACK. */
+        clear_recent_ack_if_matches(action_alert.id);
         set_status_text("Action failed, refreshing", LV_COLOR_MAKE(0xB7, 0x1C, 0x1C));
     }
 
@@ -1280,7 +1698,7 @@ static void render_alerts(void)
 
     if (g_alert_count == 0) {
         lv_obj_set_hidden(g_empty_label, false);
-        lv_label_set_text(g_empty_label, "All clear\nPager is listening");
+        lv_label_set_text(g_empty_label, "Press 14 all clear\nPager is listening");
 
         lv_obj_set_hidden(g_action_btn, true);
         lv_obj_set_hidden(g_back_btn, true);
@@ -1354,28 +1772,231 @@ static void render_alerts(void)
     g_ui_dirty = false;
 }
 
+/*
+ * AXP192 status registers used for charge detection.
+ *
+ * REG00 (power input status):
+ *   bit7 ACIN present, bit5 VBUS present, bit2 battery current direction
+ *        (1 = current flowing INTO the battery)
+ * REG01 (power operating mode):
+ *   bit6 charging indication (1 = charge engine running)
+ *
+ * The old code looked only at REG00 bit 2. That bit drops to 0 the moment the
+ * charge terminates, so a full pack sitting on the charger looked identical to
+ * a pack running down. It also depends on the battery-current ADC being
+ * enabled, which the old Axp192_SetAdc1Enable(0x80) had switched off.
+ */
+#define AXP192_POWER_INPUT_STATUS_REG 0x00
+#define AXP192_POWER_OP_MODE_REG      0x01
+#define AXP192_ACIN_PRESENT_MASK      0x80
+#define AXP192_VBUS_PRESENT_MASK      0x20
+#define AXP192_BATTERY_CHARGING_MASK  0x04
+#define AXP192_CHARGE_INDICATE_MASK   0x40
+
+static void refresh_battery_label_locked(void)
+{
+    if (g_battery_percent < 0) {
+        lv_label_set_text(g_battery_label, "--%");
+    } else {
+        lv_label_set_text_fmt(g_battery_label, "%d%%", g_battery_percent);
+    }
+
+    if (g_charging_icon) {
+        /* Show the bolt whenever the pager is on external power, including
+         * the "charge complete, still plugged in" case. */
+        lv_obj_set_hidden(g_charging_icon, !(g_battery_is_charging || g_external_power));
+    }
+}
+
+static void update_charging_indicator(void)
+{
+    /* The Core2 BSP header declares Axp192_ReadBytes() as void even though
+     * its implementation returns bool. Use the correctly declared byte-read
+     * wrapper to remain compatible with this BSP. A failed I2C read returns 0,
+     * which safely displays battery operation rather than a false charging state. */
+    uint8_t power_status = Axp192_Read8Bit(AXP192_POWER_INPUT_STATUS_REG);
+    uint8_t op_mode = Axp192_Read8Bit(AXP192_POWER_OP_MODE_REG);
+
+    bool external_power =
+        (power_status & (AXP192_ACIN_PRESENT_MASK | AXP192_VBUS_PRESENT_MASK)) != 0;
+    bool current_into_battery =
+        (power_status & AXP192_BATTERY_CHARGING_MASK) != 0;
+    bool charge_engine_running =
+        (op_mode & AXP192_CHARGE_INDICATE_MASK) != 0;
+
+    bool charging = charge_engine_running || (external_power && current_into_battery);
+
+    ESP_LOGD(TAG,
+             "AXP192 REG00=0x%02X REG01=0x%02X ext=%d dir=%d engine=%d -> charging=%d",
+             power_status,
+             op_mode,
+             external_power ? 1 : 0,
+             current_into_battery ? 1 : 0,
+             charge_engine_running ? 1 : 0,
+             charging ? 1 : 0);
+
+    bool changed = !g_charge_status_valid ||
+                   charging != g_battery_is_charging ||
+                   external_power != g_external_power;
+
+    g_charge_status_valid = true;
+    g_battery_is_charging = charging;
+    g_external_power = external_power;
+
+    if (!changed) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Charge state changed: charging=%d external=%d",
+             charging ? 1 : 0, external_power ? 1 : 0);
+
+    /* Terminal voltage steps as soon as the charger engages or drops out, and
+     * the percentage curve applies a charging offset, so the filtered value
+     * and the displayed percentage must both be recomputed now. */
+    g_battery_snap_filter = true;
+    g_force_battery_refresh = true;
+
+    if (!g_battery_label || !g_charging_icon) {
+        return;
+    }
+
+    if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
+        refresh_battery_label_locked();
+        xSemaphoreGive(xGuiSemaphore);
+    }
+}
+
 static void update_battery_indicator(void)
 {
     if (!g_battery_fill || !g_battery_label) {
         return;
     }
 
-    float voltage = Core2ForAWS_PMU_GetBatVolt();
-    int pct = battery_percent_from_voltage(voltage);
-    int fill_width = (22 * pct) / 100;
+    update_charging_indicator();
 
+    /* One bad I2C transaction used to abort the entire refresh, which looked
+     * exactly like a frozen percentage. Retry before giving up. */
+    float voltage = -1.0f;
+
+    for (int attempt = 0; attempt < BATTERY_SAMPLE_RETRIES; attempt++) {
+        float sample = Core2ForAWS_PMU_GetBatVolt();
+
+        if (sample >= 2.50f && sample <= 4.50f) {
+            voltage = sample;
+            break;
+        }
+
+        ESP_LOGW(TAG, "Invalid battery voltage sample %.3f V (attempt %d)",
+                 sample, attempt + 1);
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    if (voltage < 0.0f) {
+        ESP_LOGE(TAG,
+                 "Battery voltage unreadable. Verify Axp192_SetAdc1Enable bit 7 is set.");
+        return;
+    }
+
+    /* Li-ion voltage sags briefly during Wi-Fi and motor activity. A small
+     * low-pass filter keeps the displayed percentage from looking like it
+     * lost several percent instantly even when the cell recovers afterward.
+     *
+     * The weight is 0.5 rather than 0.3 because the sample interval dropped
+     * from 30 s to 5 s; at the old settings a genuine change took minutes to
+     * reach the screen. */
+    static bool have_filtered_voltage = false;
+    static float filtered_voltage = 0.0f;
+
+    if (!have_filtered_voltage || g_battery_snap_filter) {
+        filtered_voltage = voltage;
+        have_filtered_voltage = true;
+        g_battery_snap_filter = false;
+    } else if (fabsf(voltage - filtered_voltage) > 0.10f) {
+        /* Large divergence means the filter is stale, not that a sample is
+         * noisy. Snap to the real reading rather than crawling toward it. */
+        filtered_voltage = voltage;
+    } else {
+        filtered_voltage = (filtered_voltage * 0.5f) + (voltage * 0.5f);
+    }
+
+    int pct = battery_percent_from_voltage(filtered_voltage, g_battery_is_charging);
+
+    bool forced = g_force_battery_refresh;
+    g_force_battery_refresh = false;
+
+    ESP_LOGI(TAG, "Battery raw=%.3f V filtered=%.3f V pct=%d charging=%d ext=%d",
+             voltage,
+             filtered_voltage,
+             pct,
+             g_battery_is_charging ? 1 : 0,
+             g_external_power ? 1 : 0);
+
+    /* Skip the LVGL work when nothing changed, unless a wake or a charge-state
+     * transition explicitly asked for a repaint. */
+    if (pct == g_battery_percent && !forced) {
+        return;
+    }
+
+    int fill_width = (BATTERY_FILL_MAX_W * pct) / 100;
     if (pct > 0 && fill_width < 2) {
         fill_width = 2;
+    }
+    if (fill_width > BATTERY_FILL_MAX_W) {
+        fill_width = BATTERY_FILL_MAX_W;
     }
 
     lv_color_t color = battery_color_for_percent(pct);
 
     if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
-        lv_obj_set_size(g_battery_fill, fill_width, 8);
-        lv_obj_set_style_local_bg_color(g_battery_fill, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, color);
-        lv_label_set_text_fmt(g_battery_label, "%d%%", pct);
+        if (fill_width <= 0) {
+            lv_obj_set_hidden(g_battery_fill, true);
+        } else {
+            lv_obj_set_hidden(g_battery_fill, false);
+            lv_obj_set_size(g_battery_fill, fill_width, 8);
+            /* Re-align after the resize: LVGL v7 does not re-apply a previous
+             * alignment automatically, so without this the bar drifts. */
+            lv_obj_align(g_battery_fill, g_battery_body, LV_ALIGN_IN_LEFT_MID, 2, 0);
+            lv_obj_set_style_local_bg_color(g_battery_fill, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, color);
+        }
+
+        g_battery_percent = pct;
+        refresh_battery_label_locked();
         lv_obj_set_style_local_text_color(g_battery_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, color);
+        /* The label width changes between "9%", "99%" and "100%". */
+        lv_obj_align(g_battery_label, g_battery_tip, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
+        lv_obj_invalidate(lv_scr_act());
         xSemaphoreGive(xGuiSemaphore);
+    }
+}
+
+/*
+ * Battery and charge state come from the local AXP192 over I2C and have no
+ * dependency on Wi-Fi, the API, or the alert list. Previously this work lived
+ * inside pager_task, which also blocks for up to 5 s inside
+ * esp_http_client_perform() and services the Wi-Fi reconnect backoff. Giving
+ * it a dedicated task means the indicator keeps updating at a fixed cadence
+ * whatever the network is doing, including with no AP in range at all.
+ */
+static void power_monitor_task(void *arg)
+{
+    (void)arg;
+
+    ESP_LOGI(TAG, "Power monitor task started");
+
+    while (1) {
+        update_battery_indicator();
+
+        int interval_ms = (g_display_brightness == 0)
+                              ? BATTERY_REFRESH_SCREEN_OFF_MS
+                              : BATTERY_REFRESH_ACTIVE_MS;
+
+        if (g_battery_wake_sem) {
+            /* Returns early when a touch or an alert wakes the display, so the
+             * first frame the user sees carries a fresh reading. */
+            xSemaphoreTake(g_battery_wake_sem, pdMS_TO_TICKS(interval_ms));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(interval_ms));
+        }
     }
 }
 
@@ -1383,7 +2004,9 @@ static void build_ui(void)
 {
     ESP_LOGI(TAG, "Building UI");
 
-    set_display_brightness(DISPLAY_ACTIVE_BRIGHTNESS);
+    /* Avoid a three-second backlight flash on the once-per-minute timer
+     * maintenance boot. A touch/power boot still uses the normal brightness. */
+    set_display_brightness(g_timer_wakeup_boot ? 0 : DISPLAY_ACTIVE_BRIGHTNESS);
 
     if (pdTRUE != xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
         ESP_LOGE(TAG, "Failed to take GUI semaphore during build_ui");
@@ -1395,7 +2018,7 @@ static void build_ui(void)
     lv_obj_set_click(lv_scr_act(), false);
 
     g_title_label = lv_label_create(lv_scr_act(), NULL);
-    lv_label_set_text(g_title_label, "ProcessGuard Pager");
+    lv_label_set_text(g_title_label, "Quality Press 14");
     lv_obj_set_style_local_text_color(g_title_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_MAKE(0x21, 0x21, 0x21));
     lv_obj_align(g_title_label, lv_scr_act(), LV_ALIGN_IN_TOP_LEFT, 6, 2);
 
@@ -1406,8 +2029,11 @@ static void build_ui(void)
 
     g_battery_body = lv_cont_create(lv_scr_act(), NULL);
     lv_obj_set_size(g_battery_body, 28, 14);
-    lv_obj_align(g_battery_body, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -56, 5);
+    /* Leave room for the numeric percentage and charging bolt. */
+    lv_obj_align(g_battery_body, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -76, 5);
     lv_obj_set_style_local_bg_opa(g_battery_body, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP);
+    /* Deliberately a fixed neutral grey: the outline must never be mistaken
+     * for the low-battery colour, which belongs to the fill bar only. */
     lv_obj_set_style_local_border_color(g_battery_body, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_MAKE(0x45, 0x45, 0x45));
     lv_obj_set_style_local_border_width(g_battery_body, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 2);
     lv_obj_set_style_local_radius(g_battery_body, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 2);
@@ -1421,8 +2047,10 @@ static void build_ui(void)
     lv_obj_set_style_local_radius(g_battery_tip, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 1);
 
     g_battery_fill = lv_cont_create(g_battery_body, NULL);
-    lv_obj_set_size(g_battery_fill, 22, 8);
-    lv_obj_align(g_battery_fill, g_battery_body, LV_ALIGN_IN_LEFT_MID, 3, 0);
+    lv_obj_set_size(g_battery_fill, BATTERY_FILL_MAX_W, 8);
+    /* 2 px inset clears the body's 2 px border on both sides; the old 3 px
+     * inset pushed a full bar past the right-hand border. */
+    lv_obj_align(g_battery_fill, g_battery_body, LV_ALIGN_IN_LEFT_MID, 2, 0);
     lv_obj_set_style_local_bg_color(g_battery_fill, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_MAKE(0x43, 0xA0, 0x47));
     lv_obj_set_style_local_border_width(g_battery_fill, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0);
     lv_obj_set_style_local_radius(g_battery_fill, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 1);
@@ -1431,6 +2059,15 @@ static void build_ui(void)
     lv_label_set_text(g_battery_label, "--%");
     lv_obj_set_style_local_text_color(g_battery_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_MAKE(0x43, 0xA0, 0x47));
     lv_obj_align(g_battery_label, g_battery_tip, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
+
+    /* LVGL's built-in Font Awesome charging glyph is present in the bundled
+     * font, so it does not depend on the active font containing Unicode U+26A1. */
+    g_charging_icon = lv_label_create(lv_scr_act(), NULL);
+    lv_label_set_text(g_charging_icon, LV_SYMBOL_CHARGE);
+    lv_obj_set_style_local_text_color(g_charging_icon, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                      LV_COLOR_MAKE(0xF9, 0xA8, 0x25));
+    lv_obj_align(g_charging_icon, lv_scr_act(), LV_ALIGN_IN_TOP_RIGHT, -4, 3);
+    lv_obj_set_hidden(g_charging_icon, true);
 
     g_list_area = lv_cont_create(lv_scr_act(), NULL);
     lv_obj_set_size(g_list_area, 312, 150);
@@ -1442,7 +2079,7 @@ static void build_ui(void)
     lv_obj_set_drag(g_list_area, false);
 
     g_empty_label = lv_label_create(g_list_area, NULL);
-    lv_label_set_text(g_empty_label, "All clear\nPager is listening");
+    lv_label_set_text(g_empty_label, "Press 14 all clear\nPager is listening");
     lv_label_set_align(g_empty_label, LV_LABEL_ALIGN_CENTER);
     lv_obj_set_style_local_text_color(g_empty_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_MAKE(0x54, 0x6E, 0x7A));
     lv_obj_align(g_empty_label, g_list_area, LV_ALIGN_CENTER, 0, 0);
@@ -1553,6 +2190,7 @@ static void build_ui(void)
 
     xSemaphoreGive(xGuiSemaphore);
 
+    /* First reading is unconditional: g_force_battery_refresh starts true. */
     update_battery_indicator();
     g_ui_dirty = true;
 
@@ -1588,6 +2226,7 @@ static void pager_event_handler(lv_obj_t *obj, lv_event_t event)
         }
 
         g_ui_dirty = true;
+        notify_pager_wake();
         return;
     }
 }
@@ -1605,6 +2244,7 @@ static void back_button_event_handler(lv_obj_t *obj, lv_event_t event)
     g_selected_alert_id[0] = '\0';
     g_detail_mode = false;
     g_ui_dirty = true;
+    notify_pager_wake();
 }
 
 static void action_button_event_handler(lv_obj_t *obj, lv_event_t event)
@@ -1640,6 +2280,9 @@ static void action_button_event_handler(lv_obj_t *obj, lv_event_t event)
     g_action_in_flight = true;
     optimistic_apply_action(&action_alert);
     g_ui_dirty = true;
+
+    /* Do not wait out the idle delay before the POST goes out. */
+    notify_pager_wake();
 }
 
 static void page_prev_event_handler(lv_obj_t *obj, lv_event_t event)
@@ -1659,6 +2302,7 @@ static void page_prev_event_handler(lv_obj_t *obj, lv_event_t event)
     }
 
     g_ui_dirty = true;
+    notify_pager_wake();
 }
 
 static void page_next_event_handler(lv_obj_t *obj, lv_event_t event)
@@ -1676,17 +2320,39 @@ static void page_next_event_handler(lv_obj_t *obj, lv_event_t event)
     }
 
     g_ui_dirty = true;
+    notify_pager_wake();
 }
 
 static void update_display_power(void)
 {
-    int64_t idle_ms = now_ms() - g_last_user_activity_ms;
+    int64_t idle_ms = now_ms() - read_last_user_activity_ms();
 
     if (g_action_in_flight) {
         set_display_brightness(DISPLAY_ACTIVE_BRIGHTNESS);
         return;
     }
 
+    /*
+     * OPEN alert:
+     * Wake brightly when the alert arrives, dim quickly, then turn the
+     * backlight completely off. The alert remains active and vibration /
+     * polling continue; a touch wakes the display again. Keeping the LCD
+     * dim-but-on for the entire alert was one of the largest battery drains.
+     */
+    if (count_unacknowledged_open_alerts() > 0) {
+        if (idle_ms >= DISPLAY_OFF_WITH_ALERT_MS) {
+            set_display_brightness(0);
+        } else if (idle_ms >= DISPLAY_DIM_WITH_ALERT_MS) {
+            set_display_brightness(DISPLAY_DIM_BRIGHTNESS);
+        } else {
+            set_display_brightness(DISPLAY_ACTIVE_BRIGHTNESS);
+        }
+        return;
+    }
+
+    /*
+     * No alerts: screen can turn completely off.
+     */
     if (g_alert_count == 0) {
         if (idle_ms >= DISPLAY_OFF_NO_ALERT_MS) {
             set_display_brightness(0);
@@ -1696,7 +2362,11 @@ static void update_display_power(void)
         return;
     }
 
-    if (!g_detail_mode && idle_ms >= DISPLAY_OFF_WITH_ALERT_MS) {
+    /*
+     * ACKNOWLEDGED alerts:
+     * Dim and eventually turn off normally.
+     */
+    if (idle_ms >= DISPLAY_OFF_WITH_ALERT_MS) {
         set_display_brightness(0);
     } else if (idle_ms >= DISPLAY_DIM_WITH_ALERT_MS) {
         set_display_brightness(DISPLAY_DIM_BRIGHTNESS);
@@ -1704,50 +2374,94 @@ static void update_display_power(void)
         set_display_brightness(DISPLAY_ACTIVE_BRIGHTNESS);
     }
 }
-
 static void wake_from_touch_activity(void)
 {
     if (g_display_brightness >= DISPLAY_ACTIVE_BRIGHTNESS) {
         return;
     }
 
-    if (FT6336U_WasPressed()) {
+    /* GPIO39 is the FT6336U interrupt line. Checking it directly avoids
+     * waiting for the touch-controller I2C update task; the driver state is
+     * retained as a fallback for short interrupt pulses. */
+    if (gpio_get_level(TOUCH_WAKE_GPIO) == 0 || FT6336U_WasPressed()) {
         ESP_LOGI(TAG, "Touch detected while display dim/off");
         record_user_activity();
         g_ui_dirty = true;
     }
 }
 
-static void maybe_deep_sleep_when_empty(void)
+/* This task must stay separate from pager_task: esp_http_client_perform() can
+ * block pager_task for up to HTTP timeout_ms, but it must never block touch.
+ * It is now the ONLY caller of wake_from_touch_activity(): pager_task used to
+ * poll it as well, which both duplicated the GPIO/I2C read and could consume
+ * the FT6336U pressed flag before this task saw it. */
+static void touch_wake_task(void *arg)
 {
-#if ENABLE_DEEP_SLEEP_WHEN_EMPTY
-    if (g_alert_count > 0 || g_action_in_flight || !g_wifi_connected) {
-        g_empty_since_ms = 0;
+    (void)arg;
+
+    while (1) {
+        wake_from_touch_activity();
+        vTaskDelay(pdMS_TO_TICKS(TOUCH_WAKE_TASK_TICK_MS));
+    }
+}
+
+static void maybe_deep_sleep_when_no_open(void)
+{
+#if ENABLE_DEEP_SLEEP_WHEN_NO_OPEN
+    /* Never sleep on a stale all-clear view. Require a successful sync, no
+     * unacknowledged OPEN alert, and no action waiting for the network. */
+    if (!g_initial_sync_complete ||
+        g_last_transport_error ||
+        count_unacknowledged_open_alerts() > 0 ||
+        g_action_in_flight ||
+        !g_wifi_connected) {
+        g_no_open_since_ms = 0;
         return;
     }
 
     int64_t now = now_ms();
 
-    if (g_empty_since_ms == 0) {
-        g_empty_since_ms = now;
+    if (g_no_open_since_ms == 0) {
+        g_no_open_since_ms = now;
+    }
+
+    /* A timer wake exists only to perform one verified server check. If the
+     * result still has no OPEN alert, return directly to deep sleep. */
+    if (!g_timer_wakeup_boot &&
+        now - g_no_open_since_ms < DEEP_SLEEP_NO_OPEN_AFTER_MS) {
         return;
     }
 
-    if (now - g_empty_since_ms < DEEP_SLEEP_EMPTY_AFTER_MS) {
-        return;
-    }
-
-    ESP_LOGI(TAG, "Entering timer deep sleep, wake_us=%llu", (unsigned long long)DEEP_SLEEP_WAKE_US);
+    ESP_LOGW(TAG,
+             "Entering deep sleep; next server check in %llu us",
+             (unsigned long long)DEEP_SLEEP_WAKE_US);
 
     Core2ForAWS_Motor_SetStrength(0);
     set_display_brightness(0);
     set_led_idle();
 
+    /* No AXP192 measurements are needed during deep sleep. Core2ForAWS_Init
+     * restores the ADC configuration after either wake source resets the CPU. */
+    Axp192_SetAdc1Enable(0x00);
+
     esp_wifi_stop();
+
+    /* GPIO39 is the Core2/Core2-for-AWS FT6336U touch interrupt. It is
+     * active-low and is RTC-capable, so a screen touch can wake the pager.
+     * If it is already low, omit EXT0 for this cycle to avoid a reset loop. */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     esp_sleep_enable_timer_wakeup(DEEP_SLEEP_WAKE_US);
+    gpio_set_direction(TOUCH_WAKE_GPIO, GPIO_MODE_INPUT);
+    if (gpio_get_level(TOUCH_WAKE_GPIO) != 0) {
+        esp_err_t touch_wake_err = esp_sleep_enable_ext0_wakeup(TOUCH_WAKE_GPIO, 0);
+        if (touch_wake_err != ESP_OK) {
+            ESP_LOGW(TAG, "Touch wake setup failed: %s", esp_err_to_name(touch_wake_err));
+        }
+    }
+
     esp_deep_sleep_start();
 #else
-    (void)g_empty_since_ms;
+    (void)g_no_open_since_ms;
 #endif
 }
 
@@ -1790,6 +2504,14 @@ static void init_power_management(void)
     }
 #else
     ESP_LOGW(TAG, "CONFIG_PM_ENABLE is off; automatic light sleep is disabled");
+#endif
+
+#if !defined(CONFIG_FREERTOS_USE_TICKLESS_IDLE)
+    /* Without tickless idle the CPU wakes on every FreeRTOS tick, so the long
+     * idle waits below save much less than they could. Enable
+     * CONFIG_PM_ENABLE + CONFIG_FREERTOS_USE_TICKLESS_IDLE in sdkconfig to
+     * get the full benefit. */
+    ESP_LOGW(TAG, "Tickless idle is off; automatic light sleep cannot engage");
 #endif
 }
 
@@ -1861,6 +2583,13 @@ static void wifi_event_handler(void *arg,
         g_wifi_reconnect_delay_ms = WIFI_RECONNECT_MIN_MS;
         schedule_wifi_reconnect();
 
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_event_sta_connected_t *connected =
+            (wifi_event_sta_connected_t *)event_data;
+        if (connected && connected->channel > 0) {
+            g_saved_wifi_channel = connected->channel;
+        }
+
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
 
@@ -1898,7 +2627,12 @@ static void wifi_event_handler(void *arg,
                  IP2STR(&event->ip_info.netmask));
 
         set_status_text("Wi-Fi connected", LV_COLOR_MAKE(0x2E, 0x7D, 0x32));
-        wake_display_for_event();
+        if (!g_timer_wakeup_boot) {
+            wake_display_for_event();
+        }
+
+        /* Poll immediately instead of waiting out the current idle delay. */
+        notify_pager_wake();
     }
 }
 
@@ -1909,6 +2643,10 @@ static esp_err_t init_wifi(void)
     ESP_LOGI(TAG, "Wi-Fi password length=%u", (unsigned int)strlen(WIFI_PASSWORD));
     ESP_LOGI(TAG, "Pager API base URL=%s", API_BASE_URL);
     ESP_LOGI(TAG, "Pager responder=%s", PAGER_RESPONDER_NAME);
+    ESP_LOGI(TAG, "Local machine filter='%s'",
+             (PAGER_MACHINE_FILTER && PAGER_MACHINE_FILTER[0] != '\0')
+                 ? PAGER_MACHINE_FILTER
+                 : "ALL MACHINES");
 
     if (!WIFI_SSID || strlen(WIFI_SSID) == 0) {
         ESP_LOGE(TAG, "WIFI_SSID is empty");
@@ -1924,8 +2662,42 @@ static esp_err_t init_wifi(void)
         return ESP_FAIL;
     }
 
+#if USE_STATIC_IP
+    {
+        esp_netif_ip_info_t ip_info = { 0 };
+        ip4_addr_t parsed;
+
+        if (!ip4addr_aton(STATIC_IP_ADDR, &parsed)) {
+            ESP_LOGE(TAG, "Static IP address failed to parse: %s", STATIC_IP_ADDR);
+            return ESP_FAIL;
+        }
+        ip_info.ip.addr = parsed.addr;
+
+        if (!ip4addr_aton(STATIC_IP_GATEWAY, &parsed)) {
+            ESP_LOGE(TAG, "Static IP gateway failed to parse: %s", STATIC_IP_GATEWAY);
+            return ESP_FAIL;
+        }
+        ip_info.gw.addr = parsed.addr;
+
+        if (!ip4addr_aton(STATIC_IP_NETMASK, &parsed)) {
+            ESP_LOGE(TAG, "Static IP netmask failed to parse: %s", STATIC_IP_NETMASK);
+            return ESP_FAIL;
+        }
+        ip_info.netmask.addr = parsed.addr;
+
+        ESP_ERROR_CHECK(esp_netif_dhcpc_stop(sta_netif));
+        ESP_ERROR_CHECK(esp_netif_set_ip_info(sta_netif, &ip_info));
+
+        ESP_LOGI(TAG, "Static IP configured. IP=%s gateway=%s netmask=%s",
+                 STATIC_IP_ADDR, STATIC_IP_GATEWAY, STATIC_IP_NETMASK);
+    }
+#endif
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    /* Runtime-only Wi-Fi configuration avoids unnecessary flash writes. */
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL));
@@ -1945,7 +2717,10 @@ static esp_err_t init_wifi(void)
     /* Keep auth threshold commented out while debugging mixed WPA/WPA2 plant networks. */
     // wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
-    wifi_config.sta.listen_interval = 3;
+    /* Measured in AP beacon intervals, and only used by WIFI_PS_MAX_MODEM.
+     * Harmless under MIN_MODEM, so it is set here ready for either mode. */
+    wifi_config.sta.listen_interval = WIFI_LISTEN_INTERVAL;
+    wifi_config.sta.channel = 0;
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
@@ -1954,15 +2729,204 @@ static esp_err_t init_wifi(void)
 
     /*
      * Modem sleep is the largest safe battery win for this REST polling pager.
-     * The listen interval stays modest so new-alert polling remains responsive.
+     * Every transaction is pager-initiated, so parking the receiver between
+     * beacons cannot lose an alert; the 45 s poll still finds it.
      */
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MAX_MODEM));
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_POWER_SAVE_MODE));
+    ESP_LOGI(TAG, "Wi-Fi power save mode set (listen_interval=%d)", WIFI_LISTEN_INTERVAL);
 
     ESP_LOGI(TAG, "Starting Wi-Fi. Connection will happen from WIFI_EVENT_STA_START.");
     ESP_ERROR_CHECK(esp_wifi_start());
 
     return ESP_OK;
 }
+
+#if ENABLE_TCP_DIAGNOSTIC_PROBE
+static bool tcp_connect_probe(const char *label, const char *ip, uint16_t port, int timeout_ms)
+{
+    ESP_LOGI(TAG, "----------------------------------------");
+    ESP_LOGI(TAG, "TCP TEST: %s", label);
+    ESP_LOGI(TAG, "Target: %s:%u timeout=%d ms", ip, (unsigned int)port, timeout_ms);
+
+    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "%s: socket() failed errno=%d (%s)",
+                 label, errno, strerror(errno));
+        return false;
+    }
+
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0) {
+        ESP_LOGE(TAG, "%s: fcntl(F_GETFL) failed errno=%d (%s)",
+                 label, errno, strerror(errno));
+        close(sock);
+        return false;
+    }
+
+    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+        ESP_LOGE(TAG, "%s: fcntl(F_SETFL) failed errno=%d (%s)",
+                 label, errno, strerror(errno));
+        close(sock);
+        return false;
+    }
+
+    struct sockaddr_in dest = { 0 };
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &dest.sin_addr) != 1) {
+        ESP_LOGE(TAG, "%s: inet_pton() failed for %s", label, ip);
+        close(sock);
+        return false;
+    }
+
+    int result = connect(sock, (struct sockaddr *)&dest, sizeof(dest));
+    if (result == 0) {
+        ESP_LOGI(TAG, "%s: CONNECT SUCCESS (immediate)", label);
+        close(sock);
+        return true;
+    }
+
+    if (errno != EINPROGRESS && errno != EWOULDBLOCK) {
+        int saved_errno = errno;
+        ESP_LOGE(TAG, "%s: CONNECT FAILED immediately errno=%d (%s)",
+                 label, saved_errno, strerror(saved_errno));
+        close(sock);
+        return false;
+    }
+
+    fd_set write_fds;
+    FD_ZERO(&write_fds);
+    FD_SET(sock, &write_fds);
+
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+
+    ESP_LOGI(TAG, "%s: connect in progress; waiting for TCP handshake...", label);
+
+    result = select(sock + 1, NULL, &write_fds, NULL, &timeout);
+    if (result == 0) {
+        ESP_LOGE(TAG, "%s: CONNECT TIMEOUT after %d ms", label, timeout_ms);
+        close(sock);
+        return false;
+    }
+
+    if (result < 0) {
+        int saved_errno = errno;
+        ESP_LOGE(TAG, "%s: select() failed errno=%d (%s)",
+                 label, saved_errno, strerror(saved_errno));
+        close(sock);
+        return false;
+    }
+
+    int socket_error = 0;
+    socklen_t error_len = sizeof(socket_error);
+    if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &socket_error, &error_len) < 0) {
+        int saved_errno = errno;
+        ESP_LOGE(TAG, "%s: getsockopt(SO_ERROR) failed errno=%d (%s)",
+                 label, saved_errno, strerror(saved_errno));
+        close(sock);
+        return false;
+    }
+
+    if (socket_error == 0) {
+        ESP_LOGI(TAG, "%s: CONNECT SUCCESS", label);
+        close(sock);
+        return true;
+    }
+
+    ESP_LOGE(TAG, "%s: CONNECT FAILED socket_error=%d (%s)",
+             label, socket_error, strerror(socket_error));
+    close(sock);
+    return false;
+}
+#endif /* ENABLE_TCP_DIAGNOSTIC_PROBE */
+
+static void log_wifi_diagnostics(void)
+{
+    uint8_t mac[6] = { 0 };
+    if (esp_wifi_get_mac(ESP_IF_WIFI_STA, mac) == ESP_OK) {
+        ESP_LOGI(TAG, "Wi-Fi STA MAC=%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+
+    wifi_ap_record_t ap = { 0 };
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        ESP_LOGI(TAG,
+                 "Connected AP: SSID='%s' BSSID=%02X:%02X:%02X:%02X:%02X:%02X channel=%u RSSI=%d",
+                 (const char *)ap.ssid,
+                 ap.bssid[0], ap.bssid[1], ap.bssid[2],
+                 ap.bssid[3], ap.bssid[4], ap.bssid[5],
+                 (unsigned int)ap.primary,
+                 (int)ap.rssi);
+    } else {
+        ESP_LOGW(TAG, "Could not read current AP information");
+    }
+}
+
+#if ENABLE_TCP_DIAGNOSTIC_PROBE
+static void tcp_diagnostic_probe(void)
+{
+    const int timeout_ms = 10000;
+
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "TCP DIAGNOSTIC TEST START");
+    ESP_LOGI(TAG, "Each connection has a %d ms timeout", timeout_ms);
+
+    log_wifi_diagnostics();
+
+    /*
+     * Test 1:
+     * ProcessGuard through the DEV-APPS/local interface.
+     *
+     * Pager and 192.168.26.2 are on the same local network,
+     * so this connection does not need to go through the gateway.
+     */
+
+
+    /*
+     * Test 3:
+     * Known external TCP destination.
+     */
+    bool cloudflare_ok = tcp_connect_probe(
+        "Cloudflare HTTPS",
+        "1.1.1.1",
+        443,
+        timeout_ms);
+
+    /*
+     * Test 4:
+     * Another external TCP destination.
+     */
+    bool google_dns_ok = tcp_connect_probe(
+        "Google DNS TCP",
+        "8.8.8.8",
+        53,
+        timeout_ms);
+
+
+
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "TCP DIAGNOSTIC SUMMARY");
+
+    
+
+
+    ESP_LOGI(
+        TAG,
+        "Cloudflare          1.1.1.1:443        : %s",
+        cloudflare_ok ? "SUCCESS" : "FAILED");
+
+    ESP_LOGI(
+        TAG,
+        "Google DNS          8.8.8.8:53         : %s",
+        google_dns_ok ? "SUCCESS" : "FAILED");
+
+    ESP_LOGI(TAG, "TCP DIAGNOSTIC TEST COMPLETE");
+    ESP_LOGI(TAG, "========================================");
+}
+#endif /* ENABLE_TCP_DIAGNOSTIC_PROBE */
 
 static void pager_task(void *arg)
 {
@@ -1971,16 +2935,27 @@ static void pager_task(void *arg)
     ESP_LOGI(TAG, "Pager task started");
 
     int64_t next_poll_ms = 0;
-    int64_t next_battery_ms = 0;
     int64_t last_waiting_wifi_log_ms = 0;
+    bool net_diagnostics_done = false;
 
     while (1) {
-        wake_from_touch_activity();
+        /*
+         * Battery and charge sampling used to live here. It now runs in
+         * power_monitor_task so it cannot be delayed by a blocking HTTP
+         * transaction, a reconnect backoff, or the `continue` in the
+         * disconnected path below.
+         */
 
         if (!g_wifi_connected) {
             int64_t now = now_ms();
 
-            if (now - last_waiting_wifi_log_ms >= 5000) {
+            /* Keep servicing the reconnect deadline even if the disconnect event
+             * happened before the backoff timer expired. */
+            if (now >= g_next_wifi_reconnect_ms) {
+                schedule_wifi_reconnect();
+            }
+
+            if (now - last_waiting_wifi_log_ms >= 60000) {
                 ESP_LOGW(TAG, "Pager task waiting for Wi-Fi. connected=%d transport_error=%d last_http_status=%d last_reason=%s",
                          g_wifi_connected ? 1 : 0,
                          g_last_transport_error ? 1 : 0,
@@ -1989,10 +2964,22 @@ static void pager_task(void *arg)
                 last_waiting_wifi_log_ms = now;
             }
 
+            process_vibration_state();
             render_alerts();
             update_display_power();
-            vTaskDelay(pdMS_TO_TICKS(UI_TICK_MS));
+            int wait_ms = (g_display_brightness == 0 && g_vibration_until_ms == 0)
+                              ? UI_SCREEN_OFF_TICK_MS
+                              : UI_ACTIVE_TICK_MS;
+            pager_wait_ms(wait_ms);
             continue;
+        }
+
+        if (!net_diagnostics_done) {
+            net_diagnostics_done = true;
+            log_wifi_diagnostics();
+#if ENABLE_TCP_DIAGNOSTIC_PROBE
+            tcp_diagnostic_probe();
+#endif
         }
 
         process_action_queue();
@@ -2012,27 +2999,34 @@ static void pager_task(void *arg)
             ESP_LOGI(TAG, "Next poll in %d ms", current_poll_interval_ms());
         }
 
-        if (now >= next_battery_ms) {
-            update_battery_indicator();
-            next_battery_ms = now + BATTERY_REFRESH_MS;
-        }
-
         process_open_reminder_vibration();
+        process_vibration_state();
         render_alerts();
         update_display_power();
-        maybe_deep_sleep_when_empty();
+        maybe_deep_sleep_when_no_open();
 
-        vTaskDelay(pdMS_TO_TICKS(UI_TICK_MS));
+        int wait_ms = (g_display_brightness == 0 && g_vibration_until_ms == 0)
+                          ? UI_SCREEN_OFF_TICK_MS
+                          : UI_ACTIVE_TICK_MS;
+
+        /* Never oversleep the next poll. */
+        int64_t until_poll_ms = next_poll_ms - now_ms();
+        if (until_poll_ms > 0 && until_poll_ms < wait_ms) {
+            wait_ms = (int)until_poll_ms;
+        }
+
+        pager_wait_ms(wait_ms);
     }
 }
 
 void app_main(void)
 {
-    esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);
-    esp_log_level_set("wifi", ESP_LOG_INFO);
-    esp_log_level_set("event", ESP_LOG_INFO);
-    esp_log_level_set("esp_netif_handlers", ESP_LOG_INFO);
+    g_timer_wakeup_boot =
+        (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER);
+
+    /* Production logging: less UART/CPU activity while retaining warnings/errors. */
+        esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set(TAG, ESP_LOG_INFO);
 
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "ProcessGuard Pager booting");
@@ -2044,6 +3038,44 @@ void app_main(void)
     ESP_LOGI(TAG, "========================================");
 
     Core2ForAWS_Init();
+
+    g_display_power_mutex = xSemaphoreCreateMutex();
+    if (!g_display_power_mutex) {
+        ESP_LOGE(TAG, "Failed to create display power mutex");
+        abort();
+    }
+
+    /* Wake signal for the pager task's idle wait. Created before the touch
+     * task and the UI so no giver can run against a NULL handle. */
+    g_wake_sem = xSemaphoreCreateBinary();
+    if (!g_wake_sem) {
+        ESP_LOGE(TAG, "Failed to create wake semaphore");
+        abort();
+    }
+
+    /* Same, for the power monitor task. Must exist before build_ui(), which
+     * can trigger a display wake. */
+    g_battery_wake_sem = xSemaphoreCreateBinary();
+    if (!g_battery_wake_sem) {
+        ESP_LOGE(TAG, "Failed to create battery wake semaphore");
+        abort();
+    }
+
+    /*
+     * ADC1 enable mask (AXP192 REG82):
+     *   bit7 battery voltage  - the percentage reading
+     *   bit6 battery current  - required for the charge/discharge direction
+     *                           flag in REG00 bit 2 to be meaningful
+     *
+     * The previous 0x80 saved a negligible amount of power and left charge
+     * detection working off an unreliable bit. The remaining five channels
+     * (ACIN/VBUS/APS/TS) stay disabled since nothing reads them.
+     */
+    Axp192_SetAdc1Enable(0xC0);
+
+#if DISABLE_UNUSED_5V_EXPANSION
+    Axp192_EnableExten(0);
+#endif
 
     set_led_idle();
     Core2ForAWS_Motor_SetStrength(0);
@@ -2067,7 +3099,7 @@ void app_main(void)
         abort();
     }
 
-    g_last_user_activity_ms = now_ms();
+    mark_user_activity_now();
 
     build_ui();
     set_status_text("Connecting Wi-Fi...", LV_COLOR_MAKE(0xE6, 0x51, 0x00));
@@ -2075,8 +3107,29 @@ void app_main(void)
     ESP_LOGI(TAG, "Calling init_wifi");
     ESP_ERROR_CHECK(init_wifi());
 
+    ESP_LOGI(TAG, "Creating independent touch wake task");
+    BaseType_t touch_task_result = xTaskCreatePinnedToCore(
+        touch_wake_task, "touch_wake_task", 3072, NULL, 6, NULL, 1);
+    if (touch_task_result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create touch wake task");
+        abort();
+    }
+
+    ESP_LOGI(TAG, "Creating power monitor task");
+    BaseType_t power_task_result = xTaskCreatePinnedToCore(
+        power_monitor_task, "power_monitor_task", 4096, NULL, 4, NULL, 1);
+    if (power_task_result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create power monitor task");
+        abort();
+    }
+
     ESP_LOGI(TAG, "Creating pager task with larger stack");
-    xTaskCreatePinnedToCore(pager_task, "andon_pager_task", 24576, NULL, 5, NULL, 1);
+    BaseType_t task_result = xTaskCreatePinnedToCore(
+        pager_task, "andon_pager_task", 24576, NULL, 5, NULL, 1);
+    if (task_result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create pager task");
+        abort();
+    }
 
     ESP_LOGI(TAG, "app_main complete");
 }

@@ -32,7 +32,12 @@ function formatDuration(seconds: number) {
 }
 
 function useAdmin() {
-  return useQuery({ queryKey: ["admin"], queryFn: () => api<any>("/api/admin/bootstrap") });
+  return useQuery({
+    queryKey: ["admin"],
+    queryFn: () => api<any>("/api/admin/bootstrap", { cache: "no-store" }),
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000
+  });
 }
 
 function TextInput({ value, onChange, placeholder, type = "text" }: any) {
@@ -58,14 +63,15 @@ export function AdminPage() {
       <div className="tab-row">
         {["status", "settings", "machines", "departments", "commands", "users", "communication", "pagers"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
       </div>
+      {tab !== "status" && !data && <section className="panel"><div className="empty-state small">{admin.isError ? "Admin data could not be loaded." : "Loading admin data..."}</div>{admin.isError && <button onClick={() => void admin.refetch()}>Retry</button>}</section>}
       {tab === "status" && <StatusAdmin />}
-      {tab === "settings" && <SettingsAdmin data={data} />}
-      {tab === "machines" && <MachinesAdmin data={data} />}
-      {tab === "departments" && <DepartmentsAdmin data={data} />}
-      {tab === "commands" && <CommandsAdmin data={data} />}
-      {tab === "users" && <UsersAdmin data={data} />}
-      {tab === "communication" && <CommunicationChannelsAdmin />}
-      {tab === "pagers" && <PagersAdmin data={data} />}
+      {data && tab === "settings" && <SettingsAdmin data={data} />}
+      {data && tab === "machines" && <MachinesAdmin data={data} />}
+      {data && tab === "departments" && <DepartmentsAdmin data={data} />}
+      {data && tab === "commands" && <CommandsAdmin data={data} />}
+      {data && tab === "users" && <UsersAdmin data={data} />}
+      {data && tab === "communication" && <CommunicationChannelsAdmin />}
+      {data && tab === "pagers" && <PagersAdmin data={data} />}
     </div>
   );
 }
