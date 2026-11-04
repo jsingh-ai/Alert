@@ -78,6 +78,16 @@ export function UsersIcon(props: IconProps) {
   );
 }
 
+export function AlertTriangleIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M10.3 3.9 2.6 18a1.8 1.8 0 0 0 1.55 2.7h15.7A1.8 1.8 0 0 0 21.4 18L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z" />
+      <path d="M12 9.5v4" />
+      <path d="M12 16.8h.01" />
+    </svg>
+  );
+}
+
 export function WrenchIcon(props: IconProps) {
   return (
     <svg {...base(props)} aria-hidden="true" focusable="false">

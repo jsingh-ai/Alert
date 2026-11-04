@@ -759,6 +759,13 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .status-arrived { background: #dbeafe; color: #1e40af; }
 .status-resolved { background: #dcfce7; color: #166534; }
 .status-cancelled { background: #e2e8f0; color: #475569; }
+.alert-card-badge-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+.priority-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.55rem; border-radius: 999px; font-size: 0.68rem; font-weight: 950; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+.priority-badge-icon { width: 13px; height: 13px; flex-shrink: 0; }
+.priority-badge-critical { background: #b91c1c; color: #ffffff; border: 1px solid #991b1b; box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.15); }
+.priority-badge-high { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.priority-badge-normal { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.priority-badge-low { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 .queue-page { height: calc(100vh - 2.4rem); min-height: 0; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 0.75rem; overflow: hidden; }
 .queue-hero {
   position: relative;
@@ -1185,12 +1192,9 @@ label { display: grid; gap: 0.4rem; color: var(--muted); font-weight: 700; }
 .floor-command-open .command-status { background: #fee2e2; color: #991b1b; }
 .floor-command-acknowledged .command-status { background: #fef3c7; color: #92400e; }
 .floor-page .split-alerts { grid-template-columns: 1fr; gap: 0.55rem; margin-top: 0.7rem; }
-.floor-page .alert-card { padding: 0.65rem; border-left-color: #dc2626; border-radius: 12px; }
-.floor-page .alert-card.priority-critical,
-.floor-page .alert-card.priority-high,
-.floor-page .alert-card.priority-normal,
-.floor-page .alert-card.priority-low { border-left-color: #dc2626; }
-.floor-page .alert-card:has(.status-acknowledged) { border-left-color: #f59e0b; }
+.floor-page .alert-card { padding: 0.65rem; border-radius: 12px; }
+.floor-page .alert-card.priority-critical { background: linear-gradient(180deg, #fef2f2, #ffffff 65%); border-left-color: #7f1d1d; }
+.floor-page .alert-card:has(.status-acknowledged) { border-left-color: #f59e0b; background: none; }
 .floor-page .alert-meta { margin-top: 0.55rem; }
 .floor-alert { display: grid; gap: 0.65rem; }
 .floor-alert .alert-meta,

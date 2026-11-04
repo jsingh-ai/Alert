@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatElapsed } from "../lib/format";
 import { CommandGroupCard } from "../components/CommandGroupCard";
+import { GridIcon } from "../components/icons";
 import type { CommandGroup } from "../lib/types";
 
 const naturalMachineSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -55,7 +56,7 @@ export function FloorPage() {
   return (
     <div className="page-stack floor-page">
       <header className="floor-header">
-        <div className="operator-section-mark" aria-hidden="true">LF</div>
+        <div className="operator-section-mark" aria-hidden="true"><GridIcon /></div>
         <div className="operator-section-copy">
           <span>Live Floor</span>
           <h1>Floor Overview</h1>

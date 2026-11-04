@@ -4,6 +4,7 @@ import { postJson } from "../lib/api";
 import { formatElapsed } from "../lib/format";
 import type { Alert } from "../lib/types";
 import { StatusBadge } from "./StatusBadge";
+import { PriorityBadge } from "./PriorityBadge";
 
 type ActionMode = "queue" | "operator" | "floor";
 
@@ -51,7 +52,10 @@ export function AlertCard({ alert, compact = false, actionMode = "queue", now }:
             <strong>{alert.machine.name}</strong>
             <span>{alert.issueText}</span>
           </div>
-          <StatusBadge status={alert.status} />
+          <div className="alert-card-badge-group">
+            {actionMode === "floor" && <PriorityBadge priority={alert.priority} />}
+            <StatusBadge status={alert.status} />
+          </div>
         </header>
       )}
       {!compact && (alert.displayMessage || alert.operatorNote) && <p>{alert.displayMessage || alert.operatorNote}</p>}
