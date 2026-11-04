@@ -3,8 +3,18 @@ import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon } from "../components/icons";
+import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon, SunIcon, MoonIcon } from "../components/icons";
 import fiveStarLogo from "../assets/logos/five-star-logo.svg";
+
+const THEME_STORAGE_KEY = "pg-login-theme";
+
+function readStoredTheme(): "light" | "dark" {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
 
 const DEPARTMENT_ICONS: Record<string, (props: { className?: string }) => ReactElement> = {
   quality: ShieldCheckIcon,
@@ -47,6 +57,17 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [showDepartments, setShowDepartments] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState("");
+  const [theme, setTheme] = useState<"light" | "dark">(readStoredTheme);
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // ignore - theme just won't persist across visits
+    }
+  }
 
   async function submit(companyId?: string) {
     setBusy(true);
@@ -77,7 +98,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="login-page">
+    <div className="login-page" data-theme={theme}>
       <div className="login-shell">
         <section className="login-brand-panel">
           <div className="login-brand-header">
@@ -104,6 +125,15 @@ export function LoginPage() {
           </div>
         </section>
         <section className="login-form-panel">
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+          >
+            {theme === "light" ? <MoonIcon /> : <SunIcon />}
+          </button>
           <div className="login-card">
             <div className="demo-panel">
               <div className="demo-panel-header">
