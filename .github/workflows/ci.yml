@@ -36,6 +36,13 @@ jobs:
       - name: Build (apps/api, apps/web)
         run: npm run build
 
+      - name: Upload web build (for local preview without npm install)
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 14
+
   teams-bridge:
     name: Teams Bridge (syntax + tests)
     runs-on: ubuntu-latest
