@@ -123,6 +123,24 @@ export function MoonIcon(props: IconProps) {
   );
 }
 
+export function UserIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M4.5 20c0-4.1 3.4-7 7.5-7s7.5 2.9 7.5 7" />
+    </svg>
+  );
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <rect x="5" y="11" width="14" height="9" rx="2.5" />
+      <path d="M8 11V7.5a4 4 0 0 1 8 0V11" />
+    </svg>
+  );
+}
+
 export function WrenchIcon(props: IconProps) {
   return (
     <svg {...base(props)} aria-hidden="true" focusable="false">

@@ -3,8 +3,22 @@ import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon, SunIcon, MoonIcon } from "../components/icons";
-import fiveStarLogo from "../assets/logos/five-star-logo.svg";
+import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon, SunIcon, MoonIcon, UserIcon, LockIcon } from "../components/icons";
+import polytexLogo from "../assets/logos/polytex.svg";
+import starpakLogo from "../assets/logos/starpak.svg";
+import freshpakLogo from "../assets/logos/freshpak.svg";
+import anduroLogo from "../assets/logos/anduro.svg";
+import superbagLogo from "../assets/logos/superbag.svg";
+import fiveStarCanadaLogo from "../assets/logos/five-star-canada.svg";
+
+const SIBLING_LOGOS = [
+  { name: "Polytex", src: polytexLogo },
+  { name: "Starpak", src: starpakLogo },
+  { name: "Freshpak", src: freshpakLogo },
+  { name: "Anduro", src: anduroLogo },
+  { name: "Superbag", src: superbagLogo },
+  { name: "Five Star Canada", src: fiveStarCanadaLogo }
+];
 
 const THEME_STORAGE_KEY = "pg-login-theme";
 
@@ -101,6 +115,7 @@ export function LoginPage() {
     <div className="login-page" data-theme={theme}>
       <div className="login-shell">
         <section className="login-brand-panel">
+          <div className="login-orbit" aria-hidden="true" />
           <div className="login-brand-header">
             <div className="brand-mark large">PG</div>
             <div>
@@ -119,9 +134,26 @@ export function LoginPage() {
               </li>
             ))}
           </ol>
-          <div className="login-brand-footer">
-            <img src={fiveStarLogo} alt="Five Star Family of Companies" />
+          <div className="login-logo-strip">
             <span>Part of the Five Star family of companies</span>
+            <div className="login-logo-window">
+              <div className="login-logo-track">
+                <div className="login-logo-group">
+                  {SIBLING_LOGOS.map((logo) => (
+                    <div className="login-logo-tile" key={logo.name}>
+                      <img src={logo.src} alt={logo.name} />
+                    </div>
+                  ))}
+                </div>
+                <div className="login-logo-group" aria-hidden="true">
+                  {SIBLING_LOGOS.map((logo) => (
+                    <div className="login-logo-tile" key={`${logo.name}-dup`}>
+                      <img src={logo.src} alt="" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </section>
         <section className="login-form-panel">
@@ -179,8 +211,20 @@ export function LoginPage() {
 
             <div className="divider">or sign in</div>
             <div className="login-form-grid">
-              <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+              <label>
+                Username
+                <span className="input-icon-field">
+                  <UserIcon />
+                  <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Enter your username" autoComplete="username" />
+                </span>
+              </label>
+              <label>
+                Password
+                <span className="input-icon-field">
+                  <LockIcon />
+                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" />
+                </span>
+              </label>
             </div>
             <button className="primary wide" onClick={() => submit()} disabled={busy}>Sign in</button>
             {companies.length > 0 && (
