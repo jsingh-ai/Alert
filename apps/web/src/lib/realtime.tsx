@@ -30,6 +30,8 @@ export function RealtimeBridge() {
       }
       if (payload.alertId) invalidateLive();
     };
+    // Anything that changed while the socket was down is fetched as soon as it reconnects.
+    socket.io.on("reconnect", invalidateLive);
     socket.on("alert.changed", invalidateLive);
     socket.on("command.changed", invalidateLive);
     socket.on("admin.changed", invalidateAdmin);

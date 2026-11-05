@@ -107,6 +107,15 @@ export const config = {
       true
     ),
 
+  // Behind a reverse proxy (IIS, nginx, a load balancer) every request otherwise shares the
+  // proxy's IP, so all stations share one rate-limit bucket. Only enable when a proxy you
+  // control sets X-Forwarded-For; otherwise clients could spoof their IP.
+  trustProxy:
+    boolFromEnv(
+      process.env.TRUST_PROXY,
+      false
+    ),
+
   corsOrigin:
     process.env.CORS_ORIGIN ??
     "http://localhost:5173",
