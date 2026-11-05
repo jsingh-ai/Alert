@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon, SunIcon, MoonIcon, UserIcon, LockIcon } from "../components/icons";
+import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon, UserIcon, LockIcon } from "../components/icons";
 import polytexLogo from "../assets/logos/polytex.svg";
 import starpakLogo from "../assets/logos/starpak.svg";
 import freshpakLogo from "../assets/logos/freshpak.svg";
@@ -20,16 +20,6 @@ const SIBLING_LOGOS = [
   { name: "Superbag", src: superbagLogo },
   { name: "Five Star Canada", src: fiveStarCanadaLogo }
 ];
-
-const THEME_STORAGE_KEY = "pg-login-theme";
-
-function readStoredTheme(): "light" | "dark" {
-  try {
-    return localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
-  } catch {
-    return "light";
-  }
-}
 
 const DEPARTMENT_ICONS: Record<string, (props: { className?: string }) => ReactElement> = {
   quality: ShieldCheckIcon,
@@ -72,21 +62,10 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [showDepartments, setShowDepartments] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState("");
-  const [theme, setTheme] = useState<"light" | "dark">(readStoredTheme);
   const [selectedSibling, setSelectedSibling] = useState("");
 
   function toggleSibling(name: string) {
     setSelectedSibling((current) => (current === name ? "" : name));
-  }
-
-  function toggleTheme() {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      // ignore - theme just won't persist across visits
-    }
   }
 
   async function submit(companyId?: string) {
@@ -118,7 +97,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="login-page" data-theme={theme}>
+    <div className="login-page">
       <div className="login-shell">
         <section className="login-brand-panel">
           <div className="login-orbit" aria-hidden="true" />
@@ -177,15 +156,6 @@ export function LoginPage() {
         <section className="login-form-panel">
           <div className="login-topbar">
             <img className="login-topbar-logo" src={fiveStarLogo} alt="Five Star" />
-            <button
-              type="button"
-              className="theme-toggle"
-              onClick={toggleTheme}
-              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-              title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-            >
-              {theme === "light" ? <MoonIcon /> : <SunIcon />}
-            </button>
           </div>
           <div className="login-card">
             <div className="demo-panel">
@@ -235,14 +205,14 @@ export function LoginPage() {
               <label>
                 Username
                 <span className="input-icon-field">
-                  <UserIcon />
+                  <span className="input-icon-chip"><UserIcon /></span>
                   <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" autoComplete="username" />
                 </span>
               </label>
               <label>
                 Password
                 <span className="input-icon-field">
-                  <LockIcon />
+                  <span className="input-icon-chip"><LockIcon /></span>
                   <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoComplete="current-password" />
                 </span>
               </label>
