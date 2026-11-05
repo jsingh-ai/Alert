@@ -23,6 +23,18 @@ import { adminRoutes } from "./routes/adminRoutes.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, bodyLimit: 1_000_000, trustProxy: config.trustProxy });
 
+/**
+ * The app shell (index.html), service worker and manifest must always be revalidated, or browsers
+ * keep running an old build after a deploy. Vite's /assets/* files are fingerprinted, so they can be
+ * cached for good.
+ */
+function webCacheControl(filePath: string, webDist: string) {
+  const relative = path.relative(webDist, filePath).split(path.sep).join("/");
+  if (relative === "index.html" || relative === "sw.js" || relative === "manifest.webmanifest") return "no-cache";
+  if (relative.startsWith("assets/")) return "public, max-age=31536000, immutable";
+  return "public, max-age=0";
+}
+
 function isAllowedOrigin(origin: string) {
   if (!config.isProduction && config.corsOrigins.includes("*")) return true;
   return config.corsOrigins.includes(origin);
@@ -97,7 +109,15 @@ await app.register(adminRoutes);
 if (config.serveWeb) {
   const webDist = path.resolve(__dirname, "../../web/dist");
   if (fs.existsSync(webDist)) {
-    await app.register(fastifyStatic, { root: webDist, prefix: "/" });
+    await app.register(fastifyStatic, {
+      root: webDist,
+      prefix: "/",
+      // Cache headers are set entirely here so the installed app (service worker) picks up deploys.
+      cacheControl: false,
+      setHeaders(res, filePath) {
+        res.setHeader("Cache-Control", webCacheControl(filePath, webDist));
+      }
+    });
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith("/api/")) {
         reply.code(404).send({ success: false, error: "API route not found." });
