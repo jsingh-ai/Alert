@@ -40,22 +40,22 @@ const WORKFLOW_STEPS = [
   {
     icon: BoltIcon,
     title: "Call for help",
-    body: "An operator presses a button on the machine. A timer starts instantly."
+    body: "Operator calls for assistance with a click."
   },
   {
     icon: LayersIcon,
     title: "Routed to the right team",
-    body: "Maintenance, QC, or any department is notified right away."
+    body: "Instantly alerts the right department."
   },
   {
     icon: BellRingIcon,
     title: "Acknowledged on phone or pager",
-    body: "Responders accept from their phone, the M5 pager, or Teams."
+    body: "Accepted from phone or pager."
   },
   {
     icon: CheckCircleIcon,
     title: "Closed out on the machine",
-    body: "Every status change is logged and visible to everyone in real time."
+    body: "Logged and visible in real time."
   }
 ];
 
@@ -119,8 +119,8 @@ export function LoginPage() {
           <div className="login-brand-header">
             <div className="brand-mark large">PG</div>
             <div>
-              <h1>ProcessGuard Andon</h1>
-              <p>Fast manufacturing help calls, department queues, live floor visibility, and M5 pager support.</p>
+              <h1>ProcessGuard Workflow</h1>
+              <p>Live Floor Visibility only</p>
             </div>
           </div>
           <ol className="login-workflow">
@@ -215,14 +215,14 @@ export function LoginPage() {
                 Username
                 <span className="input-icon-field">
                   <UserIcon />
-                  <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Enter your username" autoComplete="username" />
+                  <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" autoComplete="username" />
                 </span>
               </label>
               <label>
                 Password
                 <span className="input-icon-field">
                   <LockIcon />
-                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" />
+                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoComplete="current-password" />
                 </span>
               </label>
             </div>
