@@ -107,6 +107,46 @@
 /* ---------- Open calls ---------- */
 .ms-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 1.5rem; align-items: stretch; }
 .ms-calls { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+/* Several calls: equal shares of the height, so every open call is on screen at once */
+.ms-calls.multi { display: grid; grid-auto-rows: minmax(min-content, 1fr); }
+
+/* Compact row (one-team call when several are open): headline + progress | timer | action */
+/* fixed timer and action columns so every row lines up, whatever its button says */
+.ms-call.ms-call-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, auto) 300px; align-items: center; gap: 1rem 2.25rem; padding: 1.5rem 2rem 1.5rem 2.4rem; }
+.ms-row-main { display: grid; gap: 0.85rem; min-width: 0; }
+.ms-row-main h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.85rem; font-size: clamp(1.75rem, 3.4vh, 2.375rem); font-weight: 650; letter-spacing: -0.025em; line-height: 1.1; }
+.ms-row-progress { display: flex; align-items: center; gap: 0.85rem; min-width: 0; color: var(--pg-text-2); font-size: 1.0625rem; }
+.ms-row-progress span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-row-timer { display: grid; justify-items: end; gap: 0.25rem; text-align: right; }
+.ms-row-timer span { font-size: 0.875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pg-muted); }
+.ms-row-timer strong { font-size: clamp(3.5rem, 9vh, 5.5rem); font-weight: 600; letter-spacing: -0.04em; line-height: 0.95; font-variant-numeric: tabular-nums; color: var(--pg-text); }
+.ms-call.late .ms-row-timer strong, .ms-call.stale .ms-row-timer strong { color: var(--tone); }
+:root[data-theme="dark"] .ms-call.late:not(.stale) .ms-row-timer strong { color: #f87171; }
+.ms-row-timer small { font-size: 0.9375rem; color: var(--pg-muted); font-variant-numeric: tabular-nums; }
+.ms-row-actions { display: flex; justify-content: flex-end; }
+.ms-page .ms-row-actions > .ms-btn, .ms-page .ms-row-actions > .ms-btn.big { width: 100%; min-width: 0; white-space: nowrap; }
+.ms-row-actions .ms-confirm { flex-direction: column; align-items: stretch; max-width: 340px; }
+.ms-call-row > .ms-error { grid-column: 1 / -1; }
+/* the mini track's dots, a little larger in the row */
+.ms-row-progress .ms-mini, .ms-row-progress .ms-mini i { flex: none; }
+.ms-row-progress .ms-mini i { width: 12px; height: 12px; }
+/* per-team Cancel on multi-team calls: same height as its Close neighbour */
+.ms-page .ms-team-side .ms-btn.cancel { min-height: 52px; }
+/* Laptops / 1366-wide kiosks: keep the three columns (so 3 calls still fit on a 768px-tall screen), a size down */
+@media (max-width: 1440px) {
+  .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr) minmax(160px, auto) 250px; gap: 0.75rem 1.5rem; padding: 1.15rem 1.5rem 1.15rem 1.9rem; }
+  .ms-row-main { gap: 0.6rem; }
+  .ms-row-main h2 { font-size: 1.625rem; }
+  .ms-row-progress { font-size: 1rem; gap: 0.7rem; }
+  .ms-row-timer strong { font-size: clamp(3rem, 8vh, 4.25rem); }
+  .ms-page .ms-call-row .ms-row-actions > .ms-btn { min-height: 52px; padding: 0 1rem; font-size: 0.9375rem; }
+}
+/* Tablets: headline on top, then timer and action side by side */
+@media (max-width: 900px) {
+  .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr) minmax(200px, 280px); }
+  .ms-row-main { grid-column: 1 / -1; }
+  .ms-row-timer { justify-items: start; text-align: left; }
+}
 .ms-call:not(.compact) { flex: 1; }
 .ms-call.compact { gap: 1rem; padding-top: 1.4rem; padding-bottom: 1.25rem; }
 .ms-call.compact .ms-call-main h2 { font-size: 1.75rem; }
@@ -230,8 +270,10 @@
 .ms-page .ms-btn.secondary { border-color: var(--pg-line-2); background: var(--pg-card); color: var(--pg-text); }
 .ms-page .ms-btn.danger { background: var(--pg-wait); color: #fff; }
 .ms-page .ms-btn.ghost, .ms-sheet .ms-btn.ghost { border-color: var(--pg-line-2); background: var(--pg-card); color: var(--pg-text-2); }
-.ms-page .ms-btn.quiet { background: transparent; color: var(--pg-text-2); }
-.ms-page .ms-btn.quiet:hover:not(:disabled), .ms-page .ms-btn.secondary:hover:not(:disabled), .ms-page .ms-btn.ghost:hover:not(:disabled), .ms-sheet .ms-btn.ghost:hover:not(:disabled) { background: var(--pg-hover); color: var(--pg-text); }
+.ms-page .ms-btn.cancel { min-height: 56px; padding: 0 1.5rem; border: 1.5px solid var(--pg-line-2); background: var(--pg-card); color: var(--pg-text); }
+.ms-page .ms-btn.cancel svg { color: var(--pg-wait-text); }
+.ms-page .ms-btn.cancel:hover:not(:disabled), .ms-page .ms-btn.cancel:active:not(:disabled) { border-color: var(--pg-wait-line); background: var(--pg-wait-soft); color: var(--pg-wait-text); }
+.ms-page .ms-btn.secondary:hover:not(:disabled), .ms-page .ms-btn.ghost:hover:not(:disabled), .ms-sheet .ms-btn.ghost:hover:not(:disabled) { background: var(--pg-hover); color: var(--pg-text); }
 .ms-page .ms-btn:disabled, .ms-sheet .ms-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 .ms-page .ms-btn:focus-visible, .ms-sheet .ms-btn:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
 .ms-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1rem; padding: 0.9rem 1rem; border-radius: 12px; background: var(--pg-track); }
@@ -311,6 +353,8 @@
   .ms-call-main h2 { font-size: 2rem; }
   }
 @media (max-width: 640px) {
+  .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr); padding: 1.25rem 1.1rem 1.25rem 1.5rem; }
+  .ms-row-timer strong { font-size: 3rem; }
   .ms-call { padding: 1.25rem 1.1rem 1.1rem 1.5rem; }
   .ms-call-head { flex-direction: column; }
   .ms-timer strong { font-size: 3.25rem; }

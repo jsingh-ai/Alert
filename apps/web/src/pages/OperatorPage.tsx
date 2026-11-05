@@ -226,8 +226,8 @@ export function OperatorPage() {
 
       {calls.length > 0 ? (
         <div className="ms-body">
-          <section className="ms-calls" aria-label="Open calls">
-            {calls.map((call, index) => <ActiveCall key={call.command.id} call={call} compact={index > 0} machineId={machineId} stale={connection === "offline"} disabled={!canCall} onChange={refresh} />)}
+          <section className={`ms-calls ${calls.length > 1 ? "multi" : ""}`} aria-label="Open calls">
+            {calls.map((call) => <ActiveCall key={call.command.id} call={call} compact={calls.length > 1} machineId={machineId} stale={connection === "offline"} disabled={!canCall} onChange={refresh} />)}
           </section>
           <aside className="ms-rail" aria-label="Call another team">
             {createCall.isError && !otherOpen && <p className="ms-error" role="alert">{errorText(createCall.error, "The call didn't go through. Try again.")}</p>}
@@ -478,6 +478,14 @@ function teamTimes(alert: Alert, timing: AlertTiming) {
   return parts.join(" · ");
 }
 
+/** One line of progress for a compact row: "Called 11:34 AM · no response yet", "Marcus Lee · on the way since 11:36 AM". */
+function progressLine(alert: Alert, timing: AlertTiming) {
+  const who = responder(alert) || "Responder";
+  if (timing.stage === "waiting") return `Called ${timeOfDay(alert.createdAt)} · no response yet`;
+  if (timing.stage === "onTheWay") return `${who} · on the way since ${timeOfDay(alert.acknowledgedAt ?? alert.createdAt)}`;
+  return `${who} · at the machine since ${timeOfDay(alert.arrivedAt)}`;
+}
+
 /** Called → Acknowledged → At machine → Closed, for a one-team call. */
 function Track({ alert, timing }: { alert: Alert; timing: AlertTiming }) {
   const who = responder(alert);
@@ -547,8 +555,60 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
   const single = multi ? null : call.alerts[0];
   const names = call.alerts.map(({ alert }) => alert.department.name).join(" + ");
 
+  // The call's one action (shared by the full card and the compact row)
+  const action = allAnswered ? (
+    <button type="button" className="ms-btn primary big" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: answered.map(({ alert }) => alert.id), label: multi ? "Is the issue fixed? This closes the call for every team." : "Is the issue fixed?" })}>
+      <CheckCircleIcon /> Issue fixed, close call
+    </button>
+  ) : noneAnswered ? (
+    <button type="button" className="ms-btn cancel" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: unanswered.map(({ alert }) => alert.id), label: "Cancel this call? Use this if it was pressed by mistake." })}>
+      <CloseIcon /> Cancel call
+    </button>
+  ) : null;
+
+  const confirm = pending && (
+    <div className="ms-confirm" role="alertdialog" aria-label={pending.label}>
+      <strong>{pending.label}</strong>
+      <div>
+        <button type="button" className="ms-btn ghost" autoFocus onClick={() => setPending(null)} disabled={act.isPending}>Back</button>
+        <button type="button" className={`ms-btn ${pending.kind === "close" ? "primary" : "danger"}`} onClick={() => act.mutate(pending)} disabled={act.isPending || disabled}>
+          {act.isPending ? "Working…" : pending.kind === "close" ? "Yes, close it" : "Yes, cancel"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const error = act.isError && <p className="ms-error" role="alert">{errorText(act.error, "That didn't go through. Try again.")}</p>;
+  const stateClass = `${call.stage} ${call.late ? "late" : ""} ${stale ? "stale" : ""}`;
+
+  // Several calls open: each one-team call is a compact row (headline + progress | timer | action),
+  // so every open call is visible at once without scrolling.
+  if (compact && single) {
+    return (
+      <article className={`ms-call ms-call-row ${stateClass}`}>
+        <div className="ms-row-main">
+          <h2>
+            {headline(call)}
+            {call.late && <em className="ms-late">Late</em>}
+          </h2>
+          <p className="ms-row-progress">
+            <MiniTrack stage={single.timing.stage} />
+            <span>{progressLine(single.alert, single.timing)}</span>
+          </p>
+        </div>
+        <div className="ms-row-timer">
+          <span>{timerLabel(call.stage)}</span>
+          <strong>{clock(stageSeconds(call))}</strong>
+          <small>{call.stage === "waiting" ? `Target ${clock(LATE_AFTER_SECONDS)}` : `Open for ${clock(call.totalSeconds)}`}</small>
+        </div>
+        <div className="ms-row-actions">{confirm || action}</div>
+        {error}
+      </article>
+    );
+  }
+
   return (
-    <article className={`ms-call ${call.stage} ${call.late ? "late" : ""} ${stale ? "stale" : ""} ${compact ? "compact" : ""}`}>
+    <article className={`ms-call ${stateClass} ${compact ? "compact" : ""}`}>
       <header className="ms-call-head">
         <div className="ms-call-main">
           {multi && (
@@ -581,7 +641,7 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
           </div>
         </div>
       {single ? (
-        !compact && <Track alert={single.alert} timing={single.timing} />
+        <Track alert={single.alert} timing={single.timing} />
       ) : (
         <ul className="ms-teams">
           {call.alerts.map(({ alert, timing }) => (
@@ -595,7 +655,7 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
               <div className="ms-team-side">
                 <MiniTrack stage={timing.stage} />
                 {!pending && (timing.stage === "waiting" ? (
-                  <button type="button" className="ms-btn ghost" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: [alert.id], label: `Cancel the ${alert.department.name} call?` })}>Cancel</button>
+                  <button type="button" className="ms-btn cancel" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: [alert.id], label: `Cancel the ${alert.department.name} call?` })}>Cancel</button>
                 ) : (
                   <button type="button" className="ms-btn secondary" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: [alert.id], label: `Close ${alert.department.name}? Only if their part is fixed.` })}>Close</button>
                 ))}
@@ -606,36 +666,13 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
       )}
       </div>
 
-      {pending ? (
-        <div className="ms-confirm" role="alertdialog" aria-label={pending.label}>
-          <strong>{pending.label}</strong>
-          <div>
-            <button type="button" className="ms-btn ghost" autoFocus onClick={() => setPending(null)} disabled={act.isPending}>Back</button>
-            <button type="button" className={`ms-btn ${pending.kind === "close" ? "primary" : "danger"}`} onClick={() => act.mutate(pending)} disabled={act.isPending || disabled}>
-              {act.isPending ? "Working…" : pending.kind === "close" ? "Yes, close it" : "Yes, cancel"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        (allAnswered || noneAnswered) && (
+      {confirm || (action && (
         <footer className="ms-call-foot">
-          <div className="ms-call-actions">
-            {allAnswered && (
-              <button type="button" className="ms-btn primary big" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: answered.map(({ alert }) => alert.id), label: multi ? "Is the issue fixed? This closes the call for every team." : "Is the issue fixed?" })}>
-                <CheckCircleIcon /> Issue fixed, close call
-              </button>
-            )}
-            {noneAnswered && (
-              <button type="button" className="ms-btn quiet" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: unanswered.map(({ alert }) => alert.id), label: "Cancel this call? Use this if it was pressed by mistake." })}>
-                <CloseIcon /> Cancel call
-              </button>
-            )}
-          </div>
+          <div className="ms-call-actions">{action}</div>
         </footer>
-        )
-      )}
+      ))}
 
-      {act.isError && <p className="ms-error" role="alert">{errorText(act.error, "That didn't go through. Try again.")}</p>}
+      {error}
     </article>
   );
 }
