@@ -1,29 +1,35 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postJson } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { useTheme } from "../lib/theme";
 import type { Alert, CommandGroup } from "../lib/types";
-import { clock, summarizeCall } from "../lib/callStages";
+import { clock, mergeByCall, summarizeCall } from "../lib/callStages";
 import type { AlertTiming, CallStage, CallSummary } from "../lib/callStages";
 import { DepartmentIcon } from "../components/DepartmentBadge";
-import { CheckCircleIcon, CloseIcon, SettingsIcon } from "../components/icons";
+import { CheckCircleIcon, CloseIcon, MoonIcon, SettingsIcon, SignOutIcon, SunIcon } from "../components/icons";
 import "../styles/station.css";
 
 const MACHINE_KEY = "pg_operator_locked_machine_id";
+const STALE_AFTER_MS = 15_000;
+const HOLD_MS = 1500;
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-const QUICK_MESSAGES = ["Still waiting", "Machine stopped", "Urgent, please hurry"];
+
+/** One-tap updates that make sense for each stage of a call. */
+const QUICK_MESSAGES: Record<CallStage, string[]> = {
+  waiting: ["Still waiting", "Machine stopped", "Urgent, please hurry"],
+  onTheWay: ["Machine stopped", "Urgent, please hurry"],
+  onSite: []
+};
 
 type Department = { id: string; name: string; color?: string };
 type Machine = { id: string; name: string; code: string; machineGroup?: { name?: string } | null };
 type Template = { id: string; buttonLabel: string; targets: Array<{ departmentId: string; department: Department }> };
 type IssueType = { id: string; name: string; departmentId: string };
 type Bootstrap = { machines: Machine[]; departments: Department[]; issueTypes: IssueType[]; commandTemplates: Template[] };
-
-const STATUS: Record<CallStage | "clear", { label: string; tone: string }> = {
-  clear: { label: "Running normally", tone: "clear" },
-  waiting: { label: "Waiting for help", tone: "waiting" },
-  onTheWay: { label: "Help on the way", tone: "onTheWay" },
-  onSite: { label: "Help at the machine", tone: "onSite" }
-};
+type Snapshot = { data?: { commands?: CommandGroup[] } };
+type BandState = CallStage | "clear" | "late" | "connecting" | "offline";
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -56,6 +62,20 @@ function timeOfDay(value: string | number | null | undefined) {
   return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function snapshotPath(machineId: string) {
+  return `/api/operator/snapshot?machineId=${encodeURIComponent(machineId)}`;
+}
+
+function errorText(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/** "Maintenance" for a one-team call, "Material Clear" for a multi-team one; never "Call …". */
+function callTitle(call: CallSummary) {
+  if (call.alerts.length === 1) return call.alerts[0].alert.department.name;
+  return call.command.commandLabel.replace(/^call\s+/i, "");
+}
+
 export function OperatorPage() {
   const queryClient = useQueryClient();
   const now = useNow();
@@ -66,7 +86,7 @@ export function OperatorPage() {
   const bootstrap = useQuery({ queryKey: ["operator-bootstrap"], queryFn: () => api<{ data?: Bootstrap }>("/api/operator/bootstrap") });
   const snapshot = useQuery({
     queryKey: ["operator-snapshot", machineId],
-    queryFn: () => api<{ data?: { commands?: CommandGroup[] } }>(`/api/operator/snapshot${machineId ? `?machineId=${machineId}` : ""}`),
+    queryFn: () => api<Snapshot>(snapshotPath(machineId), {}, { quiet: true }),
     enabled: Boolean(machineId),
     refetchInterval: 5000
   });
@@ -89,16 +109,20 @@ export function OperatorPage() {
   }, [data, machineId, machines]);
 
   const calls = useMemo(() => {
-    const commands = (snapshot.data?.data?.commands ?? []).filter((c) => c.machine?.id === machineId && c.alerts.length > 0);
+    const commands = mergeByCall((snapshot.data?.data?.commands ?? []).filter((c) => c.machine?.id === machineId && c.alerts.length > 0));
     return commands
       .map((command) => summarizeCall(command, now))
       .sort((a, b) => new Date(a.command.createdAt).getTime() - new Date(b.command.createdAt).getTime());
   }, [snapshot.data, machineId, now]);
 
-  const busyDepartments = new Map<string, CallSummary>();
-  for (const call of calls) for (const { alert } of call.alerts) busyDepartments.set(alert.department.id, call);
-  const activeTemplates = new Map(calls.filter((c) => c.command.commandTemplateId).map((c) => [c.command.commandTemplateId as string, c]));
+  const busyDepartments = new Set(calls.flatMap((call) => call.alerts.map(({ alert }) => alert.department.id)));
+
+  // Never claim "Running normally" without fresh data.
+  const connecting = snapshot.isLoading;
+  const offline = !connecting && (snapshot.isError || (snapshot.dataUpdatedAt > 0 && now - snapshot.dataUpdatedAt > STALE_AFTER_MS));
   const overall: CallStage | "clear" = calls.length === 0 ? "clear" : calls.some((c) => c.stage === "waiting") ? "waiting" : calls.some((c) => c.stage === "onTheWay") ? "onTheWay" : "onSite";
+  const band: BandState = connecting ? "connecting" : offline ? "offline" : calls.some((c) => c.late) ? "late" : overall;
+  const canCall = !connecting && !offline;
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["operator-snapshot"] });
@@ -117,7 +141,19 @@ export function OperatorPage() {
     setPickerOpen(false);
   }
 
-  if (bootstrap.isLoading) return <div className="ms-page"><div className="ms-loading">Loading station…</div></div>;
+  if (bootstrap.isLoading) return <div className="ms-page"><div className="ms-loading">Connecting to the station…</div></div>;
+
+  if (bootstrap.isError) {
+    return (
+      <div className="ms-page">
+        <div className="ms-problem">
+          <h1>Can't reach the server</h1>
+          <p>Check the network connection on this station.</p>
+          <button type="button" className="ms-btn primary" onClick={() => bootstrap.refetch()}>Try again</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!machine || pickerOpen) {
     return (
@@ -127,52 +163,46 @@ export function OperatorPage() {
     );
   }
 
+  const available = templates.filter((template) => !template.targets.some((t) => busyDepartments.has(t.departmentId)));
+  const oldest = calls[0];
+
   return (
-    <div className={`ms-page has-${overall}`}>
+    <div className="ms-page">
       <header className="ms-head">
         <div className="ms-machine">
           <small>{machine.machineGroup?.name ?? "Machine"} · {machine.code}</small>
           <h1>{machine.name}</h1>
         </div>
-        <div className={`ms-status ${STATUS[overall].tone}`} role="status" aria-live="polite">
-          <i aria-hidden="true" />
-          {STATUS[overall].label}
-        </div>
-        <button type="button" className="ms-change" onClick={() => setPickerOpen(true)} title="Change machine">
-          <SettingsIcon />
-          <span>Change machine</span>
-        </button>
+        <StationMenu onChangeMachine={() => setPickerOpen(true)} />
       </header>
+
+      <StatusBand state={band} oldest={oldest} callCount={calls.length} lastUpdate={snapshot.dataUpdatedAt} />
 
       <div className={`ms-body ${calls.length ? "with-calls" : ""}`}>
         {calls.length > 0 && (
           <section className="ms-calls" aria-label="Open calls">
-            {calls.map((call) => <ActiveCall key={call.command.id} call={call} onChange={refresh} />)}
+            {calls.map((call) => <ActiveCall key={call.command.id} call={call} machineId={machineId} disabled={!canCall} onChange={refresh} />)}
           </section>
         )}
 
         <section className="ms-request" aria-label="Call for help">
-          <header>
-            <h2>{calls.length ? "Call another team" : "Call for help"}</h2>
-            {createCall.isError && <span className="ms-error">Couldn't send the call. Try again.</span>}
-          </header>
+          <h2>{calls.length ? "Call another team" : "Call for help"}</h2>
+          {createCall.isError && <p className="ms-error" role="alert">{errorText(createCall.error, "The call didn't go through. Try again.")}</p>}
           <div className="ms-buttons">
-            {templates
-              // the active call is already shown on the left; usable buttons first, "already called" ones last
-              .filter((template) => !activeTemplates.has(template.id))
-              .sort((a, b) => Number(a.targets.some((t) => busyDepartments.has(t.departmentId))) - Number(b.targets.some((t) => busyDepartments.has(t.departmentId))))
-              .map((template) => {
-              const active = activeTemplates.get(template.id);
-              const busy = template.targets.map((t) => busyDepartments.get(t.departmentId)).find(Boolean);
-              const disabled = Boolean(active || busy) || createCall.isPending;
+            {available.map((template) => {
               const sending = createCall.isPending && createCall.variables?.templateId === template.id;
               const names = template.targets.map((t) => t.department.name);
+              const detail = sending
+                ? "Sending…"
+                : names.length > 1 || !names.every((n) => template.buttonLabel.toLowerCase().includes(n.toLowerCase()))
+                  ? names.join(" + ")
+                  : "";
               return (
                 <button
                   key={template.id}
                   type="button"
-                  className={`ms-call-button ${active ? "is-active" : ""} ${busy && !active ? "is-busy" : ""}`}
-                  disabled={disabled}
+                  className="ms-call-button"
+                  disabled={!canCall || createCall.isPending}
                   onClick={() => createCall.mutate({ templateId: template.id })}
                 >
                   <span className="ms-call-icons">
@@ -180,23 +210,12 @@ export function OperatorPage() {
                   </span>
                   <span className="ms-call-text">
                     <strong>{template.buttonLabel}</strong>
-                    {(() => {
-                      const detail = sending
-                        ? "Sending…"
-                        : active
-                          ? `Called ${clock(active.totalSeconds)} ago`
-                          : busy
-                            ? `${names.filter((_, i) => busyDepartments.has(template.targets[i].departmentId)).join(" + ")} already called`
-                            : names.length > 1 || !names.every((n) => template.buttonLabel.toLowerCase().includes(n.toLowerCase()))
-                              ? names.join(" + ")
-                              : "";
-                      return detail ? <small>{detail}</small> : null;
-                    })()}
+                    {detail && <small>{detail}</small>}
                   </span>
                 </button>
               );
             })}
-            <button type="button" className="ms-call-button ms-other" onClick={() => setOtherOpen(true)} disabled={createCall.isPending}>
+            <button type="button" className="ms-call-button ms-other" onClick={() => setOtherOpen(true)} disabled={!canCall || createCall.isPending}>
               <span className="ms-call-icons"><span className="ms-other-icon" aria-hidden="true">+</span></span>
               <span className="ms-call-text">
                 <strong>Other request</strong>
@@ -222,120 +241,257 @@ export function OperatorPage() {
   );
 }
 
+/* ---------- Status band: the one thing readable from across the room ---------- */
+
+function StatusBand({ state, oldest, callCount, lastUpdate }: { state: BandState; oldest?: CallSummary; callCount: number; lastUpdate: number }) {
+  const label: Record<BandState, string> = {
+    connecting: "Connecting…",
+    offline: "Offline",
+    clear: "Running normally",
+    waiting: "Waiting for help",
+    late: "Waiting for help",
+    onTheWay: "Help on the way",
+    onSite: "Help at the machine"
+  };
+  let detail = "";
+  if (state === "offline") detail = `Last update ${timeOfDay(lastUpdate) || "unknown"} · calls may be out of date`;
+  else if (state === "clear") detail = "No open calls";
+  else if (state === "late") detail = "No response yet · late";
+  else if (state !== "connecting" && oldest) detail = callCount > 1 ? `${callCount} calls open` : callTitle(oldest);
+
+  const showClock = oldest && state !== "connecting" && state !== "clear";
+  return (
+    <section className={`ms-band ${state}`} role="status" aria-live="polite">
+      <i className="ms-band-dot" aria-hidden="true" />
+      <div className="ms-band-text">
+        <strong>{label[state]}</strong>
+        {detail && <span>{detail}</span>}
+      </div>
+      {showClock && <span className="ms-band-clock">{clock(oldest.totalSeconds)}</span>}
+    </section>
+  );
+}
+
+/* ---------- Station menu (theme, sign out, protected machine change) ---------- */
+
+function StationMenu({ onChangeMachine }: { onChangeMachine: () => void }) {
+  const { logout } = useAuth();
+  const { theme, toggle } = useTheme();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <div className="ms-menu">
+      <button type="button" className="ms-menu-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <SettingsIcon />
+        <span>Station</span>
+      </button>
+      {open && (
+        <>
+          <div className="ms-menu-scrim" aria-hidden="true" onClick={() => setOpen(false)} />
+          <div className="ms-menu-list" role="menu">
+            <button type="button" role="menuitem" onClick={() => { toggle(); setOpen(false); }}>
+              {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+              {theme === "dark" ? "Light mode" : "Dark mode"}
+            </button>
+            <HoldButton onHold={() => { setOpen(false); onChangeMachine(); }} />
+            <button type="button" role="menuitem" className="danger" onClick={logout}>
+              <SignOutIcon />
+              Sign out of this station
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Press and hold to change the station's machine, so it can't happen by accident. */
+function HoldButton({ onHold }: { onHold: () => void }) {
+  const [progress, setProgress] = useState(0);
+  const timer = useRef<number | null>(null);
+  const started = useRef(0);
+
+  const stop = () => {
+    if (timer.current) window.clearInterval(timer.current);
+    timer.current = null;
+    setProgress(0);
+  };
+  const start = () => {
+    stop();
+    started.current = Date.now();
+    timer.current = window.setInterval(() => {
+      const value = Math.min(1, (Date.now() - started.current) / HOLD_MS);
+      setProgress(value);
+      if (value >= 1) {
+        stop();
+        onHold();
+      }
+    }, 30);
+  };
+  useEffect(() => stop, []);
+
+  const onKeyDown = (event: ReactKeyboardEvent) => {
+    if ((event.key === "Enter" || event.key === " ") && !timer.current) {
+      event.preventDefault();
+      start();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className="ms-hold"
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onKeyDown={onKeyDown}
+      onKeyUp={stop}
+      style={{ "--hold": progress } as CSSProperties}
+    >
+      <SettingsIcon />
+      {progress > 0 ? "Keep holding…" : "Hold to change machine"}
+    </button>
+  );
+}
+
 /* ---------- Active call ---------- */
 
 type Pending = { kind: "close" | "cancel"; alertIds: string[]; label: string } | null;
 
-function teamLine(alert: Alert, timing: AlertTiming) {
+function statusLine(alert: Alert, timing: AlertTiming) {
   const who = alert.responderNameText?.trim();
-  if (timing.stage === "waiting") return "Waiting for someone to respond";
-  if (timing.stage === "onTheWay") return `${who ?? "Someone"} is on the way`;
-  return `${who ?? "Help"} is at the machine`;
+  if (timing.stage === "waiting") return "Waiting for a response";
+  return `${who ?? "Responder"} · ${timing.stage === "onTheWay" ? "on the way" : "at the machine"}`;
 }
 
-function ActiveCall({ call, onChange }: { call: CallSummary; onChange: () => void }) {
+/** Grey traceability line: "Called 11:41 · acknowledged 11:43 (1:10) · arrived 11:45 (1:40)" */
+function timesLine(alert: Alert, timing: AlertTiming) {
+  const parts = [`Called ${timeOfDay(alert.createdAt)}`];
+  if (alert.acknowledgedAt) parts.push(`acknowledged ${timeOfDay(alert.acknowledgedAt)} (${clock(timing.waitSeconds)})`);
+  if (alert.arrivedAt) parts.push(`arrived ${timeOfDay(alert.arrivedAt)} (${clock(timing.travelSeconds)})`);
+  return parts.join(" · ");
+}
+
+function ActiveCall({ call, machineId, disabled, onChange }: { call: CallSummary; machineId: string; disabled: boolean; onChange: () => void }) {
   const [pending, setPending] = useState<Pending>(null);
   const [sentNote, setSentNote] = useState("");
+  const noteTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (noteTimer.current) window.clearTimeout(noteTimer.current); }, []);
 
   const act = useMutation({
     mutationFn: async ({ kind, alertIds }: { kind: "close" | "cancel"; alertIds: string[] }) => {
-      for (const id of alertIds) await postJson(`/api/alerts/${id}/${kind === "close" ? "resolve" : "cancel"}`, {});
+      if (kind === "cancel") {
+        // The screen can be a few seconds behind: never cancel a team that has just responded.
+        const fresh = await api<Snapshot>(snapshotPath(machineId));
+        const freshAlerts = mergeByCall(fresh.data?.commands ?? []).flatMap((c) => c.alerts);
+        if (alertIds.some((id) => freshAlerts.find((a) => a.id === id)?.status !== "OPEN")) {
+          throw new Error("Someone just responded, so this can't be cancelled now.");
+        }
+      }
+      const results = await Promise.allSettled(alertIds.map((id) => postJson(`/api/alerts/${id}/${kind === "close" ? "resolve" : "cancel"}`, {})));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      if (failed) throw new Error(failed === alertIds.length ? "That didn't go through. Try again." : "Part of that didn't go through. Check the teams below.");
     },
-    onSuccess: () => {
+    onSettled: () => {
       setPending(null);
       onChange();
     }
   });
 
+  const noteTarget = call.alerts.find(({ timing }) => timing.stage === "waiting")?.alert ?? call.alerts[0].alert;
   const note = useMutation({
-    mutationFn: (text: string) => postJson(`/api/alerts/${call.alerts[0].alert.id}/notes`, { note: text, clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}` }),
+    mutationFn: (text: string) => postJson(`/api/alerts/${noteTarget.id}/notes`, { note: text, clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}` }),
     onSuccess: (_, text) => {
       setSentNote(text);
       onChange();
-      window.setTimeout(() => setSentNote(""), 3000);
+      if (noteTimer.current) window.clearTimeout(noteTimer.current);
+      noteTimer.current = window.setTimeout(() => setSentNote(""), 3000);
     }
   });
 
-  const answered = call.alerts.filter(({ timing }) => timing.stage !== "waiting");
-  const unanswered = call.alerts.filter(({ timing }) => timing.stage === "waiting");
+  const answered = call.alerts.filter(({ alert, timing }) => timing.stage !== "waiting" && alert.status !== "RESOLVED");
+  const unanswered = call.alerts.filter(({ alert }) => alert.status === "OPEN");
   const allAnswered = unanswered.length === 0;
   const noneAnswered = answered.length === 0;
+  const multi = call.alerts.length > 1;
+  const quick = QUICK_MESSAGES[call.stage];
 
   return (
-    <article className={`ms-active ${call.stage} ${call.late ? "late" : ""}`}>
+    <article className={`ms-active ${call.stage}`}>
       <header className="ms-active-head">
         <div>
-          <h2>{call.command.commandLabel}</h2>
-          <small>Called at {timeOfDay(call.command.createdAt)}</small>
+          <h2>{callTitle(call)}</h2>
+          <small>Called at {timeOfDay(call.command.createdAt)}{multi ? ` · ${call.alerts.length} teams` : ""}</small>
         </div>
-        <div className="ms-active-clock">
-          {call.late && <em className="ms-late">Late</em>}
-          <strong>{clock(call.totalSeconds)}</strong>
-          <small>open</small>
-        </div>
+        <span className="ms-active-clock">{clock(call.totalSeconds)}</span>
       </header>
 
       <ul className="ms-teams">
         {call.alerts.map(({ alert, timing }) => (
           <li key={alert.id} className={`ms-team ${timing.stage}`}>
-            <DepartmentIcon department={alert.department} size="md" />
+            <DepartmentIcon department={alert.department} size="lg" />
             <div className="ms-team-main">
-              <div className="ms-team-top">
-                <strong>{alert.department.name}</strong>
-                <span className="ms-team-line"><i className={`ms-dot ${timing.stage}`} aria-hidden="true" />{teamLine(alert, timing)}</span>
-              </div>
-              <ol className="ms-track" aria-label={`${alert.department.name} progress`}>
-                <li className="done"><i />Called</li>
-                <li className={timing.stage === "waiting" ? "current" : "done"}><i />Acknowledged</li>
-                <li className={timing.stage === "onSite" ? "done" : timing.stage === "onTheWay" ? "current" : ""}><i />At machine</li>
-              </ol>
+              {multi && <strong className="ms-team-name">{alert.department.name}</strong>}
+              <span className="ms-team-status"><i className={`ms-dot ${timing.stage}`} aria-hidden="true" />{statusLine(alert, timing)}</span>
+              <span className="ms-team-times">{timesLine(alert, timing)}</span>
             </div>
             <div className="ms-team-side">
-              {/* a waiting team's time equals the call's open time shown above */}
-              {timing.stage !== "waiting" && <span className="ms-team-time">{clock(timing.stageSeconds)}</span>}
-              {call.alerts.length > 1 && (timing.stage === "waiting" ? (
-                <button type="button" className="ms-link" onClick={() => setPending({ kind: "cancel", alertIds: [alert.id], label: `Cancel the ${alert.department.name} call?` })}>Cancel</button>
+              {timing.stage !== "waiting" && <span className="ms-team-time">{timing.stage === "onSite" ? "on site" : "on the way"} {clock(timing.stageSeconds)}</span>}
+              {multi && !pending && (timing.stage === "waiting" ? (
+                <button type="button" className="ms-btn ghost" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: [alert.id], label: `Cancel the ${alert.department.name} call?` })}>Cancel</button>
               ) : (
-                <button type="button" className="ms-link strong" onClick={() => setPending({ kind: "close", alertIds: [alert.id], label: `Close ${alert.department.name}? Only if their part is fixed.` })}>Close</button>
+                <button type="button" className="ms-btn close" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: [alert.id], label: `Close ${alert.department.name}? Only if their part is fixed.` })}>Close</button>
               ))}
             </div>
           </li>
         ))}
       </ul>
 
-      <div className="ms-quick">
-        <span>Send update</span>
-        {QUICK_MESSAGES.map((text) => (
-          <button key={text} type="button" className={`ms-chip ${sentNote === text ? "sent" : ""}`} onClick={() => note.mutate(text)} disabled={note.isPending}>
-            {sentNote === text ? <><CheckCircleIcon /> Sent</> : text}
-          </button>
-        ))}
-      </div>
-
       {pending ? (
         <div className="ms-confirm" role="alertdialog" aria-label={pending.label}>
           <strong>{pending.label}</strong>
           <div>
-            <button type="button" className="ms-btn ghost" onClick={() => setPending(null)} disabled={act.isPending}>Back</button>
+            <button type="button" className="ms-btn ghost" autoFocus onClick={() => setPending(null)} disabled={act.isPending}>Back</button>
             <button type="button" className={`ms-btn ${pending.kind === "close" ? "close" : "danger"}`} onClick={() => act.mutate(pending)} disabled={act.isPending}>
               {act.isPending ? "Working…" : pending.kind === "close" ? "Yes, close it" : "Yes, cancel"}
             </button>
           </div>
         </div>
       ) : (
-        <div className="ms-actions">
+        <>
           {allAnswered && (
-            <button type="button" className="ms-btn close big" onClick={() => setPending({ kind: "close", alertIds: answered.map(({ alert }) => alert.id), label: "Is the issue fixed? This closes the call for every team." })}>
+            <button type="button" className="ms-btn close big" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: answered.map(({ alert }) => alert.id), label: multi ? "Is the issue fixed? This closes the call for every team." : "Is the issue fixed?" })}>
               <CheckCircleIcon /> Close call · issue fixed
             </button>
           )}
           {noneAnswered && (
-            <button type="button" className="ms-btn ghost big" onClick={() => setPending({ kind: "cancel", alertIds: unanswered.map(({ alert }) => alert.id), label: "Cancel this call? Use this if it was pressed by mistake." })}>
-              <CloseIcon /> Cancel call
-            </button>
+            <div className="ms-actions-end">
+              <button type="button" className="ms-btn ghost" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: unanswered.map(({ alert }) => alert.id), label: "Cancel this call? Use this if it was pressed by mistake." })}>
+                <CloseIcon /> Cancel call
+              </button>
+            </div>
           )}
-          {!allAnswered && !noneAnswered && <p className="ms-hint">Close each team when their part is done.</p>}
-          {act.isError && <span className="ms-error">That didn't go through. Try again.</span>}
+        </>
+      )}
+
+      {act.isError && <p className="ms-error" role="alert">{errorText(act.error, "That didn't go through. Try again.")}</p>}
+
+      {quick.length > 0 && !pending && (
+        <div className="ms-quick">
+          {quick.map((text) => (
+            <button key={text} type="button" className={`ms-chip ${sentNote === text ? "sent" : ""}`} onClick={() => note.mutate(text)} disabled={note.isPending || disabled}>
+              {sentNote === text ? <><CheckCircleIcon /> Sent</> : text}
+            </button>
+          ))}
+          {note.isError && <span className="ms-error" role="alert">Update not sent. Try again.</span>}
         </div>
       )}
     </article>
@@ -347,28 +503,39 @@ function ActiveCall({ call, onChange }: { call: CallSummary; onChange: () => voi
 function OtherRequest({ departments, issueTypes, busy, sending, onClose, onSend }: {
   departments: Department[];
   issueTypes: IssueType[];
-  busy: Map<string, CallSummary>;
+  busy: Set<string>;
   sending: boolean;
   onClose: () => void;
   onSend: (targets: Array<{ departmentId: string; issueTypeId: string }>) => void;
 }) {
   const [picked, setPicked] = useState<Record<string, string>>({});
-  const targets = Object.entries(picked).filter(([, issue]) => issue).map(([departmentId, issueTypeId]) => ({ departmentId, issueTypeId }));
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const rows = departments
+    .map((department) => ({ department, reasons: issueTypes.filter((issue) => issue.departmentId === department.id) }))
+    .filter((row) => row.reasons.length > 0);
+  // A team that became busy after it was picked is dropped from the request.
+  const targets = Object.entries(picked).filter(([departmentId, issue]) => issue && !busy.has(departmentId)).map(([departmentId, issueTypeId]) => ({ departmentId, issueTypeId }));
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
-    <div className="ms-sheet-wrap" role="dialog" aria-label="Other request">
-      <button type="button" className="ms-sheet-backdrop" aria-label="Close" onClick={onClose} />
-      <section className="ms-sheet">
+    <div className="ms-sheet-wrap">
+      <div className="ms-sheet-backdrop" aria-hidden="true" onClick={onClose} />
+      <section className="ms-sheet" role="dialog" aria-modal="true" aria-labelledby="ms-other-title">
         <header>
           <div>
-            <h2>Other request</h2>
+            <h2 id="ms-other-title">Other request</h2>
             <small>Pick a reason for each team you need.</small>
           </div>
-          <button type="button" className="ms-icon-btn" onClick={onClose} aria-label="Close"><CloseIcon /></button>
+          <button ref={closeRef} type="button" className="ms-icon-btn" onClick={onClose} aria-label="Close"><CloseIcon /></button>
         </header>
         <div className="ms-sheet-body">
-          {departments.map((department) => {
-            const reasons = issueTypes.filter((issue) => issue.departmentId === department.id);
+          {rows.map(({ department, reasons }) => {
             const isBusy = busy.has(department.id);
             return (
               <div key={department.id} className={`ms-sheet-row ${isBusy ? "busy" : ""}`}>
@@ -394,6 +561,7 @@ function OtherRequest({ departments, issueTypes, busy, sending, onClose, onSend 
               </div>
             );
           })}
+          {rows.length === 0 && <p className="ms-muted">No request reasons are set up yet.</p>}
         </div>
         <footer>
           <button type="button" className="ms-btn ghost" onClick={onClose}>Back</button>

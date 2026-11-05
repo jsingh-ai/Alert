@@ -192,3 +192,7 @@
   .pg-shell.collapsed .pg-nav-badge { position: static; }
   .pg-shell .pg-main { padding: 1rem; }
 }
+
+/* Kiosk (operator accounts on Machine Station): no sidebar, full width */
+.pg-shell.kiosk, .pg-shell.kiosk.collapsed { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.pg-shell.kiosk .pg-sidebar { display: none; }

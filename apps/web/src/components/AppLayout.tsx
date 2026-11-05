@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement, ReactNode, SVGProps } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Alert, NavItem } from "../lib/types";
@@ -16,7 +16,7 @@ import {
   StationIcon,
   SunIcon
 } from "./icons";
-import { useTheme } from "../lib/theme";
+import { useApplyTheme, useTheme } from "../lib/theme";
 import "../styles/ui.css";
 import "../styles/shell.css";
 
@@ -67,6 +67,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { session, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("pg_sidebar_collapsed") === "true");
   const { theme, toggle: toggleTheme } = useTheme();
+  useApplyTheme();
+  const location = useLocation();
   const nav = (session?.nav ?? []).filter((item) => !HIDDEN_NAV.has(item.id));
   const hasQueue = nav.some((item) => item.id === "queue");
 
@@ -80,6 +82,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
   useEffect(() => localStorage.setItem("pg_sidebar_collapsed", String(collapsed)), [collapsed]);
 
   if (!session) return null;
+
+  // Operator accounts on Machine Station get a full-screen kiosk: no sidebar (one page,
+  // and no one-tap sign-out). Theme and sign-out live in the station's own menu.
+  const kiosk = session.membership.role === "OPERATOR" && location.pathname.startsWith("/operator");
 
   const waiting = (waitingQuery.data?.data ?? []).filter((alert) => alert.status === "OPEN").length;
   const badges: Record<string, number> = { queue: waiting };
@@ -104,8 +110,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const utility = sectionItems(nav, "utility");
 
   return (
-    <div className={`pg-shell ${collapsed ? "collapsed" : ""}`}>
-      <aside className="pg-sidebar">
+    <div className={`pg-shell ${collapsed ? "collapsed" : ""} ${kiosk ? "kiosk" : ""}`}>
+      <aside className="pg-sidebar" hidden={kiosk}>
         <div className="pg-sidebar-top">
           <div className="pg-lockup">
             <div className="pg-mark" aria-hidden="true">PG</div>

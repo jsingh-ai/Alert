@@ -83,6 +83,27 @@ export function summarizeCall(command: CommandGroup, now: number): CallSummary {
   };
 }
 
+/**
+ * The operator snapshot API returns one group per department alert (keyed commandId:alertId),
+ * so a call sent to two teams arrives as two "commands". Merge them back into one call by
+ * their shared realCommandId. Safe to run on already-grouped data.
+ */
+export function mergeByCall(commands: CommandGroup[]): CommandGroup[] {
+  const merged = new Map<string, CommandGroup>();
+  for (const command of commands) {
+    const key = command.realCommandId ?? command.id;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...command, id: key, alerts: [...command.alerts] });
+      continue;
+    }
+    const seen = new Set(existing.alerts.map((alert) => alert.id));
+    existing.alerts.push(...command.alerts.filter((alert) => !seen.has(alert.id)));
+    if (new Date(command.createdAt).getTime() < new Date(existing.createdAt).getTime()) existing.createdAt = command.createdAt;
+  }
+  return Array.from(merged.values());
+}
+
 /** Most urgent first: waiting calls by longest wait, then on-the-way, then on-site. */
 export function sortCalls(calls: CallSummary[]) {
   return [...calls].sort((a, b) =>
