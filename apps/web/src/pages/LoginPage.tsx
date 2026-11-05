@@ -1,9 +1,24 @@
 import { useState } from "react";
-import type { ReactElement } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent, ReactElement, SVGProps } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { BoltIcon, LayersIcon, GridIcon, ShieldIcon, ShieldCheckIcon, UsersIcon, WrenchIcon, BellRingIcon, CheckCircleIcon, UserIcon, LockIcon } from "../components/icons";
+import {
+  BoltIcon,
+  LayersIcon,
+  GridIcon,
+  ShieldIcon,
+  ShieldCheckIcon,
+  UsersIcon,
+  WrenchIcon,
+  BellRingIcon,
+  CheckCircleIcon,
+  UserIcon,
+  LockIcon,
+  EyeIcon,
+  EyeOffIcon,
+  ChevronRightIcon
+} from "../components/icons";
 import polytexLogo from "../assets/logos/polytex.svg";
 import starpakLogo from "../assets/logos/starpak.svg";
 import freshpakLogo from "../assets/logos/freshpak.svg";
@@ -11,6 +26,12 @@ import anduroLogo from "../assets/logos/anduro.svg";
 import superbagLogo from "../assets/logos/superbag.svg";
 import fiveStarCanadaLogo from "../assets/logos/five-star-canada.svg";
 import fiveStarLogo from "../assets/logos/five-star-logo.svg";
+import fiveStarLogoWhite from "../assets/logos/five-star-logo-white.svg";
+import "../styles/login.css";
+
+type Icon = (props: SVGProps<SVGSVGElement>) => ReactElement;
+
+type WorkspaceOption = { companyId: string; companyName: string; role?: string };
 
 const SIBLING_LOGOS = [
   { name: "Polytex", src: polytexLogo },
@@ -21,52 +42,48 @@ const SIBLING_LOGOS = [
   { name: "Five Star Canada", src: fiveStarCanadaLogo }
 ];
 
-const DEPARTMENT_ICONS: Record<string, (props: { className?: string }) => ReactElement> = {
+const WORKFLOW_STEPS: { icon: Icon; title: string; body: string }[] = [
+  { icon: BoltIcon, title: "Call for help", body: "Operators raise an alert from the machine in one tap." },
+  { icon: LayersIcon, title: "Routed to the right team", body: "Quality, maintenance or supervisors are notified instantly." },
+  { icon: BellRingIcon, title: "Acknowledged anywhere", body: "Responders accept from their phone or pager." },
+  { icon: CheckCircleIcon, title: "Closed out on the machine", body: "Every alert is logged and visible in real time." }
+];
+
+const DEPARTMENT_PROFILES = ["quality", "supervisor", "maintenance"] as const;
+
+const DEPARTMENT_ICONS: Record<string, Icon> = {
   quality: ShieldCheckIcon,
   supervisor: UsersIcon,
   maintenance: WrenchIcon
 };
 
-const WORKFLOW_STEPS = [
-  {
-    icon: BoltIcon,
-    title: "Call for help",
-    body: "Operator calls for assistance with a click."
-  },
-  {
-    icon: LayersIcon,
-    title: "Routed to the right team",
-    body: "Instantly alerts the right department."
-  },
-  {
-    icon: BellRingIcon,
-    title: "Acknowledged on phone or pager",
-    body: "Accepted from phone or pager."
-  },
-  {
-    icon: CheckCircleIcon,
-    title: "Closed out on the machine",
-    body: "Logged and visible in real time."
-  }
+const QUICK_PROFILES: { key: "operator" | "department" | "manager"; label: string; hint: string; icon: Icon }[] = [
+  { key: "operator", label: "Operator", hint: "Call for help", icon: BoltIcon },
+  { key: "department", label: "Department", hint: "Response queue", icon: LayersIcon },
+  { key: "manager", label: "Manager", hint: "Live floor", icon: GridIcon }
 ];
+
+function errorMessage(err: unknown, fallback: string) {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 export function LoginPage() {
   const { login, demoLogin } = useAuth();
-  const quickLogin = useQuery({ queryKey: ["quick-login"], queryFn: () => api<any>("/api/auth/quick-login") });
-  const enabledProfiles = new Set((quickLogin.data?.data?.enabledProfiles ?? []) as string[]);
-  const departmentProfiles = ["quality", "supervisor", "maintenance"].filter((profile) => enabledProfiles.has(profile));
+  const quickLogin = useQuery({ queryKey: ["quick-login"], queryFn: () => api<{ data?: { enabledProfiles?: string[] } }>("/api/auth/quick-login") });
+  const enabledProfiles = new Set(quickLogin.data?.data?.enabledProfiles ?? []);
+  const departmentProfiles = DEPARTMENT_PROFILES.filter((profile) => enabledProfiles.has(profile));
+  const quickProfiles = QUICK_PROFILES.filter((profile) => (profile.key === "department" ? departmentProfiles.length > 0 : enabledProfiles.has(profile.key)));
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [companies, setCompanies] = useState<any[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+  const [companies, setCompanies] = useState<WorkspaceOption[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showDepartments, setShowDepartments] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState("");
-  const [selectedSibling, setSelectedSibling] = useState("");
-
-  function toggleSibling(name: string) {
-    setSelectedSibling((current) => (current === name ? "" : name));
-  }
+  const [selectedCompany, setSelectedCompany] = useState("");
 
   async function submit(companyId?: string) {
     setBusy(true);
@@ -74,44 +91,75 @@ export function LoginPage() {
     try {
       const result = await login(username, password, companyId);
       if (result?.needsCompany) setCompanies(result.companies ?? []);
-    } catch (err: any) {
-      setError(err.message ?? "Login failed.");
+    } catch (err) {
+      setError(errorMessage(err, "Sign-in failed. Check your username and password."));
     } finally {
       setBusy(false);
     }
+  }
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!username.trim() || !password) {
+      setError("Enter your username and password.");
+      return;
+    }
+    void submit();
+  }
+
+  function trackCapsLock(event: KeyboardEvent<HTMLInputElement>) {
+    setCapsLock(event.getModifierState("CapsLock"));
   }
 
   async function demo(profile: string) {
     if (!enabledProfiles.has(profile)) return;
     setBusy(true);
     setError("");
-    if (["quality", "supervisor", "maintenance"].includes(profile)) setSelectedDepartment(profile);
+    if ((DEPARTMENT_PROFILES as readonly string[]).includes(profile)) setSelectedDepartment(profile);
     try {
       await demoLogin(profile);
-    } catch (err: any) {
-      setError(err.message ?? "Demo sign-in failed. Run npm run db:seed.");
+    } catch (err) {
+      setError(errorMessage(err, "Quick sign-in failed. Run npm run db:seed."));
       setSelectedDepartment("");
     } finally {
       setBusy(false);
     }
   }
 
+  function onQuickProfile(key: string) {
+    if (key === "department") setShowDepartments((current) => !current);
+    else void demo(key);
+  }
+
+  const choosingWorkspace = companies.length > 0;
+
   return (
     <div className="login-page">
       <div className="login-shell">
-        <section className="login-brand-panel">
+        <section className="login-brand-panel" aria-label="About ProcessGuard">
           <div className="login-orbit" aria-hidden="true" />
-          <div className="login-brand-header">
-            <div className="brand-mark large">PG</div>
-            <div>
-              <h1>ProcessGuard Workflow</h1>
-              <p>Live Floor Visibility only</p>
+
+          <header className="login-topbar">
+            <div className="login-lockup">
+              <div className="login-mark" aria-hidden="true">PG</div>
+              <div className="login-lockup-text">
+                <strong>ProcessGuard</strong>
+                <span>Workflow</span>
+              </div>
             </div>
+            {/* Phone/tablet only: on desktop the Five Star logo lives in the card header */}
+            <img className="login-topbar-logo" src={fiveStarLogoWhite} alt="Five Star Family of Companies" />
+          </header>
+
+          <div className="login-hero">
+            <p className="login-eyebrow">Live floor visibility</p>
+            <h1>From call to close{"‑"}out, in real time.</h1>
           </div>
+
           <ol className="login-workflow">
             {WORKFLOW_STEPS.map((step) => (
               <li key={step.title}>
-                <span className="login-workflow-icon"><step.icon /></span>
+                <span className="login-workflow-icon" aria-hidden="true"><step.icon /></span>
                 <div>
                   <strong>{step.title}</strong>
                   <p>{step.body}</p>
@@ -119,113 +167,153 @@ export function LoginPage() {
               </li>
             ))}
           </ol>
-          <div className={`login-logo-strip ${selectedSibling ? "has-selection" : ""}`}>
-            <span>Part of the Five Star family of companies</span>
-            <div className="login-logo-window">
-              <div className={`login-logo-track ${selectedSibling ? "paused" : ""}`}>
-                <div className="login-logo-group">
-                  {SIBLING_LOGOS.map((logo) => (
-                    <button
-                      type="button"
-                      className={`login-logo-tile ${selectedSibling === logo.name ? "selected" : ""}`}
-                      key={logo.name}
-                      onClick={() => toggleSibling(logo.name)}
-                      aria-pressed={selectedSibling === logo.name}
-                    >
-                      <img src={logo.src} alt={logo.name} />
-                    </button>
-                  ))}
-                </div>
-                <div className="login-logo-group" aria-hidden="true">
-                  {SIBLING_LOGOS.map((logo) => (
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className={`login-logo-tile ${selectedSibling === logo.name ? "selected" : ""}`}
-                      key={`${logo.name}-dup`}
-                      onClick={() => toggleSibling(logo.name)}
-                    >
-                      <img src={logo.src} alt="" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+
+          {/* Company picker. Selection is UI-only for now; wire selectedCompany into sign-in later. */}
+          <div className="login-family">
+            <span className="login-family-label">
+              <span className="login-family-label-wide">Part of the Five Star family of companies</span>
+              <span className="login-family-label-phone">Select your company</span>
+            </span>
+            <ul className={`login-family-logos ${selectedCompany ? "has-selection" : ""}`} aria-label="Five Star companies">
+              {SIBLING_LOGOS.map((logo) => (
+                <li key={logo.name}>
+                  <button
+                    type="button"
+                    className={`login-family-tile ${selectedCompany === logo.name ? "selected" : ""}`}
+                    onClick={() => setSelectedCompany((current) => (current === logo.name ? "" : logo.name))}
+                    aria-pressed={selectedCompany === logo.name}
+                    title={logo.name}
+                  >
+                    <img src={logo.src} alt={logo.name} />
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
-        <section className="login-form-panel">
-          <div className="login-topbar">
-            <img className="login-topbar-logo" src={fiveStarLogo} alt="Five Star" />
-          </div>
-          <div className="login-card">
-            <div className="demo-panel">
-              <div className="demo-panel-header">
-                <strong>Quick Login</strong>
-                <span>Choose a view</span>
-              </div>
-              <div className="demo-grid">
-                <button className="demo-button operator" onClick={() => demo("operator")} disabled={busy || !enabledProfiles.has("operator")}>
-                  <span className="demo-button-icon"><BoltIcon /></span>
-                  <strong>Operator</strong>
-                  <span>{enabledProfiles.has("operator") ? "Call help" : "Disabled"}</span>
-                </button>
-                <button className={`demo-button department ${showDepartments ? "active" : ""}`} onClick={() => setShowDepartments((current) => !current)} disabled={busy || departmentProfiles.length === 0}>
-                  <span className="demo-button-icon"><LayersIcon /></span>
-                  <strong>Department</strong>
-                  <span>{departmentProfiles.length ? "Queue view" : "Disabled"}</span>
-                </button>
-                <button className="demo-button manager" onClick={() => demo("manager")} disabled={busy || !enabledProfiles.has("manager")}>
-                  <span className="demo-button-icon"><GridIcon /></span>
-                  <strong>Manager</strong>
-                  <span>{enabledProfiles.has("manager") ? "Live floor" : "Disabled"}</span>
-                </button>
-                <button className="demo-button admin" disabled>
-                  <span className="demo-button-icon"><ShieldIcon /></span>
-                  <strong>Admin</strong>
-                  <span>Sign in below</span>
-                </button>
-              </div>
-              {showDepartments && (
-                <div className="department-picker">
-                  {departmentProfiles.map((profile) => {
-                    const Icon = DEPARTMENT_ICONS[profile] ?? ShieldIcon;
-                    return (
-                      <button key={profile} className={selectedDepartment === profile ? "selected" : ""} onClick={() => demo(profile)} disabled={busy}>
-                        <span className="department-picker-icon"><Icon /></span>
-                        {profile}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
 
-            <div className="divider">or sign in</div>
-            <div className="login-form-grid">
-              <label>
-                Username
-                <span className="input-icon-field">
-                  <span className="input-icon-chip"><UserIcon /></span>
-                  <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" autoComplete="username" />
-                </span>
-              </label>
-              <label>
-                Password
-                <span className="input-icon-field">
-                  <span className="input-icon-chip"><LockIcon /></span>
-                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoComplete="current-password" />
-                </span>
-              </label>
-            </div>
-            <button className="primary wide" onClick={() => submit()} disabled={busy}>Sign in</button>
-            {companies.length > 0 && (
-              <div className="company-picker">
-                <strong>Choose workspace</strong>
-                {companies.map((company) => <button key={company.companyId} onClick={() => submit(company.companyId)}>{company.companyName} - {company.role}</button>)}
+        <section className="login-form-panel">
+          <div className="login-card">
+            <header className="login-card-header">
+              <img className="login-card-logo" src={fiveStarLogo} alt="Five Star Family of Companies" />
+              <h2>{choosingWorkspace ? "Choose a workspace" : "Sign in"}</h2>
+              <p>{choosingWorkspace ? "Your account has access to several companies." : "Welcome back to ProcessGuard."}</p>
+            </header>
+
+            {error && <div className="login-error" role="alert">{error}</div>}
+
+            {choosingWorkspace ? (
+              <div className="login-workspaces">
+                {companies.map((company) => (
+                  <button type="button" key={company.companyId} className="login-workspace" onClick={() => submit(company.companyId)} disabled={busy}>
+                    <span className="login-workspace-name">{company.companyName}</span>
+                    {company.role && <span className="login-workspace-role">{company.role}</span>}
+                    <ChevronRightIcon className="login-workspace-chevron" />
+                  </button>
+                ))}
+                <button type="button" className="login-text-button" onClick={() => setCompanies([])} disabled={busy}>
+                  Back to sign in
+                </button>
+              </div>
+            ) : (
+              <form className="login-form" onSubmit={onSubmit} noValidate>
+                <div className="login-field">
+                  <label htmlFor="login-username">Username</label>
+                  <div className="login-input">
+                    <UserIcon className="login-input-icon" />
+                    <input
+                      id="login-username"
+                      value={username}
+                      onChange={(event) => setUsername(event.target.value)}
+                      placeholder="Enter your username"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      disabled={busy}
+                    />
+                  </div>
+                </div>
+
+                <div className="login-field">
+                  <label htmlFor="login-password">Password</label>
+                  <div className="login-input">
+                    <LockIcon className="login-input-icon" />
+                    <input
+                      id="login-password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      onKeyUp={trackCapsLock}
+                      onKeyDown={trackCapsLock}
+                      onBlur={() => setCapsLock(false)}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                      disabled={busy}
+                    />
+                    <button
+                      type="button"
+                      className="login-reveal"
+                      onClick={() => setShowPassword((current) => !current)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-pressed={showPassword}
+                    >
+                      {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
+                  <p className="login-hint" aria-live="polite">{capsLock ? "Caps Lock is on" : ""}</p>
+                </div>
+
+                <button type="submit" className="login-submit" disabled={busy} aria-busy={busy}>
+                  {busy && <span className="login-spinner" aria-hidden="true" />}
+                  {busy ? "Signing in…" : "Sign in"}
+                </button>
+              </form>
+            )}
+
+            {!choosingWorkspace && quickProfiles.length > 0 && (
+              <div className="login-quick">
+                <div className="login-quick-divider"><span>Quick access</span></div>
+                <div className="login-quick-grid" style={{ "--lp-quick-cols": quickProfiles.length } as CSSProperties}>
+                  {quickProfiles.map((profile) => (
+                    <button
+                      type="button"
+                      key={profile.key}
+                      className={`login-quick-button ${profile.key === "department" && showDepartments ? "active" : ""}`}
+                      onClick={() => onQuickProfile(profile.key)}
+                      disabled={busy}
+                      aria-expanded={profile.key === "department" ? showDepartments : undefined}
+                    >
+                      <span className="login-quick-icon" aria-hidden="true"><profile.icon /></span>
+                      <strong>{profile.label}</strong>
+                      <span className="login-quick-hint">{profile.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                {showDepartments && departmentProfiles.length > 0 && (
+                  <div className="login-departments" role="group" aria-label="Choose a department">
+                    {departmentProfiles.map((profile) => {
+                      const DeptIcon = DEPARTMENT_ICONS[profile] ?? ShieldIcon;
+                      return (
+                        <button
+                          type="button"
+                          key={profile}
+                          className={selectedDepartment === profile ? "selected" : ""}
+                          onClick={() => demo(profile)}
+                          disabled={busy}
+                        >
+                          <DeptIcon aria-hidden="true" />
+                          {profile}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
-            {error && <div className="error-box">{error}</div>}
+
+            <footer className="login-card-footer">Need access? Contact your administrator.</footer>
           </div>
+          <p className="login-legal">© {new Date().getFullYear()} Five Star Family of Companies</p>
         </section>
       </div>
     </div>
