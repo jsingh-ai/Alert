@@ -3,14 +3,19 @@ import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postJson } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useKiosk } from "../lib/kiosk";
 import type { Alert, CommandGroup } from "../lib/types";
 import { LATE_AFTER_SECONDS, clock, sortCalls, summarizeCall } from "../lib/callStages";
 import type { AlertTiming, CallStage, CallSummary } from "../lib/callStages";
-import { DepartmentIcon } from "../components/DepartmentBadge";
+import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState, timeOfDay } from "../components/Suite";
+import type { Connection, Tone } from "../components/Suite";
 import { CheckCircleIcon, CloseIcon, SendIcon } from "../components/icons";
 import "../styles/floor.css";
 
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+/** The floor polls every 7s; only call it offline after several missed polls. */
+const POLL_MS = 7000;
+const OFFLINE_AFTER_MS = 20_000;
 
 type FloorMachine = { id: string; name: string; code: string; machineGroup?: { id?: string; name?: string } | null };
 type MachineStats = Record<string, { alertsToday?: number }>;
@@ -26,30 +31,43 @@ function useNow(intervalMs = 1000) {
   return now;
 }
 
-function timeOfDay(ms: number) {
-  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
 function plural(n: number, one: string, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
 function StatusDot({ stage }: { stage: CallStage }) {
-  return <i className={`fs-dot-status ${stage}`} aria-hidden="true" />;
+  return <i className={`fs-dot ${stage}`} aria-hidden="true" />;
+}
+
+/** Header pill: the floor's overall state in a few words. */
+function floorStatus(connection: Connection, calls: CallSummary[], waitingMachines: number): { tone: Tone; text: string } {
+  if (connection === "connecting") return { tone: "neutral", text: "Checking…" };
+  if (connection === "offline" && calls.length === 0) return { tone: "neutral", text: "Status unknown" };
+  const stale = connection === "offline";
+  if (waitingMachines > 0) {
+    return { tone: stale ? "neutral" : calls.some((c) => c.late) ? "late" : "waiting", text: `${plural(waitingMachines, "machine")} waiting` };
+  }
+  if (calls.length > 0) {
+    return { tone: stale ? "neutral" : calls.some((c) => c.stage === "onTheWay") ? "onTheWay" : "onSite", text: `${plural(calls.length, "call")} in progress` };
+  }
+  return { tone: "clear", text: "All clear" };
 }
 
 export function FloorPage() {
   const { session } = useAuth();
+  const kiosk = useKiosk();
   const now = useNow();
   const [group, setGroup] = useState("all");
   const [departmentId, setDepartmentId] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const floor = useQuery({ queryKey: ["floor"], queryFn: () => api<any>("/api/floor/active"), refetchInterval: 7000 });
+  const floor = useQuery({ queryKey: ["floor"], queryFn: () => api<any>("/api/floor/active"), refetchInterval: POLL_MS });
   const commands = (floor.data?.data?.commands ?? []) as CommandGroup[];
   const machines = (floor.data?.data?.machines ?? []) as FloorMachine[];
   const machineStats = (floor.data?.data?.machineStats ?? {}) as MachineStats;
   const departments = (session?.departments ?? []) as Array<{ id: string; name: string; color?: string }>;
+  const connection = connectionState(floor, now, OFFLINE_AFTER_MS);
+  const lastGood = floor.dataUpdatedAt;
 
   const groups = useMemo(
     () => Array.from(new Set(machines.map((m) => m.machineGroup?.name).filter((n): n is string => Boolean(n)))).sort(naturalSort.compare),
@@ -99,137 +117,156 @@ export function FloorPage() {
     return Array.from(map, ([name, list]) => ({ name, machines: [...list].sort((a, b) => naturalSort.compare(a.name, b.name)) })).sort((a, b) => naturalSort.compare(a.name, b.name));
   }, [visibleMachines]);
 
-  const headline = floor.isLoading
-    ? "Loading the floor…"
-    : waitingMachines > 0
-      ? `${plural(waitingMachines, "machine")} waiting for help`
-      : handledCalls.length > 0
-        ? "Nobody is waiting"
-        : "All machines running clear";
-  const subline = longest
-    ? <>Longest wait <strong className={longest.timing.late ? "late" : ""}>{clock(longest.timing.waitSeconds)}</strong> at {longest.call.command.machine.name} for {longest.alert.department.name}{lateCount > 0 && <> · <span className="late">{lateCount} late</span></>}</>
-    : handledCalls.length > 0
-      ? `${plural(handledCalls.length, "call")} being handled right now`
-      : "No open calls on the floor.";
+  const hasFilters = groups.length > 1 || departments.length > 1;
 
   return (
-    <div className="fs-page">
-      <header className="fs-head">
-        <div className="fs-title">
-          <h1>Floor Status</h1>
-          <span className={`fs-live ${floor.isError ? "offline" : ""}`}><i />{floor.isError ? "Reconnecting" : "Live"}</span>
-        </div>
-        <div className="fs-filters">
-          {groups.length > 1 && (
-            <div className="fs-seg" role="tablist" aria-label="Machine group">
-              {["all", ...groups].map((name) => (
-                <button key={name} type="button" role="tab" aria-selected={group === name} className={group === name ? "on" : ""} onClick={() => setGroup(name)}>
-                  {name === "all" ? "All" : name}
-                </button>
-              ))}
-            </div>
-          )}
-          {departments.length > 1 && (
-            <select className="fs-select" aria-label="Department" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-              <option value="all">All departments</option>
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          )}
-        </div>
-      </header>
+    <div className={`su-page fs-page ${connection === "offline" ? "stale" : ""}`}>
+      <SuiteHeader
+        eyebrow={floor.isLoading ? "Loading" : plural(visibleMachines.length, "machine")}
+        title="Floor Status"
+        status={floorStatus(connection, calls, waitingMachines)}
+      >
+        {/* With the sidebar showing, theme and sign-out live there */}
+        {kiosk && <SuiteMenu label="Menu" />}
+      </SuiteHeader>
 
-      {/* 1 · Summary: one sentence, then the three counts that matter */}
-      <section className={`fs-summary ${waitingMachines > 0 ? "has-waiting" : ""}`} aria-live="polite">
-        <div className="fs-summary-text">
-          <h2>{headline}</h2>
-          <p>{subline}</p>
-        </div>
-        <dl className="fs-summary-counts">
-          <div><dt><StatusDot stage="waiting" />Waiting</dt><dd>{waitingLanes.length}</dd></div>
-          <div><dt><StatusDot stage="onTheWay" />On the way</dt><dd>{onTheWay}</dd></div>
-          <div><dt><StatusDot stage="onSite" />At machine</dt><dd>{atMachine}</dd></div>
+      {connection === "offline" && <OfflineNotice lastGood={lastGood} />}
+
+      {/* Toolbar: the counts that matter, and the view's scope */}
+      <section className="fs-toolbar" aria-label="Summary">
+        <dl className="fs-stats">
+          <div className={waitingLanes.length ? "" : "zero"}>
+            <dt><StatusDot stage="waiting" />Teams waiting</dt>
+            <dd>
+              {waitingLanes.length}
+              {lateCount > 0 && <small className="fs-late-text">{lateCount} late</small>}
+            </dd>
+          </div>
+          <div className={onTheWay ? "" : "zero"}>
+            <dt><StatusDot stage="onTheWay" />On the way</dt>
+            <dd>{onTheWay}</dd>
+          </div>
+          <div className={atMachine ? "" : "zero"}>
+            <dt><StatusDot stage="onSite" />At machine</dt>
+            <dd>{atMachine}</dd>
+          </div>
+          <div className={longest ? "" : "zero"}>
+            <dt>Longest wait</dt>
+            <dd>
+              {longest ? (
+                <>
+                  <span className={longest.timing.late ? "fs-late-text" : ""}>{clock(longest.timing.waitSeconds)}</span>
+                  <small>{longest.call.command.machine.name}</small>
+                </>
+              ) : "–"}
+            </dd>
+          </div>
         </dl>
-      </section>
-
-      {/* 2 · Calls grouped by state */}
-      <div className="fs-board">
-        <CallColumn
-          title="Waiting for response"
-          stage="waiting"
-          calls={waitingCalls}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          empty="Nobody is waiting for help."
-        />
-        <CallColumn
-          title="Being handled"
-          stage="onTheWay"
-          calls={handledCalls}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          empty="No responders out right now."
-        />
-      </div>
-
-      {/* 3 · Machines overview */}
-      <section className="fs-machines">
-        <header className="fs-section-head">
-          <h2>Machines</h2>
-          <span>{plural(callsByMachine.size, "machine")} with calls · {plural(callsToday, "call")} today</span>
-        </header>
-        <div className="fs-groups">
-          {gridGroups.map((g) => (
-            <div key={g.name} className="fs-group">
-              <h3>{g.name}</h3>
-              <div className="fs-tiles">
-                {g.machines.map((machine) => {
-                  const machineCalls = callsByMachine.get(machine.id) ?? [];
-                  if (machineCalls.length === 0) {
-                    return (
-                      <div key={machine.id} className="fs-tile">
-                        <strong>{machine.name}</strong>
-                        <small>Running</small>
-                      </div>
-                    );
-                  }
-                  const worst = machineCalls[0];
-                  return (
-                    <button key={machine.id} type="button" className={`fs-tile active stage-${worst.stage} ${worst.late ? "late" : ""} ${selectedId === worst.command.id ? "selected" : ""}`} onClick={() => setSelectedId(worst.command.id)}>
-                      <strong>{machine.name}</strong>
-                      <small><StatusDot stage={worst.stage} />{STAGE_TEXT[worst.stage]} · {clock(worst.totalSeconds)}</small>
-                    </button>
-                  );
-                })}
+        {hasFilters && (
+          <div className="fs-filters">
+            {groups.length > 1 && (
+              <div className="fs-seg" role="tablist" aria-label="Machine group">
+                {["all", ...groups].map((name) => (
+                  <button key={name} type="button" role="tab" aria-selected={group === name} className={group === name ? "on" : ""} onClick={() => setGroup(name)}>
+                    {name === "all" ? "All" : name}
+                  </button>
+                ))}
               </div>
-            </div>
-          ))}
-          {!floor.isLoading && visibleMachines.length === 0 && <p className="fs-muted">No machines in this view.</p>}
-        </div>
+            )}
+            {departments.length > 1 && (
+              <select className="fs-select" aria-label="Department" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+                <option value="all">All departments</option>
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            )}
+          </div>
+        )}
       </section>
+
+      {/* Calls by state. With nothing open, the header says "All clear" and the board steps aside. */}
+      {calls.length > 0 && (
+        <div className="fs-board">
+          <CallList title="Waiting for response" tone="waiting" calls={waitingCalls} selectedId={selectedId} onSelect={setSelectedId} empty="Nobody is waiting for help." />
+          <CallList title="Being handled" tone="handled" calls={handledCalls} selectedId={selectedId} onSelect={setSelectedId} empty="No responders out right now." />
+        </div>
+      )}
+
+      {/* The whole floor */}
+      <section className="fs-card fs-machines" aria-label="Machines">
+        <header className="fs-card-head">
+          <h2>Machines</h2>
+          {!floor.isLoading && visibleMachines.length > 0 && (
+            <span className="fs-card-meta">{callsByMachine.size > 0 ? `${callsByMachine.size} of ${visibleMachines.length} with open calls` : "All running"}</span>
+          )}
+        </header>
+        {floor.isLoading ? (
+          <p className="fs-empty">Loading machines…</p>
+        ) : visibleMachines.length === 0 ? (
+          <p className="fs-empty">No machines in this view.</p>
+        ) : (
+          <div className="fs-groups">
+            {gridGroups.map((g) => (
+              <div key={g.name} className="fs-group">
+                {gridGroups.length > 1 && <h3>{g.name}</h3>}
+                <div className="fs-tiles">
+                  {g.machines.map((machine) => {
+                    const machineCalls = callsByMachine.get(machine.id) ?? [];
+                    if (machineCalls.length === 0) {
+                      return (
+                        <div key={machine.id} className="fs-tile">
+                          <strong>{machine.name}</strong>
+                          <small>Running</small>
+                        </div>
+                      );
+                    }
+                    const worst = machineCalls[0];
+                    return (
+                      <button
+                        key={machine.id}
+                        type="button"
+                        className={`fs-tile active ${worst.stage} ${worst.late ? "late" : ""} ${selectedId === worst.command.id ? "selected" : ""}`}
+                        onClick={() => setSelectedId(worst.command.id)}
+                      >
+                        <strong>{machine.name}</strong>
+                        <small className="num"><StatusDot stage={worst.stage} />{`${STAGE_TEXT[worst.stage]} · ${clock(worst.totalSeconds)}`}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <SuiteStatusBar connection={connection} lastGood={lastGood}>
+        {!floor.isLoading && `${plural(callsToday, "call")} today`}
+      </SuiteStatusBar>
 
       {selected && <CallPanel call={selected} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }
 
-function CallColumn({ title, stage, calls, selectedId, onSelect, empty }: {
+function CallList({ title, tone, calls, selectedId, onSelect, empty }: {
   title: string;
-  stage: CallStage;
+  tone: "waiting" | "handled";
   calls: CallSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   empty: string;
 }) {
   return (
-    <section className={`fs-column ${stage}`} aria-label={title}>
-      <header className="fs-section-head">
-        <h2><StatusDot stage={stage} />{title}</h2>
-        <span className="fs-count">{calls.length}</span>
+    <section className={`fs-card fs-list ${tone}`} aria-label={title}>
+      {/* The heading belongs to the card, not floating above it */}
+      <header className="fs-card-head">
+        <h2>{title}</h2>
+        <span className={`fs-count ${calls.length > 0 ? tone : ""}`}>{calls.length}</span>
       </header>
       {calls.length === 0 ? (
-        <div className="fs-column-empty"><CheckCircleIcon />{empty}</div>
+        <p className="fs-empty"><CheckCircleIcon />{empty}</p>
       ) : (
-        <ol className="fs-cards">
+        <ol className="fs-calls">
           {calls.map((call) => (
             <li key={call.command.id}>
               <CallCard call={call} selected={selectedId === call.command.id} onSelect={() => onSelect(call.command.id)} />
@@ -243,21 +280,21 @@ function CallColumn({ title, stage, calls, selectedId, onSelect, empty }: {
 
 function CallCard({ call, selected, onSelect }: { call: CallSummary; selected: boolean; onSelect: () => void }) {
   return (
-    <button type="button" className={`fs-call ${call.late ? "late" : ""} ${selected ? "selected" : ""}`} onClick={onSelect}>
-      <span className="fs-call-top">
+    <button type="button" className={`fs-call ${call.stage} ${call.late ? "late" : ""} ${selected ? "selected" : ""}`} onClick={onSelect}>
+      <span className="fs-call-head">
         <span className="fs-call-title">
           <strong>{call.command.machine.name}</strong>
           <small>{call.command.commandLabel}</small>
         </span>
         <span className="fs-call-clock">
-          {call.late && <em className="fs-late-tag">Late</em>}
+          {call.late && <em className="fs-late">Late</em>}
           <strong className="num">{clock(call.totalSeconds)}</strong>
         </span>
       </span>
       <span className="fs-call-teams">
         {call.alerts.map(({ alert, timing }) => (
           <span key={alert.id} className={`fs-call-team ${timing.stage}`}>
-            <DepartmentIcon department={alert.department} size="sm" variant="plain" />
+            <TeamIcon department={alert.department} size="sm" />
             <span className="fs-call-team-name">{alert.department.name}</span>
             <span className="fs-call-team-state">
               <StatusDot stage={timing.stage} />
@@ -277,7 +314,7 @@ function CallCard({ call, selected, onSelect }: { call: CallSummary; selected: b
 type Step = { label: string; state: "done" | "current" | "next"; time?: string; duration?: string };
 
 function stepsFor(alert: Alert, timing: AlertTiming): Step[] {
-  const at = (value?: string | null) => (value ? timeOfDay(new Date(value).getTime()) : undefined);
+  const at = (value?: string | null) => (value ? timeOfDay(value) : undefined);
   const ack = timing.stage !== "waiting";
   const arrived = timing.stage === "onSite";
   return [
@@ -340,13 +377,14 @@ function CallPanel({ call, onClose }: { call: CallSummary; onClose: () => void }
   }
 
   const target = call.alerts.find(({ alert }) => alert.id === targetId)?.alert;
+  const tone: Tone = call.late ? "late" : call.stage;
 
   return (
     <>
       <button type="button" className="fs-backdrop" aria-label="Close details" onClick={onClose} />
       <aside className="fs-panel" role="dialog" aria-label={`${call.command.machine.name} call`}>
         <header className="fs-panel-head">
-          <div>
+          <div className="fs-panel-title">
             <small>{[call.command.machine.group, call.command.commandLabel].filter(Boolean).join(" · ")}</small>
             <h2>{call.command.machine.name}</h2>
           </div>
@@ -354,16 +392,18 @@ function CallPanel({ call, onClose }: { call: CallSummary; onClose: () => void }
         </header>
 
         <div className="fs-panel-summary">
-          <div><span>Open for</span><strong className={call.late ? "late" : ""}>{clock(call.totalSeconds)}</strong></div>
-          <div><span>Teams</span><strong>{call.alerts.length}</strong></div>
-          <div><span>Status</span><strong className="fs-panel-status"><StatusDot stage={call.stage} />{STAGE_TEXT[call.stage]}</strong></div>
+          <div className="fs-panel-timer">
+            <span>Open for</span>
+            <strong className={`num ${call.late ? "fs-late-text" : ""}`}>{clock(call.totalSeconds)}</strong>
+          </div>
+          <span className={`su-status ${tone}`}><i aria-hidden="true" />{STAGE_TEXT[call.stage]}{call.late ? " · late" : ""}</span>
         </div>
 
         <div className="fs-panel-body">
           {call.alerts.map(({ alert, timing }) => (
-            <section key={alert.id} className="fs-progress">
-              <header>
-                <DepartmentIcon department={alert.department} size="sm" variant="plain" />
+            <section key={alert.id} className="fs-card fs-progress">
+              <header className="fs-progress-head">
+                <TeamIcon department={alert.department} />
                 <strong>{alert.department.name}</strong>
                 <span className="fs-progress-who">{alert.responderNameText?.trim() || (timing.stage === "waiting" ? "No responder yet" : "")}</span>
               </header>
@@ -380,8 +420,8 @@ function CallPanel({ call, onClose }: { call: CallSummary; onClose: () => void }
             </section>
           ))}
 
-          <section className="fs-activity">
-            <h3>Activity</h3>
+          <section className="fs-card fs-activity">
+            <h3 className="fs-card-head">Activity</h3>
             <ol>
               {activity.map((item) => (
                 <li key={item.key}>

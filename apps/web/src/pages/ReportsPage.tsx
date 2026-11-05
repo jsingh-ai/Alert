@@ -1,10 +1,13 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { dateInputValue } from "../lib/format";
 import { LATE_AFTER_SECONDS } from "../lib/callStages";
+import { useKiosk } from "../lib/kiosk";
+import { SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState, teamHue } from "../components/Suite";
+import { ChevronRightIcon } from "../components/icons";
 import "../styles/reports.css";
 
 /* ---------- Types & data ---------- */
@@ -30,6 +33,8 @@ type ReportRow = {
 type Summary = { alerts?: ReportRow[] };
 type Preset = "today" | "7d" | "30d" | "custom";
 type Dimension = "department" | "machine" | "responder" | "reason";
+type Dept = { id: string; name: string; color?: string | null };
+type SeriesKey = { key: string; label: string; color: string };
 
 const PRESETS: Array<{ id: Preset; label: string; days: number }> = [
   { id: "today", label: "Today", days: 1 },
@@ -39,6 +44,9 @@ const PRESETS: Array<{ id: Preset; label: string; days: number }> = [
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MAX_SERIES = 8;
+/** The report refreshes every minute; it reads as offline once its data is this old. */
+const REFRESH_MS = 60_000;
+const OFFLINE_AFTER_MS = 150_000;
 
 function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * DAY_MS);
@@ -75,6 +83,7 @@ function shortDate(date: Date) {
 function pct(n: number | null) {
   return n == null ? "–" : `${Math.round(n * 100)}%`;
 }
+const hourLabel = (h: number) => `${((h + 11) % 12) + 1}${h < 12 ? "a" : "p"}`;
 
 function summarize(rows: ReportRow[], now: number) {
   const answered = rows.filter((r) => r.acknowledgeSeconds != null);
@@ -87,6 +96,32 @@ function summarize(rows: ReportRow[], now: number) {
     answered: answered.length
   };
 }
+
+function heatOf(rows: ReportRow[]) {
+  const grid = Array.from({ length: 7 }, () => Array(24).fill(0) as number[]);
+  for (const r of rows) {
+    const d = new Date(r.createdAt);
+    grid[(d.getDay() + 6) % 7][d.getHours()]++;
+  }
+  let busiest = { day: 0, hour: 0, n: 0 };
+  grid.forEach((row, day) => row.forEach((n, hour) => { if (n > busiest.n) busiest = { day, hour, n }; }));
+  return { grid, max: Math.max(1, ...grid.flat()), busiest };
+}
+
+/**
+ * Department series wear the suite's team colour (teamHue), so a department looks the same here as on
+ * Machine Station and the queue. Teams that share a hue step lighter in department order. --rp-mix
+ * lifts the hue in dark mode so it holds up on the navy card.
+ */
+function seriesColor(hue: string, tier: number) {
+  const base = `color-mix(in srgb, ${hue} var(--rp-mix), #fff)`;
+  return tier === 0 ? base : `color-mix(in srgb, ${base} ${Math.max(30, 100 - tier * 35)}%, var(--pg-card))`;
+}
+const OTHER_COLOR = "var(--rp-other)";
+const TIME_KEYS: SeriesKey[] = [
+  { key: "r", label: "Response", color: "var(--rp-response)" },
+  { key: "f", label: "Fix", color: "var(--rp-fix)" }
+];
 
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -103,11 +138,24 @@ function useWidth<T extends HTMLElement>() {
   return [ref, width] as const;
 }
 
+
+/** Re-renders on an interval so freshness checks run even when no data arrives. */
+function useClock(intervalMs: number) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
 /* ---------- Page ---------- */
 
 export function ReportsPage() {
   const { session } = useAuth();
-  const now = Date.now();
+  const kiosk = useKiosk();
+  // Ticks, so the status bar notices when the data stops refreshing
+  const now = useClock(15_000);
   const today = useMemo(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -143,12 +191,14 @@ export function ReportsPage() {
   };
   const current = useQuery({
     queryKey: ["reports", params(range)],
-    queryFn: () => api<{ data?: Summary }>(`/api/reports/summary?${params(range)}`)
+    queryFn: () => api<{ data?: Summary }>(`/api/reports/summary?${params(range)}`),
+    refetchInterval: REFRESH_MS
   });
   const prior = useQuery({
     queryKey: ["reports", "prior", params(previous)],
     queryFn: () => api<{ data?: Summary }>(`/api/reports/summary?${params(previous)}`)
   });
+  const connection = connectionState(current, now, OFFLINE_AFTER_MS);
 
   const allRows = current.data?.data?.alerts ?? [];
   const rows = useMemo(() => (reason ? allRows.filter((r) => (r.issueType?.id ?? "general") === reason) : allRows), [allRows, reason]);
@@ -158,18 +208,28 @@ export function ReportsPage() {
   }, [prior.data, reason]);
   const stats = summarize(rows, now);
   const before = prior.data ? summarize(priorRows, now) : null;
+  const heat = useMemo(() => heatOf(rows), [rows]);
 
-  // Department colour slots follow the department's fixed order, never its rank.
-  // Up to 8 departments get their own slot; past that, the first 7 do and the rest fold into "Other".
-  const departments = (session?.departments ?? []) as Array<{ id: string; name: string }>;
+  // Department colours follow the department's fixed order, never its rank.
+  // Up to 8 departments get their own series; past that, the first 7 do and the rest fold into "Other".
+  const departments = (session?.departments ?? []) as Dept[];
+  const deptById = useMemo(() => new Map(departments.map((d) => [d.id, d])), [departments]);
   const ownSlots = departments.length <= MAX_SERIES ? MAX_SERIES : MAX_SERIES - 1;
-  const slotOf = useMemo(() => new Map(departments.slice(0, ownSlots).map((d, i) => [d.id, i])), [departments, ownSlots]);
-  const series = useMemo(() => {
+  const colorOf = useMemo(() => {
+    const tiers = new Map<string, number>();
+    return new Map(departments.slice(0, ownSlots).map((d) => {
+      const hue = teamHue(d);
+      const tier = tiers.get(hue) ?? 0;
+      tiers.set(hue, tier + 1);
+      return [d.id, seriesColor(hue, tier)] as const;
+    }));
+  }, [departments, ownSlots]);
+  const seriesKeys = useMemo<SeriesKey[]>(() => {
     const present = new Set(rows.map((r) => r.department.id));
-    const named = departments.filter((d) => slotOf.has(d.id) && present.has(d.id));
-    return { named, other: rows.some((r) => !slotOf.has(r.department.id)) };
-  }, [rows, departments, slotOf]);
-  const keyOf = (row: ReportRow) => (slotOf.has(row.department.id) ? row.department.id : "other");
+    const named = departments.filter((d) => colorOf.has(d.id) && present.has(d.id)).map((d) => ({ key: d.id, label: d.name, color: colorOf.get(d.id) ?? OTHER_COLOR }));
+    return rows.some((r) => !colorOf.has(r.department.id)) ? [...named, { key: "other", label: "Other", color: OTHER_COLOR }] : named;
+  }, [rows, departments, colorOf]);
+  const keyOf = (row: ReportRow) => (colorOf.has(row.department.id) ? row.department.id : "other");
 
   const machineGroups = useMemo(() => Array.from(new Map((session?.machines ?? [])
     .filter((m: any) => m.machineGroup?.id)
@@ -191,56 +251,73 @@ export function ReportsPage() {
   }
 
   const rangeLabel = days === 1 ? shortDate(range.start) : `${shortDate(range.start)} – ${shortDate(range.end)}`;
+  const previousLabel = days === 1 ? shortDate(previous.start) : `${shortDate(previous.start)} – ${shortDate(previous.end)}`;
+  // App bar label: the period and what the report is scoped to
+  const period = preset === "today" ? "Today" : preset === "7d" ? "Last 7 days" : preset === "30d" ? "Last 30 days" : rangeLabel;
+  const scope = [
+    departments.find((d) => d.id === departmentId)?.name,
+    machineId ? machines.find((m) => m.id === machineId)?.name : machineGroups.find((g) => g.id === machineGroupId)?.name,
+    responders.find((r) => r.id === responderId)?.name
+  ].filter(Boolean).join(" · ") || "All departments";
 
   return (
-    <div className="rp-page">
-      <header className="rp-head">
-        <div>
-          <h1>Reports</h1>
-          <p>{rangeLabel} · {current.isLoading ? "loading…" : `${stats.calls} call${stats.calls === 1 ? "" : "s"}`}</p>
-        </div>
-        <div className="rp-range">
-          <div className="rp-seg" role="tablist" aria-label="Date range">
-            {PRESETS.map((p) => (
-              <button key={p.id} type="button" role="tab" aria-selected={preset === p.id} className={preset === p.id ? "on" : ""} onClick={() => setPreset(p.id)}>{p.label}</button>
-            ))}
-            <button type="button" role="tab" aria-selected={preset === "custom"} className={preset === "custom" ? "on" : ""} onClick={() => setPreset("custom")}>Custom</button>
-          </div>
-          {preset === "custom" && (
-            <div className="rp-dates">
-              <input type="date" aria-label="Start date" value={customStart} max={customEnd} onChange={(e) => setCustomStart(e.target.value)} />
-              <span>to</span>
-              <input type="date" aria-label="End date" value={customEnd} min={customStart} onChange={(e) => setCustomEnd(e.target.value)} />
-            </div>
-          )}
-        </div>
-      </header>
+    <div className="su-page rp-page">
+      <SuiteHeader eyebrow={`${period} · ${scope}`} title="Reports">
+        <button type="button" className="rp-export" onClick={() => exportCsv(rows)} disabled={!rows.length}>
+          <DownloadGlyph />
+          Export CSV
+        </button>
+        {kiosk && <SuiteMenu label="Menu" />}
+      </SuiteHeader>
 
-      <div className="rp-filters">
-        <select aria-label="Department" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
-          <option value="">All departments</option>
-          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-        <select aria-label="Machine group" value={machineGroupId} onChange={(e) => { setMachineGroupId(e.target.value); setMachineId(""); }}>
-          <option value="">All machine groups</option>
-          {machineGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-        <select aria-label="Machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
-          <option value="">All machines</option>
-          {machines.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
-        <select aria-label="Responder" value={responderId} onChange={(e) => setResponderId(e.target.value)}>
-          <option value="">All responders</option>
-          {responders.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
-        {reason && <span className="rp-chip">Reason: {reasons.find(([id]) => id === reason)?.[1]}</span>}
-        {anyFilter && <button type="button" className="rp-clear" onClick={clearFilters}>Clear filters</button>}
-      </div>
+      <section className="rp-toolbar" aria-label="Report filters">
+        <div className="rp-seg" role="tablist" aria-label="Date range">
+          {PRESETS.map((p) => (
+            <button key={p.id} type="button" role="tab" aria-selected={preset === p.id} className={preset === p.id ? "on" : ""} onClick={() => setPreset(p.id)}>{p.label}</button>
+          ))}
+          <button type="button" role="tab" aria-selected={preset === "custom"} className={preset === "custom" ? "on" : ""} onClick={() => setPreset("custom")}>Custom</button>
+        </div>
+        {preset === "custom" ? (
+          <div className="rp-dates">
+            <input type="date" aria-label="Start date" value={customStart} max={customEnd} onChange={(e) => setCustomStart(e.target.value)} />
+            <span>to</span>
+            <input type="date" aria-label="End date" value={customEnd} min={customStart} onChange={(e) => setCustomEnd(e.target.value)} />
+          </div>
+        ) : (
+          <span className="rp-range-label">{rangeLabel}</span>
+        )}
+        <span className="rp-sep" aria-hidden="true" />
+        <div className="rp-filters">
+          <select aria-label="Department" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+            <option value="">All departments</option>
+            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <select aria-label="Machine group" value={machineGroupId} onChange={(e) => { setMachineGroupId(e.target.value); setMachineId(""); }}>
+            <option value="">All machine groups</option>
+            {machineGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+          <select aria-label="Machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
+            <option value="">All machines</option>
+            {machines.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <select aria-label="Responder" value={responderId} onChange={(e) => setResponderId(e.target.value)}>
+            <option value="">All responders</option>
+            {responders.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          {reason && (
+            <button type="button" className="rp-chip" onClick={() => setReason("")} aria-label="Remove reason filter">
+              Reason: {reasons.find(([id]) => id === reason)?.[1]}
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+          {anyFilter && <button type="button" className="rp-clear" onClick={clearFilters}>Clear filters</button>}
+        </div>
+      </section>
 
       {current.isError && <p className="rp-error" role="alert">{current.error instanceof Error ? current.error.message : "Couldn't load the report."}</p>}
 
       <section className="rp-stats" aria-label="Summary">
-        <Stat label="Calls" value={stats.calls.toLocaleString()} delta={before ? delta(stats.calls, before.calls, "neutral") : null} note={`vs previous ${days === 1 ? "day" : `${days} days`}`} />
+        <Stat label="Calls" value={stats.calls.toLocaleString()} delta={before ? delta(stats.calls, before.calls, "neutral") : null} hint={`vs previous ${days === 1 ? "day" : `${days} days`}`} />
         <Stat label="Avg response" hint="call → acknowledged" value={dur(stats.response)} delta={before ? delta(stats.response, before.response, "down") : null} />
         <Stat label="Avg fix" hint="acknowledged → closed" value={dur(stats.fix)} delta={before ? delta(stats.fix, before.fix, "down") : null} />
         <Stat label="Machine wait" hint="total, call → closed" value={dur(stats.waitTotal)} delta={before ? delta(stats.waitTotal, before.waitTotal, "down") : null} />
@@ -248,21 +325,24 @@ export function ReportsPage() {
       </section>
 
       <div className="rp-grid">
-        <Card title="Calls over time" subtitle={days <= 1 ? "By hour, by department" : "By day, by department"} className="rp-span-2">
-          <CallsChart rows={rows} range={range} hourly={days <= 1} series={series} slotOf={slotOf} keyOf={keyOf} />
+        <Card title={days <= 1 ? "Calls per hour" : "Calls per day"} action={seriesKeys.length > 1 ? <Legend items={seriesKeys} /> : undefined}>
+          <CallsChart rows={rows} range={range} hourly={days <= 1} keys={seriesKeys} keyOf={keyOf} />
         </Card>
-        <Card title="Where the time goes" subtitle="Average per call, by department">
-          <TimeSplit rows={rows} departments={departments} />
+        <Card title="Where the time goes" action={<Legend items={TIME_KEYS} />} flush>
+          <TimeSplit rows={rows} departments={departments} deptById={deptById} />
         </Card>
       </div>
 
-      <Card title="When calls happen" subtitle="Calls by day of week and hour">
-        <Heatmap rows={rows} />
+      <Card
+        title="When calls happen"
+        meta={heat.busiest.n > 0 ? <>Busiest <strong>{WEEKDAYS[heat.busiest.day]} around {hourLabel(heat.busiest.hour)}</strong> · {heat.busiest.n} call{heat.busiest.n === 1 ? "" : "s"}</> : undefined}
+        action={rows.length ? <HeatScale /> : undefined}
+      >
+        <Heatmap rows={rows} heat={heat} />
       </Card>
 
       <Card
         title="Breakdown"
-        subtitle="Click a row to filter the whole report"
         action={
           <div className="rp-seg small" role="tablist" aria-label="Breakdown">
             {(["department", "machine", "responder", "reason"] as Dimension[]).map((d) => (
@@ -272,24 +352,32 @@ export function ReportsPage() {
             ))}
           </div>
         }
+        flush
       >
-        <Breakdown rows={rows} dimension={dimension} now={now} onPick={drill} />
+        <Breakdown rows={rows} dimension={dimension} now={now} deptById={deptById} onPick={drill} />
       </Card>
 
-      <section className="rp-card">
-        <header className="rp-card-head">
-          <div>
-            <h2>All calls</h2>
-            <p>{rows.length.toLocaleString()} in this view</p>
-          </div>
-          <div className="rp-card-actions">
-            <button type="button" className="rp-btn" onClick={() => exportCsv(rows)} disabled={!rows.length}>Export CSV</button>
-            <button type="button" className="rp-btn ghost" onClick={() => setShowCalls((v) => !v)} aria-expanded={showCalls}>{showCalls ? "Hide" : "Show"}</button>
-          </div>
-        </header>
-        {showCalls && <CallsTable rows={rows} />}
-      </section>
+      <Card
+        title="All calls"
+        meta={`${rows.length.toLocaleString()} in this view`}
+        action={<button type="button" className="rp-btn" onClick={() => setShowCalls((v) => !v)} aria-expanded={showCalls}>{showCalls ? "Hide" : "Show"}</button>}
+        flush
+      >
+        {showCalls && <CallsTable rows={rows} deptById={deptById} />}
+      </Card>
+
+      <SuiteStatusBar connection={connection} lastGood={current.dataUpdatedAt}>
+        Compared with {previousLabel}
+      </SuiteStatusBar>
     </div>
+  );
+}
+
+function DownloadGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M12 4.5v10.5M7.5 10.5 12 15l4.5-4.5M5 19.5h14" />
+    </svg>
   );
 }
 
@@ -310,27 +398,29 @@ function delta(cur: number | null, prev: number | null, better: "down" | "up" | 
   return { text, tone };
 }
 
-function Stat({ label, value, delta: d, hint, note }: { label: string; value: string; delta: Delta; hint?: string; note?: string }) {
+function Stat({ label, value, delta: d, hint }: { label: string; value: string; delta: Delta; hint?: string }) {
   return (
     <div className="rp-stat">
-      <span className="rp-stat-label">{label}{hint && <small>{hint}</small>}</span>
-      <strong>{value}</strong>
-      <span className={`rp-delta ${d?.tone ?? ""}`}>{d ? d.text : "–"}{note && <small> {note}</small>}</span>
+      <span className="rp-stat-label">{label}</span>
+      <strong className="rp-stat-value">{value}</strong>
+      <span className="rp-stat-foot">
+        {d && <span className={`rp-delta ${d.tone}`}>{d.text}</span>}
+        {hint && <small>{hint}</small>}
+      </span>
     </div>
   );
 }
 
-function Card({ title, subtitle, action, className = "", children }: { title: string; subtitle?: string; action?: ReactNode; className?: string; children: ReactNode }) {
+/** A card with its label inside, on a hairline: title left, an optional note, controls right. */
+function Card({ title, meta, action, flush = false, className = "", children }: { title: string; meta?: ReactNode; action?: ReactNode; flush?: boolean; className?: string; children?: ReactNode }) {
   return (
     <section className={`rp-card ${className}`}>
       <header className="rp-card-head">
-        <div>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        {action}
+        <h2>{title}</h2>
+        {meta && <span className="rp-card-meta">{meta}</span>}
+        {action && <div className="rp-card-action">{action}</div>}
       </header>
-      {children}
+      {children && <div className={`rp-card-body ${flush ? "flush" : ""}`}>{children}</div>}
     </section>
   );
 }
@@ -344,16 +434,13 @@ function Tooltip({ tip }: { tip: Tip }) {
   return <div className="rp-tip" style={{ left: tip.x, top: tip.y }} role="tooltip">{tip.content}</div>;
 }
 
-function Legend({ items }: { items: Array<{ key: string; label: string; color: string }> }) {
+function Legend({ items }: { items: SeriesKey[] }) {
   return (
     <ul className="rp-legend">
       {items.map((item) => <li key={item.key}><i style={{ background: item.color }} />{item.label}</li>)}
     </ul>
   );
 }
-
-const seriesColor = (slot: number) => `var(--rp-s${slot + 1})`;
-const OTHER_COLOR = "var(--rp-other)";
 
 /* ---------- Calls over time: stacked columns ---------- */
 
@@ -366,12 +453,11 @@ function niceMax(value: number) {
   return step * 4;
 }
 
-function CallsChart({ rows, range, hourly, series, slotOf, keyOf }: {
+function CallsChart({ rows, range, hourly, keys, keyOf }: {
   rows: ReportRow[];
   range: { start: Date; end: Date };
   hourly: boolean;
-  series: { named: Array<{ id: string; name: string }>; other: boolean };
-  slotOf: Map<string, number>;
+  keys: SeriesKey[];
   keyOf: (row: ReportRow) => string;
 }) {
   const [wrapRef, width] = useWidth<HTMLDivElement>();
@@ -381,7 +467,7 @@ function CallsChart({ rows, range, hourly, series, slotOf, keyOf }: {
   const buckets = useMemo(() => {
     const list: Array<{ key: string; label: string; counts: Map<string, number>; total: number }> = [];
     if (hourly) {
-      for (let h = 0; h < 24; h++) list.push({ key: String(h), label: h % 6 === 0 ? `${((h + 11) % 12) + 1}${h < 12 ? "a" : "p"}` : "", counts: new Map(), total: 0 });
+      for (let h = 0; h < 24; h++) list.push({ key: String(h), label: h % 6 === 0 ? hourLabel(h) : "", counts: new Map(), total: 0 });
       for (const r of rows) {
         const b = list[new Date(r.createdAt).getHours()];
         b.counts.set(keyOf(r), (b.counts.get(keyOf(r)) ?? 0) + 1);
@@ -400,87 +486,82 @@ function CallsChart({ rows, range, hourly, series, slotOf, keyOf }: {
     return list;
   }, [rows, range, hourly, keyOf]);
 
-  const keys = [...series.named.map((d) => ({ key: d.id, label: d.name, color: seriesColor(slotOf.get(d.id) ?? 0) })), ...(series.other ? [{ key: "other", label: "Other", color: OTHER_COLOR }] : [])];
   const height = 240;
   const pad = { l: 36, r: 8, t: 8, b: 26 };
   const plotW = Math.max(0, width - pad.l - pad.r);
   const plotH = height - pad.t - pad.b;
   const max = niceMax(Math.max(1, ...buckets.map((b) => b.total)));
   const band = buckets.length ? plotW / buckets.length : 0;
-  const barW = Math.max(3, Math.min(24, band * 0.62));
+  const barW = Math.max(3, Math.min(36, band * 0.5));
   const y = (v: number) => pad.t + plotH - (v / max) * plotH;
   const labelEvery = Math.max(1, Math.ceil(buckets.length / Math.max(1, Math.floor(plotW / 56))));
 
-  if (!rows.length) return <div ref={wrapRef} className="rp-empty">No calls in this range.</div>;
-
   return (
-    <div className="rp-chart">
-      {keys.length > 1 && <Legend items={keys} />}
-      <div ref={wrapRef} className="rp-plot" onMouseLeave={() => { setHover(null); setTip(null); }}>
-        {width > 0 && (
-          <svg width={width} height={height} role="img" aria-label={`Calls per ${hourly ? "hour" : "day"}, stacked by department. Total ${rows.length}.`}>
-            {[0, 1, 2, 3, 4].map((i) => {
-              const v = (max / 4) * i;
-              return (
-                <g key={i}>
-                  <line x1={pad.l} x2={width - pad.r} y1={y(v)} y2={y(v)} className={i === 0 ? "rp-axis" : "rp-grid"} />
-                  <text x={pad.l - 8} y={y(v)} dy="0.32em" textAnchor="end" className="rp-tick">{Math.round(v).toLocaleString()}</text>
-                </g>
-              );
-            })}
-            {buckets.map((b, i) => {
-              const cx = pad.l + band * i + band / 2;
-              let acc = 0;
-              const segs = keys.map((k) => ({ ...k, value: b.counts.get(k.key) ?? 0 })).filter((s) => s.value > 0);
-              return (
-                <g key={b.key} opacity={hover == null || hover === i ? 1 : 0.4}>
-                  {segs.map((s, si) => {
-                    const top = y(acc + s.value);
-                    const bottom = y(acc);
-                    acc += s.value;
-                    const h = Math.max(0, bottom - top - (si > 0 ? 2 : 0)); // 2px surface gap between segments
-                    const x = cx - barW / 2;
-                    const last = si === segs.length - 1;
-                    if (!last || h < 4) return <rect key={s.key} x={x} y={top} width={barW} height={h} fill={s.color} />;
-                    const r = Math.min(4, barW / 2);
-                    return <path key={s.key} fill={s.color} d={`M${x},${top + h} V${top + r} Q${x},${top} ${x + r},${top} H${x + barW - r} Q${x + barW},${top} ${x + barW},${top + r} V${top + h} Z`} />;
-                  })}
-                  {i % labelEvery === 0 && b.label && <text x={cx} y={height - 8} textAnchor="middle" className="rp-tick">{b.label}</text>}
-                  <rect
-                    x={pad.l + band * i}
-                    y={pad.t}
-                    width={band}
-                    height={plotH}
-                    fill="transparent"
-                    onMouseMove={(e) => {
-                      setHover(i);
-                      const box = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
-                      setTip({
-                        x: Math.min(e.clientX - box.left + 14, width - 190),
-                        y: Math.max(0, e.clientY - box.top - 20),
-                        content: (
-                          <>
-                            <strong>{hourly ? `${((Number(b.key) + 11) % 12) + 1}${Number(b.key) < 12 ? " AM" : " PM"}` : b.label} · {b.total} call{b.total === 1 ? "" : "s"}</strong>
-                            {keys.map((k) => b.counts.get(k.key) ? <span key={k.key}><i style={{ background: k.color }} />{k.label}<em>{b.counts.get(k.key)}</em></span> : null)}
-                          </>
-                        )
-                      });
-                    }}
-                  />
-                </g>
-              );
-            })}
-          </svg>
-        )}
-        <Tooltip tip={tip} />
-      </div>
+    // The measured box stays mounted, so the chart keeps tracking its width once data arrives
+    <div ref={wrapRef} className="rp-plot" onMouseLeave={() => { setHover(null); setTip(null); }}>
+      {!rows.length ? <div className="rp-empty">No calls in this range.</div> : width > 0 && (
+        <svg width={width} height={height} role="img" aria-label={`Calls per ${hourly ? "hour" : "day"}, stacked by department. Total ${rows.length}.`}>
+          {[0, 1, 2, 3, 4].map((i) => {
+            const v = (max / 4) * i;
+            return (
+              <g key={i}>
+                <line x1={pad.l} x2={width - pad.r} y1={y(v)} y2={y(v)} className={i === 0 ? "rp-axis" : "rp-gridline"} />
+                <text x={pad.l - 8} y={y(v)} dy="0.32em" textAnchor="end" className="rp-tick">{Math.round(v).toLocaleString()}</text>
+              </g>
+            );
+          })}
+          {buckets.map((b, i) => {
+            const cx = pad.l + band * i + band / 2;
+            let acc = 0;
+            const segs = keys.map((k) => ({ ...k, value: b.counts.get(k.key) ?? 0 })).filter((s) => s.value > 0);
+            return (
+              <g key={b.key} opacity={hover == null || hover === i ? 1 : 0.4}>
+                {segs.map((s, si) => {
+                  const top = y(acc + s.value);
+                  const bottom = y(acc);
+                  acc += s.value;
+                  const h = Math.max(0, bottom - top - (si > 0 ? 2 : 0)); // 2px surface gap between segments
+                  const x = cx - barW / 2;
+                  const last = si === segs.length - 1;
+                  if (!last || h < 4) return <rect key={s.key} x={x} y={top} width={barW} height={h} style={{ fill: s.color }} />;
+                  const r = Math.min(4, barW / 2);
+                  return <path key={s.key} style={{ fill: s.color }} d={`M${x},${top + h} V${top + r} Q${x},${top} ${x + r},${top} H${x + barW - r} Q${x + barW},${top} ${x + barW},${top + r} V${top + h} Z`} />;
+                })}
+                {i % labelEvery === 0 && b.label && <text x={cx} y={height - 8} textAnchor="middle" className="rp-tick">{b.label}</text>}
+                <rect
+                  x={pad.l + band * i}
+                  y={pad.t}
+                  width={band}
+                  height={plotH}
+                  fill="transparent"
+                  onMouseMove={(e) => {
+                    setHover(i);
+                    const box = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
+                    setTip({
+                      x: Math.min(e.clientX - box.left + 14, width - 190),
+                      y: Math.max(0, e.clientY - box.top - 20),
+                      content: (
+                        <>
+                          <strong>{hourly ? `${((Number(b.key) + 11) % 12) + 1}${Number(b.key) < 12 ? " AM" : " PM"}` : b.label} · {b.total} call{b.total === 1 ? "" : "s"}</strong>
+                          {keys.map((k) => b.counts.get(k.key) ? <span key={k.key}><i style={{ background: k.color }} />{k.label}<em>{b.counts.get(k.key)}</em></span> : null)}
+                        </>
+                      )
+                    });
+                  }}
+                />
+              </g>
+            );
+          })}
+        </svg>
+      )}
+      <Tooltip tip={tip} />
     </div>
   );
 }
 
 /* ---------- Where the time goes: response vs fix per department ---------- */
 
-function TimeSplit({ rows, departments }: { rows: ReportRow[]; departments: Array<{ id: string; name: string }> }) {
+function TimeSplit({ rows, departments, deptById }: { rows: ReportRow[]; departments: Dept[]; deptById: Map<string, Dept> }) {
   const [tip, setTip] = useState<Tip>(null);
   const items = useMemo(() => {
     const byDept = new Map<string, { name: string; rows: ReportRow[] }>();
@@ -498,7 +579,6 @@ function TimeSplit({ rows, departments }: { rows: ReportRow[]; departments: Arra
   if (!items.length) return <div className="rp-empty">No calls in this range.</div>;
   return (
     <div className="rp-split" onMouseLeave={() => setTip(null)}>
-      <Legend items={[{ key: "r", label: "Response", color: "var(--rp-response)" }, { key: "f", label: "Fix", color: "var(--rp-fix)" }]} />
       <ul className="rp-split-list">
         {items.map((item) => (
           <li
@@ -518,7 +598,10 @@ function TimeSplit({ rows, departments }: { rows: ReportRow[]; departments: Arra
               });
             }}
           >
-            <span className="rp-split-name">{item.name}</span>
+            <span className="rp-split-name">
+              <TeamIcon department={deptById.get(item.id) ?? item} size="md" />
+              <span><strong>{item.name}</strong><small>{item.count.toLocaleString()} call{item.count === 1 ? "" : "s"}</small></span>
+            </span>
             <span className="rp-split-bar" aria-label={`${item.name}: response ${dur(item.response)}, fix ${dur(item.fix)}`}>
               {item.response > 0 && <i style={{ width: `${(item.response / max) * 100}%`, background: "var(--rp-response)" }} />}
               {item.fix > 0 && <i style={{ width: `${(item.fix / max) * 100}%`, background: "var(--rp-fix)" }} />}
@@ -534,28 +617,17 @@ function TimeSplit({ rows, departments }: { rows: ReportRow[]; departments: Arra
 
 /* ---------- When calls happen: weekday × hour heatmap ---------- */
 
-function Heatmap({ rows }: { rows: ReportRow[] }) {
+function HeatScale() {
+  return <div className="rp-heat-scale" aria-hidden="true"><span>Fewer</span>{[1, 2, 3, 4, 5, 6, 7].map((s) => <i key={s} className={`rp-heat-cell s${s}`} />)}<span>More</span></div>;
+}
+
+function Heatmap({ rows, heat }: { rows: ReportRow[]; heat: ReturnType<typeof heatOf> }) {
   const [tip, setTip] = useState<Tip>(null);
-  const grid = useMemo(() => {
-    const cells = Array.from({ length: 7 }, () => Array(24).fill(0) as number[]);
-    for (const r of rows) {
-      const d = new Date(r.createdAt);
-      cells[(d.getDay() + 6) % 7][d.getHours()]++;
-    }
-    return cells;
-  }, [rows]);
-  const max = Math.max(1, ...grid.flat());
-  const busiest = useMemo(() => {
-    let best = { day: 0, hour: 0, n: 0 };
-    grid.forEach((row, day) => row.forEach((n, hour) => { if (n > best.n) best = { day, hour, n }; }));
-    return best;
-  }, [grid]);
-  const hourLabel = (h: number) => `${((h + 11) % 12) + 1}${h < 12 ? "a" : "p"}`;
+  const { grid, max } = heat;
 
   if (!rows.length) return <div className="rp-empty">No calls in this range.</div>;
   return (
     <div className="rp-heat-wrap" onMouseLeave={() => setTip(null)}>
-      {busiest.n > 0 && <p className="rp-insight">Busiest: <strong>{WEEKDAYS[busiest.day]} around {hourLabel(busiest.hour)}</strong> · {busiest.n} call{busiest.n === 1 ? "" : "s"}</p>}
       <div className="rp-heat" role="img" aria-label="Calls by weekday and hour">
         <span />
         {Array.from({ length: 24 }, (_, h) => <span key={h} className="rp-heat-hour">{h % 3 === 0 ? hourLabel(h) : ""}</span>)}
@@ -578,7 +650,6 @@ function Heatmap({ rows }: { rows: ReportRow[] }) {
           </div>
         ))}
       </div>
-      <div className="rp-heat-scale"><span>Fewer</span>{[1, 2, 3, 4, 5, 6, 7].map((s) => <i key={s} className={`rp-heat-cell s${s}`} />)}<span>More</span></div>
       <Tooltip tip={tip} />
     </div>
   );
@@ -586,7 +657,7 @@ function Heatmap({ rows }: { rows: ReportRow[] }) {
 
 /* ---------- Breakdown table ---------- */
 
-function Breakdown({ rows, dimension, now, onPick }: { rows: ReportRow[]; dimension: Dimension; now: number; onPick: (dim: Dimension, id: string) => void }) {
+function Breakdown({ rows, dimension, now, deptById, onPick }: { rows: ReportRow[]; dimension: Dimension; now: number; deptById: Map<string, Dept>; onPick: (dim: Dimension, id: string) => void }) {
   const items = useMemo(() => {
     const map = new Map<string, { id: string; name: string; sub?: string; rows: ReportRow[] }>();
     for (const r of rows) {
@@ -615,16 +686,30 @@ function Breakdown({ rows, dimension, now, onPick }: { rows: ReportRow[]; dimens
             <th className="num">Avg response</th>
             <th className="num">Avg fix</th>
             <th className="num">Late</th>
+            <th className="go" aria-hidden="true" />
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.id || "none"} className={item.id ? "clickable" : ""} onClick={() => item.id && onPick(dimension, item.id)} tabIndex={item.id ? 0 : -1} onKeyDown={(e) => { if (item.id && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onPick(dimension, item.id); } }}>
-              <td><strong>{item.name}</strong>{item.sub && <small>{item.sub}</small>}</td>
+            <tr
+              key={item.id || "none"}
+              className={item.id ? "clickable" : ""}
+              title={item.id ? `Filter the report to ${item.name}` : undefined}
+              onClick={() => item.id && onPick(dimension, item.id)}
+              tabIndex={item.id ? 0 : -1}
+              onKeyDown={(e) => { if (item.id && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onPick(dimension, item.id); } }}
+            >
+              <td>
+                <span className="rp-name">
+                  {dimension === "department" && <TeamIcon department={deptById.get(item.id) ?? item} size="sm" />}
+                  <span><strong>{item.name}</strong>{item.sub && <small>{item.sub}</small>}</span>
+                </span>
+              </td>
               <td className="num"><span className="rp-inline-bar"><i style={{ width: `${(item.count / max) * 100}%` }} /></span>{item.count}</td>
               <td className="num">{dur(item.response)}</td>
               <td className="num">{dur(item.fix)}</td>
               <td className={`num ${item.late > 0.2 ? "rp-warn" : ""}`}>{pct(item.late)}</td>
+              <td className="go">{item.id && <ChevronRightIcon />}</td>
             </tr>
           ))}
         </tbody>
@@ -635,7 +720,7 @@ function Breakdown({ rows, dimension, now, onPick }: { rows: ReportRow[]; dimens
 
 /* ---------- All calls ---------- */
 
-function CallsTable({ rows }: { rows: ReportRow[] }) {
+function CallsTable({ rows, deptById }: { rows: ReportRow[]; deptById: Map<string, Dept> }) {
   const sorted = [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 500);
   return (
     <div className="rp-table-wrap tall">
@@ -648,7 +733,7 @@ function CallsTable({ rows }: { rows: ReportRow[] }) {
             <tr key={r.id}>
               <td className="nowrap">{new Date(r.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
               <td><strong>{r.machine.name}</strong><small>{r.machine.groupName}</small></td>
-              <td>{r.department.name}</td>
+              <td><span className="rp-name"><TeamIcon department={deptById.get(r.department.id) ?? r.department} size="sm" />{r.department.name}</span></td>
               <td>{r.issueType?.name ?? r.commandLabel}</td>
               <td>{r.responder?.name ?? "–"}</td>
               <td className="num">{dur(r.acknowledgeSeconds)}</td>
@@ -682,4 +767,3 @@ function exportCsv(rows: ReportRow[]) {
   link.click();
   URL.revokeObjectURL(url);
 }
-

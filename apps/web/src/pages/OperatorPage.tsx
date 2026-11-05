@@ -2,13 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postJson } from "../lib/api";
-import { useAuth } from "../lib/auth";
-import { useTheme } from "../lib/theme";
 import type { Alert, CommandGroup } from "../lib/types";
-import { clock, mergeByCall, summarizeCall } from "../lib/callStages";
+import { LATE_AFTER_SECONDS, clock, mergeByCall, summarizeCall } from "../lib/callStages";
 import type { AlertTiming, CallStage, CallSummary } from "../lib/callStages";
-import { DepartmentIcon } from "../components/DepartmentBadge";
-import { CheckCircleIcon, ChevronRightIcon, CloseIcon, LayersIcon, MoonIcon, MoreIcon, PlusIcon, SettingsIcon, SignOutIcon, SunIcon } from "../components/icons";
+import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState } from "../components/Suite";
+import type { Connection, Tone } from "../components/Suite";
+import { CheckCircleIcon, ChevronRightIcon, CloseIcon, LayersIcon, PlusIcon, SettingsIcon } from "../components/icons";
 import "../styles/station.css";
 
 const MACHINE_KEY = "pg_operator_locked_machine_id";
@@ -18,20 +17,12 @@ const OFFLINE_AFTER_MS = 20_000;
 const HOLD_MS = 1500;
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-/** One-tap updates that make sense for each stage of a call. */
-const QUICK_MESSAGES: Record<CallStage, string[]> = {
-  waiting: ["Machine stopped", "Urgent, please hurry"],
-  onTheWay: ["Machine stopped", "Urgent, please hurry"],
-  onSite: []
-};
-
 type Department = { id: string; name: string; color?: string };
 type Machine = { id: string; name: string; code: string; machineGroup?: { name?: string } | null };
 type Template = { id: string; buttonLabel: string; targets: Array<{ departmentId: string; department: Department }> };
 type IssueType = { id: string; name: string; departmentId: string };
 type Bootstrap = { machines: Machine[]; departments: Department[]; issueTypes: IssueType[]; commandTemplates: Template[] };
 type Snapshot = { data?: { commands?: CommandGroup[] } };
-type Connection = "connecting" | "live" | "offline";
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -152,10 +143,7 @@ export function OperatorPage() {
   // Offline is judged by how old the data is, not by a single failed request: one dropped
   // poll is retried and replaced 5s later. Never claim "Running normally" without fresh data.
   const lastGood = snapshot.dataUpdatedAt;
-  const connection: Connection =
-    lastGood === 0
-      ? snapshot.errorUpdatedAt > 0 ? "offline" : "connecting"
-      : now - lastGood > OFFLINE_AFTER_MS ? "offline" : "live";
+  const connection = connectionState(snapshot, now, OFFLINE_AFTER_MS);
   const canCall = connection === "live";
 
   const refresh = () =>
@@ -178,24 +166,32 @@ export function OperatorPage() {
     setPickerOpen(false);
   }
 
-  if (bootstrap.isLoading) return <div className="ms-page"><div className="ms-loading">Connecting to the station…</div></div>;
-
-  if (bootstrap.isError) {
+  // Every screen keeps the app bar and its menu, so a kiosk (no sidebar) can always sign out
+  if (bootstrap.isLoading || bootstrap.isError) {
     return (
-      <div className="ms-page">
-        <div className="ms-problem">
-          <h1>Can't reach the server</h1>
-          <p>Check the network connection on this station.</p>
-          <button type="button" className="ms-btn primary" onClick={() => bootstrap.refetch()}>Try again</button>
-        </div>
+      <div className="su-page ms-page">
+        <SuiteHeader eyebrow="Machine Station" title={bootstrap.isError ? "Can't reach the server" : "Connecting…"} status={{ tone: "neutral", text: bootstrap.isError ? "Offline" : "Checking…" }}>
+          <SuiteMenu signOutLabel="Sign out of this station" />
+        </SuiteHeader>
+        {bootstrap.isError && (
+          <div className="ms-problem">
+            <strong>This station can't reach the server.</strong>
+            <span>Check the network connection, then try again.</span>
+            <button type="button" className="ms-btn primary" onClick={() => bootstrap.refetch()}>Try again</button>
+          </div>
+        )}
       </div>
     );
   }
 
   if (!machine || pickerOpen) {
     return (
-      <div className="ms-page">
-        <MachinePicker machines={machines} currentId={machineId} onPick={chooseMachine} onCancel={machine ? () => setPickerOpen(false) : undefined} />
+      <div className="su-page ms-page">
+        <SuiteHeader eyebrow="Station setup" title="Which machine is this?">
+          {machine && <button type="button" className="ms-btn ghost" onClick={() => setPickerOpen(false)}>Back</button>}
+          <SuiteMenu signOutLabel="Sign out of this station" />
+        </SuiteHeader>
+        <MachinePicker machines={machines} currentId={machineId} onPick={chooseMachine} />
       </div>
     );
   }
@@ -213,42 +209,31 @@ export function OperatorPage() {
   };
 
   return (
-    <div className={`ms-page ${calls.length ? "has-calls" : ""}`}>
-      <header className="ms-head">
-        <div className="ms-identity">
-          <h1>{machine.name}</h1>
-          {machine.code && <span className="ms-code">{machine.code}</span>}
-          {group && <span className="ms-group">{group}</span>}
-        </div>
-        <div className="ms-head-side">
-          <MachineStatus calls={calls} connection={connection} />
-          {connection !== "live" && (
-            <span className={`ms-conn ${connection}`}>
-              <i aria-hidden="true" />
-              {connection === "offline" ? "Offline" : "Connecting"}
-            </span>
-          )}
-          <span className="ms-time">{timeOfDay(now)}</span>
-          <StationMenu onChangeMachine={() => setPickerOpen(true)} />
-        </div>
-      </header>
+    <div className="su-page ms-page">
+      <SuiteHeader
+        // Small spaced label over the name: the machine code maintenance looks for, plus its group when it adds something
+        eyebrow={[group || "Machine", machine.code].filter(Boolean).join(" · ")}
+        title={machine.name}
+        status={machineStatus(calls, connection)}
+      >
+        <SuiteMenu
+          signOutLabel="Sign out of this station"
+          items={(close) => <HoldButton onHold={() => { close(); setPickerOpen(true); }} />}
+        />
+      </SuiteHeader>
 
-      {connection === "offline" && (
-        <div className="ms-notice" role="alert">
-          <strong>Connection lost.</strong>
-          <span>{lastGood ? `Last update ${timeOfDay(lastGood)}. ` : ""}Calls on this screen may be out of date. Reconnecting…</span>
-        </div>
-      )}
+      {connection === "offline" && <OfflineNotice lastGood={lastGood} />}
 
       {calls.length > 0 ? (
         <div className="ms-body">
           <section className="ms-calls" aria-label="Open calls">
-            {calls.map((call) => <ActiveCall key={call.command.id} call={call} machineId={machineId} stale={connection === "offline"} disabled={!canCall} onChange={refresh} />)}
+            {calls.map((call, index) => <ActiveCall key={call.command.id} call={call} compact={index > 0} machineId={machineId} stale={connection === "offline"} disabled={!canCall} onChange={refresh} />)}
           </section>
           <aside className="ms-rail" aria-label="Call another team">
-            <h2 className="ms-section-title">Call another team</h2>
             {createCall.isError && !otherOpen && <p className="ms-error" role="alert">{errorText(createCall.error, "The call didn't go through. Try again.")}</p>}
             <div className="ms-list">
+              {/* The heading belongs to the card, not floating above it */}
+              <h2 className="ms-list-head">Call another team</h2>
               {available.map((template) => (
                 <CallRow key={template.id} template={template} sending={sendingId === template.id} disabled={!canCall || createCall.isPending} onCall={() => callTemplate(template)} />
               ))}
@@ -263,6 +248,7 @@ export function OperatorPage() {
       ) : (
         <CallForHelp
           templates={available}
+          issueTypes={data?.issueTypes ?? []}
           sendingId={sendingId}
           disabled={!canCall || createCall.isPending}
           error={createCall.isError && !otherOpen ? errorText(createCall.error, "The call didn't go through. Try again.") : ""}
@@ -270,6 +256,8 @@ export function OperatorPage() {
           onOther={openOther}
         />
       )}
+
+      <SuiteStatusBar connection={connection} lastGood={lastGood} />
 
       {otherOpen && data && (
         <OtherRequest
@@ -295,33 +283,18 @@ export function OperatorPage() {
 
 /* ---------- Header status: the machine's overall state, one short line ---------- */
 
-function MachineStatus({ calls, connection }: { calls: CallSummary[]; connection: Connection }) {
-  let tone = "neutral";
-  let text = "Checking…";
-  if (connection === "live" || (connection === "offline" && calls.length)) {
-    if (calls.length === 0) {
-      tone = "clear";
-      text = "Running normally";
-    } else {
-      const worst = calls.some((c) => c.stage === "waiting") ? "waiting" : calls.some((c) => c.stage === "onTheWay") ? "onTheWay" : "onSite";
-      tone = connection === "offline" ? "neutral" : calls.some((c) => c.late) ? "late" : worst;
-      text = `${calls.length} open call${calls.length === 1 ? "" : "s"}`;
-    }
-  } else if (connection === "offline") {
-    text = "Status unknown";
-  }
-  return (
-    <span className={`ms-status ${tone}`} role="status">
-      <i aria-hidden="true" />
-      {text}
-    </span>
-  );
+function machineStatus(calls: CallSummary[], connection: Connection): { tone: Tone; text: string } {
+  if (connection !== "live" && !(connection === "offline" && calls.length)) return { tone: "neutral", text: connection === "offline" ? "Status unknown" : "Checking…" };
+  if (calls.length === 0) return { tone: "clear", text: "Running normally" };
+  const worst: Tone = calls.some((c) => c.stage === "waiting") ? "waiting" : calls.some((c) => c.stage === "onTheWay") ? "onTheWay" : "onSite";
+  return { tone: connection === "offline" ? "neutral" : calls.some((c) => c.late) ? "late" : worst, text: `${calls.length} open call${calls.length === 1 ? "" : "s"}` };
 }
 
 /* ---------- Idle: call for help ---------- */
 
-function CallForHelp({ templates, sendingId, disabled, error, onCall, onOther }: {
+function CallForHelp({ templates, issueTypes, sendingId, disabled, error, onCall, onOther }: {
   templates: Template[];
+  issueTypes: IssueType[];
   sendingId?: string;
   disabled: boolean;
   error: string;
@@ -330,13 +303,11 @@ function CallForHelp({ templates, sendingId, disabled, error, onCall, onOther }:
 }) {
   const single = templates.filter((t) => t.targets.length === 1);
   const combined = templates.filter((t) => t.targets.length !== 1);
+  // What each team handles, from its configured request reasons: "Breakdown · Jam · Tooling"
+  const handles = (departmentId: string) => issueTypes.filter((issue) => issue.departmentId === departmentId).slice(0, 3).map((issue) => issue.name).join(" · ");
 
   return (
     <section className="ms-idle" aria-label="Call for help">
-      <div className="ms-idle-head">
-        <h2 className="ms-section-title">Call for help</h2>
-        <p>The team is notified as soon as you tap.</p>
-      </div>
       {error && <p className="ms-error" role="alert">{error}</p>}
 
       <div className="ms-tiles">
@@ -352,11 +323,10 @@ function CallForHelp({ templates, sendingId, disabled, error, onCall, onOther }:
               aria-busy={sending}
               onClick={() => onCall(template)}
             >
-              <DepartmentIcon department={department} size="lg" variant="plain" />
-              <span className="ms-tile-text">
-                <strong>{plainLabel(template.buttonLabel)}</strong>
-                {sending && <small>Sending…</small>}
-              </span>
+              <span className="ms-tile-icon"><TeamIcon department={department} size="lg" /></span>
+              <strong className="ms-tile-label">{plainLabel(template.buttonLabel)}</strong>
+              {/* Always present, so "Sending…" swaps in without moving the label */}
+              <span className="ms-tile-sub">{sending ? "Sending…" : handles(department.id) || "\u00a0"}</span>
               <i className="ms-sweep" aria-hidden="true" />
             </button>
           );
@@ -364,7 +334,6 @@ function CallForHelp({ templates, sendingId, disabled, error, onCall, onOther }:
       </div>
 
       <div className="ms-more">
-        <h3 className="ms-subtitle">{combined.length ? "Combined requests" : "Something else"}</h3>
         <div className="ms-list ms-list-grid">
           {combined.map((template) => (
             <CallRow key={template.id} template={template} sending={sendingId === template.id} disabled={disabled} onCall={() => onCall(template)} />
@@ -389,7 +358,7 @@ function CallRow({ template, sending, disabled, onCall }: { template: Template; 
       {multi ? (
         <span className="ms-glyph" aria-hidden="true"><LayersIcon /></span>
       ) : (
-        <DepartmentIcon department={template.targets[0].department} size="md" variant="plain" />
+        <TeamIcon department={template.targets[0].department} />
       )}
       <span className="ms-row-text">
         <strong>{plainLabel(template.buttonLabel)}</strong>
@@ -398,45 +367,6 @@ function CallRow({ template, sending, disabled, onCall }: { template: Template; 
       <ChevronRightIcon className="ms-row-chevron" />
       <i className="ms-sweep" aria-hidden="true" />
     </button>
-  );
-}
-
-/* ---------- Station menu (theme, sign out, protected machine change) ---------- */
-
-function StationMenu({ onChangeMachine }: { onChangeMachine: () => void }) {
-  const { logout } = useAuth();
-  const { theme, toggle } = useTheme();
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  return (
-    <div className="ms-menu">
-      <button type="button" className="ms-menu-trigger" aria-label="Station menu" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <MoreIcon />
-      </button>
-      {open && (
-        <>
-          <div className="ms-menu-scrim" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div className="ms-menu-list" role="menu">
-            <button type="button" role="menuitem" onClick={() => { toggle(); setOpen(false); }}>
-              {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-              {theme === "dark" ? "Light mode" : "Dark mode"}
-            </button>
-            <HoldButton onHold={() => { setOpen(false); onChangeMachine(); }} />
-            <button type="button" role="menuitem" className="danger" onClick={logout}>
-              <SignOutIcon />
-              Sign out of this station
-            </button>
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -475,7 +405,6 @@ function HoldButton({ onHold }: { onHold: () => void }) {
   return (
     <button
       type="button"
-      role="menuitem"
       className="ms-hold"
       onPointerDown={start}
       onPointerUp={stop}
@@ -499,9 +428,30 @@ type Pending = { kind: "close" | "cancel"; alertIds: string[]; label: string } |
 /** A one-team call names the team in the headline, so it reads from across the room. */
 function headline(call: CallSummary) {
   const team = call.alerts.length === 1 ? call.alerts[0].alert.department.name : "";
-  if (call.stage === "waiting") return team ? `Waiting for ${team}` : "Waiting for help";
+  if (call.stage === "waiting") {
+    const blocking = call.alerts.filter(({ timing }) => timing.stage === "waiting").map(({ alert }) => alert.department.name);
+    return `Waiting for ${team || listNames(blocking)}`;
+  }
   if (call.stage === "onTheWay") return team ? `${team} is on the way` : "Help is on the way";
   return team ? `${team} is at the machine` : "Help is at the machine";
+}
+
+/** "Quality", "Quality and Supervisor", "Quality, Safety and Supervisor" */
+function listNames(names: string[]) {
+  if (names.length <= 1) return names[0] ?? "help";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** Compact Called / Acknowledged / At machine / Closed dots for one team on a multi-team call; same steps as Track. */
+function MiniTrack({ stage }: { stage: CallStage }) {
+  const current = stage === "waiting" ? 1 : stage === "onTheWay" ? 2 : 3;
+  return (
+    <span className={`ms-mini ${stage}`} aria-hidden="true">
+      {[0, 1, 2, 3].map((step) => (
+        <i key={step} className={step < current ? "done" : step === current ? "current" : ""} />
+      ))}
+    </span>
+  );
 }
 
 function timerLabel(stage: CallStage) {
@@ -566,9 +516,8 @@ function CheckIcon() {
   );
 }
 
-function ActiveCall({ call, machineId, stale, disabled, onChange }: { call: CallSummary; machineId: string; stale: boolean; disabled: boolean; onChange: () => void }) {
+function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { call: CallSummary; compact: boolean; machineId: string; stale: boolean; disabled: boolean; onChange: () => void }) {
   const [pending, setPending] = useState<Pending>(null);
-  const [lastNote, setLastNote] = useState<{ text: string; at: number } | null>(null);
 
   const act = useMutation({
     mutationFn: async ({ kind, alertIds }: { kind: "close" | "cancel"; alertIds: string[] }) => {
@@ -590,32 +539,16 @@ function ActiveCall({ call, machineId, stale, disabled, onChange }: { call: Call
     }
   });
 
-  // An update ("Machine stopped") goes to every team still working this call, not just one.
-  const noteTargets = call.alerts.filter(({ alert }) => alert.status !== "RESOLVED").map(({ alert }) => alert.id);
-  const note = useMutation({
-    mutationFn: async (text: string) => {
-      const results = await Promise.allSettled(
-        noteTargets.map((id) => postJson(`/api/alerts/${id}/notes`, { note: text, clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}` }))
-      );
-      if (results.every((result) => result.status === "rejected")) throw new Error("Update not sent. Try again.");
-    },
-    onSuccess: (_, text) => {
-      setLastNote({ text, at: Date.now() });
-      onChange();
-    }
-  });
-
   const answered = call.alerts.filter(({ alert, timing }) => timing.stage !== "waiting" && alert.status !== "RESOLVED");
   const unanswered = call.alerts.filter(({ alert }) => alert.status === "OPEN");
   const allAnswered = unanswered.length === 0;
   const noneAnswered = answered.length === 0;
   const multi = call.alerts.length > 1;
-  const quick = QUICK_MESSAGES[call.stage];
   const single = multi ? null : call.alerts[0];
   const names = call.alerts.map(({ alert }) => alert.department.name).join(" + ");
 
   return (
-    <article className={`ms-call ${call.stage} ${call.late ? "late" : ""} ${stale ? "stale" : ""}`}>
+    <article className={`ms-call ${call.stage} ${call.late ? "late" : ""} ${stale ? "stale" : ""} ${compact ? "compact" : ""}`}>
       <header className="ms-call-head">
         <div className="ms-call-main">
           {multi && (
@@ -632,26 +565,35 @@ function ActiveCall({ call, machineId, stale, disabled, onChange }: { call: Call
           {/* One-team calls show the called time in the progress track instead */}
           {multi && <small>Called {timeOfDay(call.command.createdAt)}</small>}
         </div>
-        <div className="ms-timer">
-          <span>{timerLabel(call.stage)}</span>
-          <strong>{clock(stageSeconds(call))}</strong>
-          {call.stage !== "waiting" && <small>Open {clock(call.totalSeconds)}</small>}
-        </div>
       </header>
 
+      {/* The timer is the hero: the one number people read from across the floor */}
+      <div className="ms-call-mid">
+        <div className="ms-timer-row">
+          <div className="ms-timer">
+            <span>{timerLabel(call.stage)}</span>
+            <strong>{clock(stageSeconds(call))}</strong>
+          </div>
+          {/* Target vs actual, as on any MES board: the response target while waiting, then total open time */}
+          <div className="ms-target">
+            <span>{call.stage === "waiting" ? "Response target" : "Open for"}</span>
+            <strong>{clock(call.stage === "waiting" ? LATE_AFTER_SECONDS : call.totalSeconds)}</strong>
+          </div>
+        </div>
       {single ? (
-        <Track alert={single.alert} timing={single.timing} />
+        !compact && <Track alert={single.alert} timing={single.timing} />
       ) : (
         <ul className="ms-teams">
           {call.alerts.map(({ alert, timing }) => (
             <li key={alert.id} className={`ms-team ${timing.stage}`}>
-              <DepartmentIcon department={alert.department} size="md" variant="plain" />
+              <TeamIcon department={alert.department} />
               <div className="ms-team-main">
                 <strong>{alert.department.name}</strong>
                 <span className="ms-team-status"><i className={`ms-dot ${timing.stage}`} aria-hidden="true" />{teamStatus(alert, timing)}</span>
                 {teamTimes(alert, timing) && <span className="ms-team-times">{teamTimes(alert, timing)}</span>}
               </div>
               <div className="ms-team-side">
+                <MiniTrack stage={timing.stage} />
                 {!pending && (timing.stage === "waiting" ? (
                   <button type="button" className="ms-btn ghost" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: [alert.id], label: `Cancel the ${alert.department.name} call?` })}>Cancel</button>
                 ) : (
@@ -662,6 +604,7 @@ function ActiveCall({ call, machineId, stale, disabled, onChange }: { call: Call
           ))}
         </ul>
       )}
+      </div>
 
       {pending ? (
         <div className="ms-confirm" role="alertdialog" aria-label={pending.label}>
@@ -674,24 +617,8 @@ function ActiveCall({ call, machineId, stale, disabled, onChange }: { call: Call
           </div>
         </div>
       ) : (
+        (allAnswered || noneAnswered) && (
         <footer className="ms-call-foot">
-          {quick.length > 0 && (
-            <div className="ms-updates">
-              <span className="ms-updates-label">Send an update</span>
-              <div className="ms-updates-buttons">
-                {quick.map((text) => (
-                  <button key={text} type="button" className="ms-chip" onClick={() => { haptic(); note.mutate(text); }} disabled={note.isPending || disabled}>
-                    {note.isPending && note.variables === text ? "Sending…" : text}
-                  </button>
-                ))}
-              </div>
-              {note.isError ? (
-                <span className="ms-error" role="alert">Update not sent. Try again.</span>
-              ) : lastNote ? (
-                <span className="ms-sent" role="status"><CheckCircleIcon /> Sent “{lastNote.text}” at {timeOfDay(lastNote.at)}</span>
-              ) : null}
-            </div>
-          )}
           <div className="ms-call-actions">
             {allAnswered && (
               <button type="button" className="ms-btn primary big" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: answered.map(({ alert }) => alert.id), label: multi ? "Is the issue fixed? This closes the call for every team." : "Is the issue fixed?" })}>
@@ -705,6 +632,7 @@ function ActiveCall({ call, machineId, stale, disabled, onChange }: { call: Call
             )}
           </div>
         </footer>
+        )
       )}
 
       {act.isError && <p className="ms-error" role="alert">{errorText(act.error, "That didn't go through. Try again.")}</p>}
@@ -758,7 +686,7 @@ function OtherRequest({ departments, issueTypes, busy, sending, error, onClose, 
             return (
               <div key={department.id} className={`ms-sheet-row ${isBusy ? "busy" : ""}`}>
                 <div className="ms-sheet-dept">
-                  <DepartmentIcon department={department} size="md" variant="plain" />
+                  <TeamIcon department={department} />
                   <strong>{department.name}</strong>
                   {isBusy && <small>Already called</small>}
                 </div>
@@ -795,26 +723,21 @@ function OtherRequest({ departments, issueTypes, busy, sending, error, onClose, 
 
 /* ---------- Machine picker (station setup) ---------- */
 
-function MachinePicker({ machines, currentId, onPick, onCancel }: { machines: Machine[]; currentId: string; onPick: (id: string) => void; onCancel?: () => void }) {
+function MachinePicker({ machines, currentId, onPick }: { machines: Machine[]; currentId: string; onPick: (id: string) => void }) {
   const groups = useMemo(() => {
     const map = new Map<string, Machine[]>();
     for (const m of machines) map.set(m.machineGroup?.name ?? "Machines", [...(map.get(m.machineGroup?.name ?? "Machines") ?? []), m]);
     return Array.from(map).sort(([a], [b]) => naturalSort.compare(a, b));
   }, [machines]);
 
+  if (machines.length === 0) return <div className="ms-problem"><strong>No machines are set up for your account.</strong><span>Ask an administrator to add this station's machine.</span></div>;
+
+  // One card per machine group, its name in the card header; the station remembers the choice
   return (
-    <section className="ms-picker">
-      <header>
-        <div>
-          <h1>Which machine is this station?</h1>
-          <p>This screen remembers the machine, so operators only see its calls.</p>
-        </div>
-        {onCancel && <button type="button" className="ms-btn ghost" onClick={onCancel}>Back</button>}
-      </header>
-      {machines.length === 0 && <p className="ms-muted">No machines are set up for your account.</p>}
+    <div className="ms-picker">
       {groups.map(([name, list]) => (
-        <div key={name} className="ms-picker-group">
-          <h2>{name}</h2>
+        <section key={name} className="ms-list ms-picker-group">
+          <h2 className="ms-list-head">{name}</h2>
           <div className="ms-picker-grid">
             {list.map((m) => (
               <button key={m.id} type="button" className={`ms-picker-tile ${m.id === currentId ? "current" : ""}`} onClick={() => onPick(m.id)}>
@@ -823,8 +746,8 @@ function MachinePicker({ machines, currentId, onPick, onCancel }: { machines: Ma
               </button>
             ))}
           </div>
-        </div>
+        </section>
       ))}
-    </section>
+    </div>
   );
 }
