@@ -1,0 +1,160 @@
+/*
+ * ProcessGuard suite chrome, shared by every page (Machine Station, Response Queue, Floor Status, Reports):
+ * the page frame, the textured app bar (logo · centred title with a small label · live state), the status
+ * pill, the station menu, the always-on status bar, the offline notice, and team colours.
+ * Pages add their own content styles in their own file. Tokens: ui.css.
+ */
+
+/* --su-pad mirrors .pg-main's padding (shell.css) so the app bar and status bar can run edge to edge */
+/* The page fills .pg-main's height, so the status bar sits at the bottom even on short pages (and on phones) */
+.pg-main:has(> .su-page) { display: flex; flex-direction: column; }
+.su-page { --su-pad: clamp(1rem, 1.6vw, 1.75rem); flex: 1 0 auto; display: flex; flex-direction: column; gap: 1.5rem; color: var(--pg-text); font-size: 0.9375rem; }
+/* Dark mode: lift cards off the canvas so they never read as dark holes */
+:root[data-theme="dark"] .su-page { --pg-card: #141c33; --pg-line: #283353; --pg-line-2: #34406a; }
+@media (max-width: 880px) { .su-page { --su-pad: 1rem; } }
+.su-page h1, .su-page h2, .su-page h3, .su-page p { margin: 0; }
+.su-page button, .su-page select, .su-page input { font: inherit; }
+.su-page button { filter: none; }
+.su-page button:hover { filter: none; }
+
+/* ---------- App bar ---------- */
+/* Page chrome with the login page's brand texture, kept light: a soft blue glow and a faint grid that fades out.
+   Three columns: Five Star logo, the machine's name (centred, with a small label above), live state. */
+.su-head {
+  position: sticky;
+  /* Inside .pg-main (which scrolls and has padding) a sticky top of 0 sits one padding too low */
+  top: calc(-1 * var(--su-pad));
+  z-index: 30;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1.5rem;
+  box-sizing: border-box;
+  min-height: 100px;
+  margin: calc(-1 * var(--su-pad)) calc(-1 * var(--su-pad)) 0;
+  padding: 0 var(--su-pad);
+  border-bottom: 1px solid var(--pg-line);
+  background:
+    radial-gradient(560px 180px at 50% -40px, rgba(59, 108, 246, 0.11) 0%, transparent 70%),
+    radial-gradient(520px 220px at 100% 0%, rgba(110, 128, 255, 0.10) 0%, transparent 65%),
+    radial-gradient(480px 220px at 0% 100%, rgba(64, 98, 190, 0.07) 0%, transparent 65%),
+    var(--pg-card);
+  color: var(--pg-text);
+}
+.su-head::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(37, 56, 120, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(37, 56, 120, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center -1px;
+  -webkit-mask-image: radial-gradient(ellipse 45% 120% at 50% 0%, #000 0%, transparent 80%);
+  mask-image: radial-gradient(ellipse 45% 120% at 50% 0%, #000 0%, transparent 80%);
+}
+/* Dark mode: the real login navy */
+:root[data-theme="dark"] .su-head { background: var(--pg-brand-bg); border-bottom-color: rgba(255, 255, 255, 0.08); }
+:root[data-theme="dark"] .su-head::after { background-image: linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px); }
+
+.su-head-left { display: flex; align-items: center; min-width: 0; }
+.su-logo { display: block; height: 40px; width: auto; max-width: 100%; }
+
+.su-title { display: grid; justify-items: center; gap: 0.3rem; min-width: 0; text-align: center; }
+.su-eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--pg-muted); white-space: nowrap; }
+:root[data-theme="dark"] .su-eyebrow { color: #9aa3c7; }
+.su-head h1 { min-width: 0; max-width: 56vw; font-size: 2.625rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.su-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.su-head-side { justify-self: end; display: flex; align-items: center; gap: 1rem; }
+.su-status { display: inline-flex; align-items: center; gap: 0.6rem; height: 40px; padding: 0 1rem 0 0.85rem; border-radius: 999px; background: var(--pg-track); box-shadow: inset 0 0 0 1px var(--pg-line); color: var(--pg-text); font-size: 1rem; font-weight: 600; white-space: nowrap; }
+.su-status i { width: 10px; height: 10px; border-radius: 50%; background: var(--pg-faint); }
+/* The pill takes a soft tint of the state; the dot carries the full colour */
+.su-status.clear { background: var(--pg-done-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pg-done) 28%, transparent); }
+.su-status.clear i { background: var(--pg-done); }
+.su-status.waiting, .su-status.late { background: var(--pg-wait-soft); box-shadow: inset 0 0 0 1px var(--pg-wait-line); }
+.su-status.waiting i, .su-status.late i { background: var(--pg-wait); }
+.su-status.late i { animation: suPulse 1.8s ease-out infinite; }
+.su-status.onTheWay { background: var(--pg-way-soft); box-shadow: inset 0 0 0 1px var(--pg-way-line); }
+.su-status.onTheWay i { background: var(--pg-way); }
+.su-status.onSite { background: var(--pg-site-soft); box-shadow: inset 0 0 0 1px var(--pg-site-line); }
+.su-status.onSite i { background: var(--pg-site); }
+:root[data-theme="dark"] .su-time { color: #c3cae0; }
+.su-time { color: var(--pg-text-2); font-size: 1rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Station menu */
+.su-menu { position: relative; }
+.su-page .su-menu-trigger { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--pg-line); border-radius: 10px; background: var(--pg-card); color: var(--pg-text-2); cursor: pointer; }
+.su-page .su-menu-trigger:hover, .su-page .su-menu-trigger[aria-expanded="true"] { background: var(--pg-hover); color: var(--pg-text); }
+.su-page .su-menu-trigger:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
+.su-menu-trigger svg { width: 20px; height: 20px; }
+.su-menu-scrim { position: fixed; inset: 0; z-index: 40; }
+.su-menu-list { position: absolute; right: 0; top: calc(100% + 0.5rem); z-index: 41; width: 280px; padding: 0.4rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 20px 44px -16px rgba(15, 23, 42, 0.35); }
+.su-page .su-menu-list button { position: relative; overflow: hidden; width: 100%; min-height: 52px; display: flex; align-items: center; gap: 0.7rem; padding: 0 0.85rem; border: 0; border-radius: 10px; background: transparent; color: var(--pg-text); font-size: 0.9375rem; font-weight: 500; text-align: left; cursor: pointer; touch-action: none; user-select: none; }
+.su-page .su-menu-list button:hover { background: var(--pg-hover); }
+.su-page .su-menu-list button.danger { color: var(--pg-wait-text); }
+.su-menu-list svg { position: relative; z-index: 1; width: 18px; height: 18px; flex: none; }
+
+/* Status bar: always-on system status at the foot of the screen */
+.su-statusbar {
+  /* Stays on screen on long pages (Reports, Floor Status); same padding offset as the app bar */
+  position: sticky;
+  bottom: calc(-1 * var(--su-pad));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin: auto calc(-1 * var(--su-pad)) calc(-1 * var(--su-pad));
+  padding: 0 var(--su-pad);
+  border-top: 1px solid var(--pg-line);
+  background: var(--pg-card);
+  color: var(--pg-muted);
+  font-size: 0.875rem;
+}
+.su-sync { display: inline-flex; align-items: center; gap: 0.55rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.su-sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--pg-done); }
+.su-statusbar.offline .su-sync { color: var(--pg-way-text); }
+.su-statusbar.offline .su-sync i { background: var(--pg-way); }
+.su-statusbar.connecting .su-sync i { background: var(--pg-faint); animation: suBlink 1.2s ease-in-out infinite; }
+
+/* Offline notice: the one banner on this screen, and only when data may be wrong */
+.su-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem; padding: 0.85rem 1.1rem; border: 1px solid var(--pg-way-line); border-radius: 12px; background: var(--pg-way-soft); color: var(--pg-way-text); }
+.su-notice strong { font-weight: 650; }
+
+/* ---------- Team colour ---------- */
+/* --hue is set per team in OperatorPage (teamHue). Tints mix it into the card colour, so they work in both themes. */
+.su-hue { --hue-ink: var(--hue); --hue-tint: color-mix(in srgb, var(--hue) 10%, var(--pg-card)); --hue-line: color-mix(in srgb, var(--hue) 20%, var(--pg-card)); display: inline-flex; flex: none; }
+:root[data-theme="dark"] .su-hue { --hue-ink: color-mix(in srgb, var(--hue) 55%, #fff); --hue-tint: color-mix(in srgb, var(--hue) 22%, var(--pg-card)); --hue-line: color-mix(in srgb, var(--hue) 36%, var(--pg-card)); }
+.su-hue .dept-icon { color: var(--hue-ink); background: var(--hue-tint); box-shadow: inset 0 0 0 1px var(--hue-line); }
+
+
+@keyframes suPulse { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); } 70%, 100% { box-shadow: 0 0 0 9px transparent; } }
+@keyframes suBlink { 50% { opacity: 0.35; } }
+
+/* ---------- Responsive ---------- */
+@media (max-height: 800px) {
+  .su-head { min-height: 82px; }
+  .su-head h1 { font-size: 2.25rem; }
+  .su-page { gap: 1rem; }
+}
+@media (max-width: 900px) {
+  .su-time { display: none; }
+  .su-head h1 { font-size: 1.875rem; }
+}
+@media (max-width: 640px) {
+  .su-head { min-height: 64px; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.75rem; }
+  .su-head h1 { font-size: 1.375rem; }
+  .su-title { justify-items: start; text-align: left; }
+  .su-head-left { display: none; }
+  .su-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .su-status { height: 32px; padding: 0 0.75rem 0 0.65rem; font-size: 0.875rem; }
+  .su-eyebrow { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .su-status i, .su-sync i { animation: none !important; }
+}
+.su-statusbar-side { margin-left: auto; display: inline-flex; align-items: center; gap: 1rem; }

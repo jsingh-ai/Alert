@@ -6,13 +6,16 @@ import { useAuth } from "../lib/auth";
 import type { Alert } from "../lib/types";
 import { alertTiming, clock } from "../lib/callStages";
 import type { AlertTiming } from "../lib/callStages";
-import { DepartmentIcon } from "../components/DepartmentBadge";
+import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState } from "../components/Suite";
+import type { Tone } from "../components/Suite";
+import { useKiosk } from "../lib/kiosk";
 import { CheckCircleIcon, SendIcon } from "../components/icons";
 import "../styles/queue.css";
 
 const QUICK_REPLIES = ["On my way", "5 minutes", "Need parts"];
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-const STALE_AFTER_MS = 30_000;
+/** Calls poll every 6s; the queue is called offline after several missed polls, never on one. */
+const OFFLINE_AFTER_MS = 30_000;
 
 type Tab = "waiting" | "responding";
 
@@ -35,6 +38,7 @@ function errorText(error: unknown, fallback: string) {
 
 export function QueuePage() {
   const { session } = useAuth();
+  const kiosk = useKiosk();
   const now = useNow();
   const departments = (session?.departments ?? []) as Array<{ id: string; name: string; color?: string }>;
   const [departmentId, setDepartmentId] = useState(departments.length === 1 ? departments[0].id : "");
@@ -60,7 +64,8 @@ export function QueuePage() {
   const waiting = items.filter(({ timing }) => timing.stage === "waiting");
   const responding = items.filter(({ timing }) => timing.stage !== "waiting");
   const late = waiting.filter(({ timing }) => timing.late).length;
-  const offline = !active.isLoading && (active.isError || (active.dataUpdatedAt > 0 && now - active.dataUpdatedAt > STALE_AFTER_MS));
+  const connection = connectionState(active, now, OFFLINE_AFTER_MS);
+  const offline = connection === "offline";
 
   // Calls that appear after the page loaded get a brief highlight (first-seen time per call).
   const firstSeen = useRef<Map<string, number> | null>(null);
@@ -83,34 +88,61 @@ export function QueuePage() {
   }, [waiting.length]);
 
   const department = departments.find((d) => d.id === departmentId);
+  // Same semantics as the other pages: keep the counts when offline, just without colour
+  const status: { tone: Tone; text: string } = connection === "connecting" || (offline && items.length === 0)
+    ? { tone: "neutral", text: offline ? "Status unknown" : "Checking…" }
+    : waiting.length
+      ? { tone: offline ? "neutral" : late ? "late" : "waiting", text: `${waiting.length} waiting` }
+      : responding.length
+        ? { tone: offline ? "neutral" : responding.every(({ timing }) => timing.stage === "onSite") ? "onSite" : "onTheWay", text: `${responding.length} responding` }
+        : { tone: "clear", text: "All clear" };
+  const nothingOpen = !active.isLoading && items.length === 0;
 
   return (
-    <div className="rq-page">
-      <header className="rq-head">
-        <div className="rq-title">
-          <h1>Response Queue</h1>
-          <span className={`rq-live ${offline ? "offline" : ""}`}><i />{offline ? "Offline" : departments.length > 1 ? "Live" : department?.name ?? "Live"}</span>
-        </div>
-        {(departments.length > 1 || groups.length > 1) && (
-          <div className="rq-filters">
-            {departments.length > 1 && (
-              <select aria-label="Department" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+    <div className={`su-page rq-page ${offline ? "stale" : ""}`}>
+      <SuiteHeader
+        eyebrow={[ "Response queue", group !== "all" ? group : "" ].filter(Boolean).join(" · ")}
+        title={department ? <span className="rq-head-team"><TeamIcon department={department} /><span>{department.name}</span></span> : "All departments"}
+        status={status}
+      >
+        {kiosk && <SuiteMenu label="Menu" />}
+      </SuiteHeader>
+
+      {(departments.length > 1 || groups.length > 1) && (
+        // Filters sit in a toolbar surface, never loose on the page
+        <div className="rq-toolbar">
+          {departments.length > 1 && (
+            <label>
+              <span>Department</span>
+              <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
                 <option value="">All departments</option>
                 {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
-            )}
-            {groups.length > 1 && (
-              <select aria-label="Machine group" value={group} onChange={(event) => setGroup(event.target.value)}>
+            </label>
+          )}
+          {groups.length > 1 && (
+            <label>
+              <span>Machines</span>
+              <select value={group} onChange={(event) => setGroup(event.target.value)}>
                 <option value="all">All machines</option>
                 {groups.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
-            )}
-          </div>
-        )}
-      </header>
+            </label>
+          )}
+        </div>
+      )}
 
-      {offline && <p className="rq-offline" role="status">Can't reach the server. Calls below may be out of date.</p>}
+      {offline && <OfflineNotice lastGood={active.dataUpdatedAt} />}
 
+      {nothingOpen ? (
+        // Nothing open: one quiet card, not two empty panels
+        <section className="rq-clear" aria-label="Queue">
+          <CheckCircleIcon />
+          <strong>All clear</strong>
+          <span>Nobody is waiting. New calls appear here the moment a machine calls.</span>
+        </section>
+      ) : (
+      <>
       <div className="rq-tabs" role="tablist" aria-label="Queue">
         <button type="button" role="tab" aria-selected={tab === "waiting"} className={tab === "waiting" ? "on" : ""} onClick={() => setTab("waiting")}>
           Needs a response {waiting.length > 0 && <em className={late ? "late" : ""}>{waiting.length}</em>}
@@ -122,9 +154,10 @@ export function QueuePage() {
 
       <div className="rq-board" data-tab={tab}>
         <section className="rq-column waiting" aria-label="Needs a response">
+          {/* The column title belongs to its panel */}
           <header className="rq-column-head">
             <h2><i className="rq-dot waiting" />Needs a response</h2>
-            <span>{waiting.length}{late ? ` · ${late} late` : ""}</span>
+            <span className="rq-count">{waiting.length}{late ? ` · ${late} late` : ""}</span>
           </header>
           {active.isLoading ? <p className="rq-empty">Loading…</p> : waiting.length === 0 ? (
             <p className="rq-empty"><CheckCircleIcon />Nobody is waiting. New calls appear here.</p>
@@ -138,7 +171,7 @@ export function QueuePage() {
         <section className="rq-column responding" aria-label="Responding">
           <header className="rq-column-head">
             <h2><i className="rq-dot onTheWay" />Responding</h2>
-            <span>{responding.length}</span>
+            <span className="rq-count">{responding.length}</span>
           </header>
           {active.isLoading ? <p className="rq-empty">Loading…</p> : responding.length === 0 ? (
             <p className="rq-empty">No one is out on a call.</p>
@@ -149,6 +182,10 @@ export function QueuePage() {
           )}
         </section>
       </div>
+      </>
+      )}
+
+      <SuiteStatusBar connection={connection} lastGood={active.dataUpdatedAt} />
     </div>
   );
 }
@@ -192,13 +229,14 @@ function QueueCard({ alert, timing, isNew, me, showDepartment }: { alert: Alert;
   return (
     <article className={`rq-card ${timing.stage} ${timing.late ? "late" : ""} ${isNew ? "is-new" : ""}`}>
       <header className="rq-card-head">
-        <DepartmentIcon department={alert.department} size="md" variant="plain" />
+        <TeamIcon department={alert.department} />
         <div className="rq-card-title">
           <strong>{alert.machine.name}</strong>
           <small>{[showDepartment ? alert.department.name : alert.machine.group, alert.issueType?.name ?? alert.commandLabel].filter(Boolean).join(" · ")}</small>
         </div>
         <div className="rq-card-clock">
           {timing.late && <em className="rq-late">Late</em>}
+          {/* the clock counts the current stage: waiting time, then time since they set off / arrived */}
           <strong>{clock(timing.stage === "waiting" ? timing.waitSeconds : timing.stageSeconds)}</strong>
         </div>
       </header>

@@ -21,7 +21,7 @@ import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { adminRoutes } from "./routes/adminRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = Fastify({ logger: true, bodyLimit: 1_000_000 });
+const app = Fastify({ logger: true, bodyLimit: 1_000_000, trustProxy: config.trustProxy });
 
 function isAllowedOrigin(origin: string) {
   if (!config.isProduction && config.corsOrigins.includes("*")) return true;

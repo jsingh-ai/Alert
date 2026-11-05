@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement, ReactNode, SVGProps } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Alert, NavItem } from "../lib/types";
@@ -17,6 +17,7 @@ import {
   SunIcon
 } from "./icons";
 import { useApplyTheme, useTheme } from "../lib/theme";
+import { isKiosk, visibleNav } from "../lib/kiosk";
 import "../styles/ui.css";
 import "../styles/shell.css";
 
@@ -30,9 +31,6 @@ const NAV_META: Record<string, { label: string; icon: Icon; section: "live" | "i
   reports: { label: "Reports", icon: ChartIcon, section: "insights" },
   admin: { label: "Settings", icon: SettingsIcon, section: "utility" }
 };
-
-/** Pages hidden from the sidebar for now (their routes still work). */
-const HIDDEN_NAV = new Set(["channels"]);
 
 const SECTION_ORDER: Record<string, string[]> = {
   live: ["floor", "queue", "operator"],
@@ -68,8 +66,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("pg_sidebar_collapsed") === "true");
   const { theme, toggle: toggleTheme } = useTheme();
   useApplyTheme();
-  const location = useLocation();
-  const nav = (session?.nav ?? []).filter((item) => !HIDDEN_NAV.has(item.id));
+  const nav = visibleNav(session);
   const hasQueue = nav.some((item) => item.id === "queue");
 
   const waitingQuery = useQuery({
@@ -83,9 +80,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   if (!session) return null;
 
-  // Operator accounts on Machine Station get a full-screen kiosk: no sidebar (one page,
-  // and no one-tap sign-out). Theme and sign-out live in the station's own menu.
-  const kiosk = session.membership.role === "OPERATOR" && location.pathname.startsWith("/operator");
+  // One-page users (operators, responders) get their page full screen with no sidebar; theme and
+  // sign-out live in the page's own menu. Managers and admins keep the sidebar.
+  const kiosk = isKiosk(session);
 
   const waiting = (waitingQuery.data?.data ?? []).filter((alert) => alert.status === "OPEN").length;
   const badges: Record<string, number> = { queue: waiting };
