@@ -10,6 +10,7 @@ import freshpakLogo from "../assets/logos/freshpak.svg";
 import anduroLogo from "../assets/logos/anduro.svg";
 import superbagLogo from "../assets/logos/superbag.svg";
 import fiveStarCanadaLogo from "../assets/logos/five-star-canada.svg";
+import fiveStarLogo from "../assets/logos/five-star-logo.svg";
 
 const SIBLING_LOGOS = [
   { name: "Polytex", src: polytexLogo },
@@ -72,6 +73,11 @@ export function LoginPage() {
   const [showDepartments, setShowDepartments] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">(readStoredTheme);
+  const [selectedSibling, setSelectedSibling] = useState("");
+
+  function toggleSibling(name: string) {
+    setSelectedSibling((current) => (current === name ? "" : name));
+  }
 
   function toggleTheme() {
     const next = theme === "light" ? "dark" : "light";
@@ -134,22 +140,34 @@ export function LoginPage() {
               </li>
             ))}
           </ol>
-          <div className="login-logo-strip">
+          <div className={`login-logo-strip ${selectedSibling ? "has-selection" : ""}`}>
             <span>Part of the Five Star family of companies</span>
             <div className="login-logo-window">
-              <div className="login-logo-track">
+              <div className={`login-logo-track ${selectedSibling ? "paused" : ""}`}>
                 <div className="login-logo-group">
                   {SIBLING_LOGOS.map((logo) => (
-                    <div className="login-logo-tile" key={logo.name}>
+                    <button
+                      type="button"
+                      className={`login-logo-tile ${selectedSibling === logo.name ? "selected" : ""}`}
+                      key={logo.name}
+                      onClick={() => toggleSibling(logo.name)}
+                      aria-pressed={selectedSibling === logo.name}
+                    >
                       <img src={logo.src} alt={logo.name} />
-                    </div>
+                    </button>
                   ))}
                 </div>
                 <div className="login-logo-group" aria-hidden="true">
                   {SIBLING_LOGOS.map((logo) => (
-                    <div className="login-logo-tile" key={`${logo.name}-dup`}>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className={`login-logo-tile ${selectedSibling === logo.name ? "selected" : ""}`}
+                      key={`${logo.name}-dup`}
+                      onClick={() => toggleSibling(logo.name)}
+                    >
                       <img src={logo.src} alt="" />
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -157,15 +175,18 @@ export function LoginPage() {
           </div>
         </section>
         <section className="login-form-panel">
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={toggleTheme}
-            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-            title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-          >
-            {theme === "light" ? <MoonIcon /> : <SunIcon />}
-          </button>
+          <div className="login-topbar">
+            <img className="login-topbar-logo" src={fiveStarLogo} alt="Five Star" />
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={toggleTheme}
+              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+              title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            >
+              {theme === "light" ? <MoonIcon /> : <SunIcon />}
+            </button>
+          </div>
           <div className="login-card">
             <div className="demo-panel">
               <div className="demo-panel-header">
