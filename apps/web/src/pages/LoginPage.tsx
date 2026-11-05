@@ -235,14 +235,14 @@ export function LoginPage() {
               <label>
                 Username
                 <span className="input-icon-field">
-                  <UserIcon />
+                  <span className="input-icon-chip"><UserIcon /></span>
                   <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" autoComplete="username" />
                 </span>
               </label>
               <label>
                 Password
                 <span className="input-icon-field">
-                  <LockIcon />
+                  <span className="input-icon-chip"><LockIcon /></span>
                   <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoComplete="current-password" />
                 </span>
               </label>
