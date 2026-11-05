@@ -1,0 +1,134 @@
+/*
+ * Shared design tokens and small components for the redesigned pages.
+ * Matches the login page: navy brand, soft off-white canvas, white cards, one blue accent.
+ * Stage colours follow the andon convention: red waiting, amber on the way, blue on site, green closed.
+ */
+:root {
+  --pg-navy-1: #070b1a;
+  --pg-navy-2: #111833;
+  --pg-navy-3: #232d5c;
+  --pg-canvas: #f3f5fa;
+  --pg-card: #ffffff;
+  --pg-line: #e2e7f0;
+  --pg-line-2: #cfd7e4;
+  --pg-text: #0f172a;
+  --pg-text-2: #334155;
+  --pg-muted: #64748b;
+  --pg-faint: #94a3b8;
+  --pg-accent: #2563eb;
+  --pg-accent-soft: rgba(37, 99, 235, 0.1);
+  --pg-ring: rgba(37, 99, 235, 0.22);
+
+  --pg-wait: #dc2626;
+  --pg-wait-text: #b91c1c;
+  --pg-wait-soft: #fef2f2;
+  --pg-wait-line: #fecaca;
+  --pg-way: #f59e0b;
+  --pg-way-text: #b45309;
+  --pg-way-soft: #fffbeb;
+  --pg-way-line: #fde68a;
+  --pg-site: #2563eb;
+  --pg-site-text: #1d4ed8;
+  --pg-site-soft: #eff6ff;
+  --pg-site-line: #bfdbfe;
+  --pg-done: #16a34a;
+  --pg-done-soft: #f0fdf4;
+
+  /* Same brand background as the login page (login.css --lp-dark-bg); never changes with theme */
+  --pg-brand-bg:
+    radial-gradient(720px 480px at 85% 0%, rgba(110, 128, 255, 0.24) 0%, transparent 62%),
+    radial-gradient(600px 480px at 0% 100%, rgba(64, 98, 190, 0.22) 0%, transparent 62%),
+    linear-gradient(135deg, #070b1a 0%, #111833 50%, #232d5c 100%);
+  --pg-radius: 16px;
+  --pg-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+  --pg-track: #eef1f6;
+  --pg-hover: #f6f8fc;
+  --pg-selected: #f5f8ff;
+  --pg-input: #f8fafc;
+  color-scheme: light;
+}
+
+/* Dark mode for the redesigned pages (toggle in the sidebar) */
+:root[data-theme="dark"] {
+  --pg-canvas: #0b1020;
+  --pg-card: #121a30;
+  --pg-line: #222c48;
+  --pg-line-2: #2e3a5c;
+  --pg-text: #e8ecf8;
+  --pg-text-2: #c3cae0;
+  --pg-muted: #8f9abd;
+  --pg-faint: #66729a;
+  --pg-accent: #5b8cff;
+  --pg-accent-soft: rgba(91, 140, 255, 0.16);
+  --pg-ring: rgba(91, 140, 255, 0.32);
+
+  --pg-wait: #ef4444;
+  --pg-wait-text: #fca5a5;
+  --pg-wait-soft: rgba(239, 68, 68, 0.12);
+  --pg-wait-line: rgba(239, 68, 68, 0.4);
+  --pg-way: #f59e0b;
+  --pg-way-text: #fcd34d;
+  --pg-way-soft: rgba(245, 158, 11, 0.12);
+  --pg-way-line: rgba(245, 158, 11, 0.4);
+  --pg-site: #5b8cff;
+  --pg-site-text: #a5c0ff;
+  --pg-site-soft: rgba(91, 140, 255, 0.14);
+  --pg-site-line: rgba(91, 140, 255, 0.4);
+  --pg-done: #22c55e;
+  --pg-done-soft: rgba(34, 197, 94, 0.12);
+
+  --pg-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+  --pg-track: #1c2540;
+  --pg-hover: #172039;
+  --pg-selected: #18223f;
+  --pg-input: #0e1528;
+  color-scheme: dark;
+}
+
+/* ---------- Department identity ---------- */
+.dept-icon {
+  --dept: #475569;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--dept);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+.dept-icon svg { width: 15px; height: 15px; stroke-width: 2.1; }
+.dept-icon-sm { width: 20px; height: 20px; border-radius: 6px; }
+.dept-icon-sm svg { width: 12px; height: 12px; }
+.dept-icon-lg { width: 44px; height: 44px; border-radius: 12px; }
+.dept-icon-lg svg { width: 24px; height: 24px; }
+/* Neutral version for dense, calm views: identity by glyph only */
+.dept-icon-plain { color: var(--pg-text-2); background: var(--pg-track); box-shadow: inset 0 0 0 1px var(--pg-line); }
+.dept-icon-letter { font-size: 0.78em; font-weight: 700; line-height: 1; }
+.dept-icon-sm .dept-icon-letter { font-size: 11px; }
+.dept-icon-md .dept-icon-letter { font-size: 13px; }
+.dept-icon-lg .dept-icon-letter { font-size: 19px; }
+.dept-badge { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.dept-badge-name { font-size: 0.88rem; font-weight: 600; color: var(--pg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dept-stack { display: inline-flex; align-items: center; gap: 3px; }
+.dept-stack-more { font-size: 11px; font-weight: 600; color: var(--pg-muted); padding-left: 2px; }
+
+/* ---------- Stage text colours ---------- */
+.pg-t-waiting { color: var(--pg-wait-text); }
+.pg-t-onTheWay { color: var(--pg-way-text); }
+.pg-t-onSite { color: var(--pg-site-text); }
+
+.pg-late {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid var(--pg-wait-line);
+  background: var(--pg-wait-soft);
+  color: var(--pg-wait-text);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+

@@ -11,7 +11,11 @@ export function setToken(token: string | null) {
   else localStorage.removeItem("pg_token");
 }
 
-export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+/**
+ * `quiet: true` skips the global error toast, for background polling on screens that
+ * already show their own connection state (e.g. Machine Station's offline band).
+ */
+export async function api<T = any>(path: string, options: RequestInit = {}, { quiet = false }: { quiet?: boolean } = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
@@ -22,14 +26,14 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   try {
     response = await fetch(path, { ...options, headers });
   } catch (error) {
-    notifyAppError("Network request failed.");
+    if (!quiet) notifyAppError("Network request failed.");
     throw error;
   }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.success === false) {
     const message = payload.error || `Request failed: ${response.status}`;
-    if (path.startsWith("/api/admin/") || ![400, 401, 403].includes(response.status)) {
+    if (!quiet && (path.startsWith("/api/admin/") || ![400, 401, 403].includes(response.status))) {
       notifyAppError(message);
     }
     throw new Error(message);
