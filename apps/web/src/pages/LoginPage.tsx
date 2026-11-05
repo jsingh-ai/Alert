@@ -26,6 +26,7 @@ import anduroLogo from "../assets/logos/anduro.svg";
 import superbagLogo from "../assets/logos/superbag.svg";
 import fiveStarCanadaLogo from "../assets/logos/five-star-canada.svg";
 import fiveStarLogo from "../assets/logos/five-star-logo.svg";
+import fiveStarLogoWhite from "../assets/logos/five-star-logo-white.svg";
 import "../styles/login.css";
 
 type Icon = (props: SVGProps<SVGSVGElement>) => ReactElement;
@@ -138,18 +139,21 @@ export function LoginPage() {
         <section className="login-brand-panel" aria-label="About ProcessGuard">
           <div className="login-orbit" aria-hidden="true" />
 
-          <div className="login-lockup">
-            <div className="login-mark" aria-hidden="true">PG</div>
-            <div className="login-lockup-text">
-              <strong>ProcessGuard</strong>
-              <span>Workflow</span>
+          <header className="login-topbar">
+            <div className="login-lockup">
+              <div className="login-mark" aria-hidden="true">PG</div>
+              <div className="login-lockup-text">
+                <strong>ProcessGuard</strong>
+                <span>Workflow</span>
+              </div>
             </div>
-          </div>
+            {/* Phone/tablet only: on desktop the Five Star logo lives in the card header */}
+            <img className="login-topbar-logo" src={fiveStarLogoWhite} alt="Five Star Family of Companies" />
+          </header>
 
           <div className="login-hero">
             <p className="login-eyebrow">Live floor visibility</p>
-            <h1>From call for help to close{"‑"}out, in real time.</h1>
-            <p className="login-hero-sub">One workflow for operators, responders and managers across every line.</p>
+            <h1>From call to close{"‑"}out, in real time.</h1>
           </div>
 
           <ol className="login-workflow">
@@ -193,7 +197,7 @@ export function LoginPage() {
             <header className="login-card-header">
               <img className="login-card-logo" src={fiveStarLogo} alt="Five Star Family of Companies" />
               <h2>{choosingWorkspace ? "Choose a workspace" : "Sign in"}</h2>
-              <p>{choosingWorkspace ? "Your account has access to more than one company." : "Welcome back. Sign in to continue to ProcessGuard."}</p>
+              <p>{choosingWorkspace ? "Your account has access to several companies." : "Welcome back to ProcessGuard."}</p>
             </header>
 
             {error && <div className="login-error" role="alert">{error}</div>}
@@ -307,7 +311,7 @@ export function LoginPage() {
               </div>
             )}
 
-            <footer className="login-card-footer">Need access? Contact your plant administrator.</footer>
+            <footer className="login-card-footer">Need access? Contact your administrator.</footer>
           </div>
           <p className="login-legal">© {new Date().getFullYear()} Five Star Family of Companies</p>
         </section>
