@@ -1,203 +1,169 @@
-import { useEffect, useMemo, useState } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { ReactElement, ReactNode, SVGProps } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { NavItem } from "../lib/types";
+import type { Alert, NavItem } from "../lib/types";
+import {
+  BellRingIcon,
+  ChartIcon,
+  ChevronLeftIcon,
+  GridIcon,
+  MoonIcon,
+  SettingsIcon,
+  SignOutIcon,
+  StationIcon,
+  SunIcon
+} from "./icons";
+import { useTheme } from "../lib/theme";
+import "../styles/ui.css";
+import "../styles/shell.css";
 
-const MIN_SIDEBAR_WIDTH = 210;
-const MAX_SIDEBAR_WIDTH = 420;
-const DEFAULT_SIDEBAR_WIDTH = 260;
+type Icon = (props: SVGProps<SVGSVGElement>) => ReactElement;
 
-function clampSidebarWidth(value: number) {
-  if (!Number.isFinite(value)) return DEFAULT_SIDEBAR_WIDTH;
-  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, value));
+/** Frontend names for each page; the API's nav ids stay the same. */
+const NAV_META: Record<string, { label: string; icon: Icon; section: "live" | "insights" | "utility" }> = {
+  floor: { label: "Floor Status", icon: GridIcon, section: "live" },
+  queue: { label: "Response Queue", icon: BellRingIcon, section: "live" },
+  operator: { label: "Machine Station", icon: StationIcon, section: "live" },
+  reports: { label: "Reports", icon: ChartIcon, section: "insights" },
+  admin: { label: "Settings", icon: SettingsIcon, section: "utility" }
+};
+
+/** Pages hidden from the sidebar for now (their routes still work). */
+const HIDDEN_NAV = new Set(["channels"]);
+
+const SECTION_ORDER: Record<string, string[]> = {
+  live: ["floor", "queue", "operator"],
+  insights: ["reports"],
+  utility: ["admin"]
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  ADMIN: "Administrator",
+  MANAGER: "Manager",
+  OPERATOR: "Operator",
+  RESPONDER: "Responder",
+  VIEWER: "Viewer"
+};
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
 }
 
-function readSidebarWidth() {
-  return clampSidebarWidth(Number(localStorage.getItem("pg_sidebar_width") ?? DEFAULT_SIDEBAR_WIDTH));
-}
-
-function readSidebarOrder() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem("pg_sidebar_order") || "[]");
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function orderedNav(items: NavItem[], order: string[]) {
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const ordered = order.map((id) => byId.get(id)).filter(Boolean) as NavItem[];
-  const missing = items.filter((item) => !order.includes(item.id));
-  const nav = [...ordered, ...missing];
-  const operatorIndex = nav.findIndex((item) => item.id === "operator");
-  const queueIndex = nav.findIndex((item) => item.id === "queue");
-  if (operatorIndex >= 0 && queueIndex >= 0 && queueIndex < operatorIndex) {
-    const [operator] = nav.splice(operatorIndex, 1);
-    nav.splice(queueIndex, 0, operator);
-  }
-  return nav;
-}
-
-function navIconContent(item: NavItem): ReactNode {
-  switch (item.id) {
-    case "operator":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M5 6.75A2.75 2.75 0 0 1 7.75 4h8.5A2.75 2.75 0 0 1 19 6.75v10.5A2.75 2.75 0 0 1 16.25 20h-8.5A2.75 2.75 0 0 1 5 17.25V6.75Z" />
-          <path d="M8 8h8" />
-          <path d="M8.5 12h2.25M13.25 12h2.25M8.5 15.75h2.25M13.25 15.75h2.25" />
-        </svg>
-      );
-    case "queue":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M5 5.75A2.75 2.75 0 0 1 7.75 3h8.5A2.75 2.75 0 0 1 19 5.75v12.5A2.75 2.75 0 0 1 16.25 21h-8.5A2.75 2.75 0 0 1 5 18.25V5.75Z" />
-          <path d="M8.25 8h7.5M8.25 12h7.5M8.25 16h4.5" />
-        </svg>
-      );
-    case "channels":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M4.5 6.25A3.25 3.25 0 0 1 7.75 3h8.5a3.25 3.25 0 0 1 3.25 3.25v5.5A3.25 3.25 0 0 1 16.25 15H12l-4.2 3.15A1.05 1.05 0 0 1 6.1 17.3V15A3.25 3.25 0 0 1 3.5 11.75v-5.5Z" />
-          <path d="M8 8h8M8 11h5.8" />
-        </svg>
-      );
-    case "floor":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h5v6h-6.5V5.5Z" />
-          <path d="M13.5 4h5A1.5 1.5 0 0 1 20 5.5V10h-6.5V4Z" />
-          <path d="M4 14h6.5v6h-5A1.5 1.5 0 0 1 4 18.5V14Z" />
-          <path d="M13.5 14H20v4.5a1.5 1.5 0 0 1-1.5 1.5h-5v-6Z" />
-        </svg>
-      );
-    case "reports":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M5 19V5" />
-          <path d="M5 19h14" />
-          <path d="M8.5 16v-4" />
-          <path d="M12 16V8" />
-          <path d="M15.5 16v-6" />
-          <path d="M8 7.5h8" />
-        </svg>
-      );
-    case "admin":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M12 3.75v2.1M12 18.15v2.1M5.63 5.63l1.48 1.48M16.89 16.89l1.48 1.48M3.75 12h2.1M18.15 12h2.1M5.63 18.37l1.48-1.48M16.89 7.11l1.48-1.48" />
-        </svg>
-      );
-    default:
-      if (item.icon === "text") {
-        return (
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M4.5 6.25A3.25 3.25 0 0 1 7.75 3h8.5a3.25 3.25 0 0 1 3.25 3.25v5.5A3.25 3.25 0 0 1 16.25 15H12l-4.2 3.15A1.05 1.05 0 0 1 6.1 17.3V15A3.25 3.25 0 0 1 3.5 11.75v-5.5Z" />
-            <path d="M8 8h8M8 11h5.8" />
-          </svg>
-        );
-      }
-      return item.icon.slice(0, 1).toUpperCase();
-  }
+function sectionItems(nav: NavItem[], section: "live" | "insights" | "utility") {
+  const order = SECTION_ORDER[section];
+  const items = nav.filter((item) => (NAV_META[item.id]?.section ?? "live") === section);
+  return items.sort((a, b) => {
+    const ai = order.indexOf(a.id);
+    const bi = order.indexOf(b.id);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
 }
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { session, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("pg_sidebar_collapsed") === "true");
-  const [width, setWidth] = useState(readSidebarWidth);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [order, setOrder] = useState<string[]>(readSidebarOrder);
-  const nav = useMemo(() => orderedNav(session?.nav ?? [], order), [session?.nav, order]);
-  const communicationItem = nav.find((item) => item.id === "channels");
-  const mainNav = nav.filter((item) => item.id !== "channels");
-  const channelsQuery = useQuery({
-    queryKey: ["channels"],
-    queryFn: () => api<any>("/api/channels"),
-    enabled: Boolean(communicationItem),
-    refetchInterval: 30000
+  const { theme, toggle: toggleTheme } = useTheme();
+  const nav = (session?.nav ?? []).filter((item) => !HIDDEN_NAV.has(item.id));
+  const hasQueue = nav.some((item) => item.id === "queue");
+
+  const waitingQuery = useQuery({
+    queryKey: ["active-alerts", "nav-count"],
+    queryFn: () => api<{ data?: Alert[] }>("/api/alerts/active"),
+    enabled: hasQueue,
+    refetchInterval: 15000
   });
-  const communicationUnread = ((channelsQuery.data?.data ?? []) as any[]).reduce(
-    (total, channel) => total + Math.max(0, Number(channel.membership?.unreadCount ?? 0)),
-    0
-  );
 
   useEffect(() => localStorage.setItem("pg_sidebar_collapsed", String(collapsed)), [collapsed]);
-  useEffect(() => localStorage.setItem("pg_sidebar_width", String(width)), [width]);
-  useEffect(() => localStorage.setItem("pg_sidebar_order", JSON.stringify(order)), [order]);
 
   if (!session) return null;
-  const companyLabel = session.company.name === "Five Star Demo" ? "Five Star Workflow" : session.company.name;
 
-  const startResize = (event: ReactMouseEvent) => {
-    const startX = event.clientX;
-    const startWidth = width;
-    const onMove = (move: globalThis.MouseEvent) => setWidth(clampSidebarWidth(startWidth + move.clientX - startX));
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+  const waiting = (waitingQuery.data?.data ?? []).filter((alert) => alert.status === "OPEN").length;
+  const badges: Record<string, number> = { queue: waiting };
+  const companyLabel = session.company.name === "Five Star Demo" ? "Five Star" : session.company.name;
+
+  const renderItem = (item: NavItem) => {
+    const meta = NAV_META[item.id];
+    const Glyph = meta?.icon ?? GridIcon;
+    const label = meta?.label ?? item.label;
+    const count = badges[item.id] ?? 0;
+    return (
+      <NavLink key={item.id} to={item.path} className={({ isActive }) => `pg-nav-item ${isActive ? "active" : ""}`} title={collapsed ? label : undefined}>
+        <Glyph className="pg-nav-icon" />
+        <span className="pg-nav-label">{label}</span>
+        {count > 0 && <em className="pg-nav-badge" aria-label={`${count} new`}>{count > 99 ? "99+" : count}</em>}
+      </NavLink>
+    );
   };
 
-  const dropOn = (targetId: string) => {
-    if (!dragging || dragging === targetId) return;
-    const current = nav.map((item) => item.id);
-    const from = current.indexOf(dragging);
-    const to = current.indexOf(targetId);
-    current.splice(from, 1);
-    current.splice(to, 0, dragging);
-    setOrder(current);
-  };
+  const live = sectionItems(nav, "live");
+  const insights = sectionItems(nav, "insights");
+  const utility = sectionItems(nav, "utility");
 
   return (
-    <div className="app-shell" style={{ gridTemplateColumns: collapsed ? "72px 1fr" : `${width}px 1fr` }}>
-      <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
-        <div className="brand-row">
-          <div className="brand-mark">PG</div>
-          {!collapsed && <div><strong>ProcessGuard</strong><span>{companyLabel}</span></div>}
+    <div className={`pg-shell ${collapsed ? "collapsed" : ""}`}>
+      <aside className="pg-sidebar">
+        <div className="pg-sidebar-top">
+          <div className="pg-lockup">
+            <div className="pg-mark" aria-hidden="true">PG</div>
+            <div className="pg-lockup-text">
+              <strong>ProcessGuard</strong>
+              <span>Workflow</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="pg-collapse"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand" : "Collapse"}
+          >
+            <ChevronLeftIcon />
+          </button>
         </div>
-        <button className="sidebar-toggle" onClick={() => setCollapsed((value) => !value)}>{collapsed ? ">" : "Collapse"}</button>
-        <nav className="side-nav">
-          {mainNav.map((item) => (
-            <NavLink
-              key={item.id}
-              to={item.path}
-              draggable={!collapsed}
-              onDragStart={() => setDragging(item.id)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => dropOn(item.id)}
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              title={item.label}
-            >
-              <span className="nav-icon">{navIconContent(item)}</span>
-              {!collapsed && <span>{item.label}</span>}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          {!collapsed && <div className="user-mini"><strong>{session.user.displayName}</strong><span>{session.membership.role}</span></div>}
-          {communicationItem && (
-            <NavLink
-              to={communicationItem.path}
-              className={({ isActive }) => `nav-item footer-nav-item ${isActive ? "active" : ""}`}
-              title={communicationItem.label}
-            >
-              <span className="nav-icon">{navIconContent(communicationItem)}</span>
-              {!collapsed && <span>{communicationItem.label}</span>}
-              {communicationUnread > 0 && <em className="nav-badge">{communicationUnread > 99 ? "99+" : communicationUnread}</em>}
-            </NavLink>
+
+        <nav className="pg-nav" aria-label="Main">
+          {live.length > 0 && (
+            <div className="pg-nav-section">
+              <span className="pg-nav-heading">Live</span>
+              {live.map(renderItem)}
+            </div>
           )}
-          <button className="ghost signout-button" onClick={logout}>{collapsed ? "X" : "Sign out"}</button>
+          {insights.length > 0 && (
+            <div className="pg-nav-section">
+              <span className="pg-nav-heading">Insights</span>
+              {insights.map(renderItem)}
+            </div>
+          )}
+          {utility.length > 0 && <div className="pg-nav-section pg-nav-utility">{utility.map(renderItem)}</div>}
+        </nav>
+
+        <div className="pg-user">
+          <div className="pg-avatar" aria-hidden="true">{initials(session.user.displayName)}</div>
+          <div className="pg-user-text">
+            <strong>{session.user.displayName}</strong>
+            <span title={companyLabel}>{ROLE_LABEL[session.membership.role] ?? session.membership.role}</span>
+          </div>
+          <div className="pg-user-actions">
+            <button
+              type="button"
+              className="pg-icon-button"
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+            >
+              {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+            </button>
+            <button type="button" className="pg-icon-button pg-signout" onClick={logout} aria-label="Sign out" title="Sign out">
+              <SignOutIcon />
+            </button>
+          </div>
         </div>
-        {!collapsed && <div className="resize-handle" onMouseDown={startResize} />}
       </aside>
-      <main className="main-panel">{children}</main>
+      <main className="main-panel pg-main">{children}</main>
     </div>
   );
 }

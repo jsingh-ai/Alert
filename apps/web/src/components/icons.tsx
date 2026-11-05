@@ -168,6 +168,83 @@ export function ChevronRightIcon(props: IconProps) {
   );
 }
 
+export function BoxIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M3.5 7.5 12 3.2l8.5 4.3v9L12 20.8l-8.5-4.3v-9Z" />
+      <path d="M3.5 7.5 12 11.8l8.5-4.3M12 11.8v9" />
+    </svg>
+  );
+}
+
+export function StationIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <rect x="3.5" y="4" width="17" height="12" rx="2.2" />
+      <path d="M9 20h6M12 16v4" />
+    </svg>
+  );
+}
+
+export function ChartIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M4.5 19.5V4.5M4.5 19.5h15" />
+      <path d="M8.5 16v-4.5M12.5 16V8M16.5 16v-6" />
+    </svg>
+  );
+}
+
+export function MessageIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M4.5 6.2A3.2 3.2 0 0 1 7.7 3h8.6a3.2 3.2 0 0 1 3.2 3.2v5.6a3.2 3.2 0 0 1-3.2 3.2H12l-4.5 3.5V15a3.2 3.2 0 0 1-3-3.2V6.2Z" />
+    </svg>
+  );
+}
+
+export function SettingsIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3.5v2.2M12 18.3v2.2M5.99 5.99l1.55 1.55M16.46 16.46l1.55 1.55M3.5 12h2.2M18.3 12h2.2M5.99 18.01l1.55-1.55M16.46 7.54l1.55-1.55" />
+    </svg>
+  );
+}
+
+export function SignOutIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M14 4.5h3.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H14" />
+      <path d="M10 8l-4 4 4 4M6 12h9" />
+    </svg>
+  );
+}
+
+export function ChevronLeftIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="m15 6-6 6 6 6" />
+    </svg>
+  );
+}
+
+export function CloseIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="m6 6 12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+export function SendIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M4 12 20 4l-6 16-3-7-7-1Z" />
+    </svg>
+  );
+}
+
 export function WrenchIcon(props: IconProps) {
   return (
     <svg {...base(props)} aria-hidden="true" focusable="false">
