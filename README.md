@@ -565,7 +565,7 @@ Before using this on a real plant network:
 3. Set `DEMO_MODE=false`.
 4. Review Quick Login in Admin Setup -> Settings and disable any role buttons you do not want.
 5. Generate real pager tokens and remove demo tokens if desired.
-6. Use HTTPS or keep the app on a protected local network/VPN.
+6. Use HTTPS or keep the app on a protected local network/VPN. HTTPS is also what lets people install ProcessGuard as an app: see [docs/app-rollout.md](docs/app-rollout.md).
 7. Rotate any Wi-Fi passwords or bearer tokens that were previously pasted into shared code.
 8. Back up PostgreSQL.
 9. Run the app as a scheduled task or service account.
