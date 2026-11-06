@@ -105,17 +105,6 @@
 .rq-latest strong { flex: none; font-weight: 600; }
 .rq-latest span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* A call someone else took (or that was cancelled): says so, then folds away */
-.rq-card.leaving { --rail: var(--pg-way); animation: rqLeave 1.8s ease forwards; }
-.rq-card.leaving.cancelled { --rail: var(--pg-faint); }
-.rq-card.leaving.mine .rq-leaving-note { background: var(--pg-done-soft); color: var(--pg-text); }
-.rq-card.leaving.mine .rq-leaving-note svg { color: var(--pg-done); }
-.rq-card.leaving .rq-card-head { opacity: 0.7; }
-.rq-leaving-note { display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 54px; border-radius: 12px; background: var(--pg-way-soft); color: var(--pg-way-text); font-size: 1.0625rem; font-weight: 600; animation: rqUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.rq-card.leaving.cancelled .rq-leaving-note { background: var(--pg-track); color: var(--pg-muted); }
-.rq-leaving-note svg { width: 20px; height: 20px; }
-@keyframes rqUp { from { opacity: 0; transform: translateY(6px); } }
-@keyframes rqLeave { 0%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; transform: scale(0.97); } }
 
 /* One next step per call: dark primary, the same as Machine Station */
 .rq-page .rq-btn { position: relative; overflow: hidden; width: 100%; min-height: 54px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 12px; font-size: 1.0625rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
@@ -157,7 +146,12 @@
 .rq-teamcall-main { display: grid; gap: 0.1rem; min-width: 0; }
 .rq-teamcall-main strong { font-size: 1rem; font-weight: 650; }
 .rq-teamcall-main small { color: var(--pg-muted); font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rq-teamcall-clock { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rq-teamcall { --rail: var(--pg-way); }
+.rq-teamcall-time { display: grid; justify-items: end; gap: 0.1rem; }
+.rq-teamcall-time strong { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.rq-teamcall-time small { color: var(--pg-muted); font-size: 0.8125rem; white-space: nowrap; }
+/* Just accepted by a teammate: it slides in here (it has already left Needs a response) */
+.rq-teamcall.is-moved { animation: rqSlide 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.6s 0.15s ease-out; }
 .rq-page .rq-help { grid-column: 1 / -1; justify-self: start; min-height: 36px; padding: 0 0.9rem; border: 1px solid var(--pg-line-2); border-radius: 999px; background: var(--pg-card); color: var(--pg-text); font-size: 0.875rem; font-weight: 600; cursor: pointer; }
 .rq-page .rq-help:hover:not(:disabled) { background: var(--pg-hover); }
 .rq-page .rq-help:disabled { opacity: 0.6; cursor: progress; }
@@ -194,10 +188,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rq-card.is-new, .rq-my.is-moved, .rq-card.is-new::before, .rq-my.is-moved::before, .rq-my.is-moved .rq-my-status .rq-dot, .rq-leaving-note { animation: none; }
-  /* still leaves, just without moving */
-  .rq-card.leaving { animation: rqFadeOnly 1.8s ease forwards; }
-  @keyframes rqFadeOnly { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+  .rq-card.is-new, .rq-my.is-moved, .rq-card.is-new::before, .rq-my.is-moved::before, .rq-my.is-moved .rq-my-status .rq-dot, .rq-teamcall.is-moved { animation: none; }
   .rq-btn.sending .rq-sweep { animation: none; transform: scaleX(0.6); }
   .rq-page .rq-btn:active:not(:disabled) { transform: none; }
 }

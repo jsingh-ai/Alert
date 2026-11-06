@@ -23,8 +23,8 @@ import "../styles/queue.css";
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 /** Calls poll every 6s; the queue is called offline after several missed polls, never on one. */
 const OFFLINE_AFTER_MS = 30_000;
-/** A call that leaves the waiting list says why for this long before it goes. */
-const LEAVE_MS = 1800;
+/** How long a call that left the waiting list stays in the screen-reader announcement. */
+const LEAVE_MS = 4000;
 /** Polls further apart than this (a pocketed phone, an outage, a cached list) are a fresh start, not a diff. */
 const GAP_MS = 15_000;
 /** "Help out" is a message with this id, so it is sent once per person and the server can list who is helping. */
@@ -123,8 +123,8 @@ export function QueuePage() {
   const offline = connection === "offline";
 
   // What changed since the last poll, worked out while rendering so animations start on the same frame:
-  //   new waiting calls drop in; a call that becomes mine slides into Your calls;
-  //   a waiting call that was taken or cancelled says so before it goes.
+  //   new waiting calls drop in; a call that's just been accepted slides into Your calls or Team on calls
+  //   (it leaves Needs a response at once: that list only ever holds calls nobody has taken).
   // Only consecutive polls are compared. After a gap (a different department, a pocketed phone, an outage)
   // the list is a fresh start, so nothing is wrongly shown as cancelled or new.
   const tracked = useRef<Tracked | null>(null);
@@ -161,18 +161,7 @@ export function QueuePage() {
   const t = tracked.current;
   const fresh = (id: string) => now - (t?.firstSeen.get(id) ?? 0) < 5000;
   const moved = (id: string) => now - (t?.seen.get(id)?.at ?? 0) < 2500;
-  const leaving = Array.from(t?.leaving.values() ?? []).filter((gone) => gone.until > Date.now() && inGroup(gone.alert) && !waiting.some(({ alert }) => alert.id === gone.alert.id));
-  // Leaving cards keep their place in the list (oldest call first)
-  const waitingShown: Array<Item | Leaving> = [...waiting, ...leaving].sort((a, b) => new Date(a.alert.createdAt).getTime() - new Date(b.alert.createdAt).getTime());
-
-  // Remove a leaving card the moment its time is up, not on the next clock tick (no empty slot)
-  const [, rerender] = useState(0);
-  const nextLeave = leaving.length ? Math.min(...leaving.map((gone) => gone.until)) : 0;
-  useEffect(() => {
-    if (!nextLeave) return;
-    const timer = window.setTimeout(() => rerender((n) => n + 1), Math.max(0, nextLeave - Date.now()) + 20);
-    return () => window.clearTimeout(timer);
-  }, [nextLeave]);
+  const leaving = Array.from(t?.leaving.values() ?? []).filter((gone) => gone.until > now && inGroup(gone.alert));
 
   // Waiting count in the browser tab title, so a phone in a pocket shows it at a glance.
   useEffect(() => {
@@ -261,7 +250,7 @@ export function QueuePage() {
           ) : !active.data ? (
             // Never say "All clear" when the list couldn't be loaded
             <p className="rq-empty">Can't load calls right now. Retrying…</p>
-          ) : waitingShown.length === 0 ? (
+          ) : waiting.length === 0 ? (
             // Nothing waiting: one quiet message in the space, not an empty grid
             <div className="rq-clear">
               <CheckCircleIcon />
@@ -270,11 +259,9 @@ export function QueuePage() {
             </div>
           ) : (
             <ol className="rq-grid">
-              {waitingShown.map((entry) => (
-                <li key={entry.alert.id}>
-                  {"reason" in entry
-                    ? <LeavingCard gone={entry} showDepartment={showDepartment} />
-                    : <WaitingCard item={entry} isNew={fresh(entry.alert.id)} showDepartment={showDepartment} disabled={offline} />}
+              {waiting.map((item) => (
+                <li key={item.alert.id}>
+                  <WaitingCard item={item} isNew={fresh(item.alert.id)} showDepartment={showDepartment} disabled={offline} />
                 </li>
               ))}
             </ol>
@@ -288,7 +275,7 @@ export function QueuePage() {
           </header>
           {team.length ? (
             <ol className="rq-team-list">
-              {team.map((item) => <li key={item.alert.id}><TeamCall item={item} userId={userId} showDepartment={showDepartment} canHelp={canHelp} disabled={offline} /></li>)}
+              {team.map((item) => <li key={item.alert.id}><TeamCall item={item} userId={userId} isMoved={moved(item.alert.id)} showDepartment={showDepartment} canHelp={canHelp} disabled={offline} /></li>)}
             </ol>
           ) : (
             <p className="rq-empty small">{active.isLoading ? "Loading…" : "No one else is on a call."}</p>
@@ -302,9 +289,9 @@ export function QueuePage() {
 }
 
 function leavingText({ alert, reason }: Leaving) {
-  if (reason === "mine") return "You accepted. It's in Your calls";
-  if (reason === "taken") return `${responder(alert) || "A teammate"} accepted`;
-  return "Call cancelled";
+  if (reason === "mine") return `You accepted ${alert.machine.name}. It's in Your calls`;
+  if (reason === "taken") return `${responder(alert) || "A teammate"} accepted ${alert.machine.name}`;
+  return `${alert.machine.name} call cancelled`;
 }
 
 function useRefresh() {
@@ -364,19 +351,6 @@ function WaitingCard({ item: { alert, timing }, isNew, showDepartment, disabled 
   );
 }
 
-/** A call that just left the list: say who took it (or that it was cancelled), then go. */
-function LeavingCard({ gone, showDepartment }: { gone: Leaving; showDepartment: boolean }) {
-  return (
-    <article className={`rq-card leaving ${gone.reason}`}>
-      <CardHead alert={gone.alert} showDepartment={showDepartment} clockText="" />
-      <p className="rq-leaving-note">
-        {gone.reason !== "cancelled" && <CheckCircleIcon />}
-        {leavingText(gone)}
-      </p>
-    </article>
-  );
-}
-
 /** One of my calls: a slim row (where, since when) with its messages one tap away. */
 function MyCall({ item: { alert, timing }, helping, userId, isMoved, showDepartment }: { item: Item; helping: boolean; userId: string; isMoved: boolean; showDepartment: boolean }) {
   const [open, setOpen] = useState(false);
@@ -410,8 +384,8 @@ function MyCall({ item: { alert, timing }, helping, userId, isMoved, showDepartm
   );
 }
 
-/** A teammate's call, kept small: where, who (and who's helping), how long, and a way to go and help. */
-function TeamCall({ item: { alert, timing }, userId, showDepartment, canHelp, disabled }: { item: Item; userId: string; showDepartment: boolean; canHelp: boolean; disabled: boolean }) {
+/** A teammate's call, kept small: where, who (and who's helping), when it was accepted and for how long, and a way to go and help. */
+function TeamCall({ item: { alert, timing }, userId, isMoved, showDepartment, canHelp, disabled }: { item: Item; userId: string; isMoved: boolean; showDepartment: boolean; canHelp: boolean; disabled: boolean }) {
   const refresh = useRefresh();
   const help = useMutation({
     mutationFn: () => postJson(`/api/alerts/${alert.id}/notes`, { note: "Coming to help", clientMessageId: helpMessageId(alert.id) }),
@@ -420,12 +394,16 @@ function TeamCall({ item: { alert, timing }, userId, showDepartment, canHelp, di
   });
   const who = [responder(alert) || "A teammate", helpersText(alert, userId)].filter(Boolean).join(" · ");
   return (
-    <article className="rq-teamcall">
+    <article className={`rq-teamcall ${isMoved ? "is-moved" : ""}`}>
       <div className="rq-teamcall-main">
         <strong>{alert.machine.name}</strong>
         <small>{[who, showDepartment ? alert.department.name : alert.issueType?.name ?? alert.commandLabel].filter(Boolean).join(" · ")}</small>
       </div>
-      <strong className="rq-teamcall-clock">{clock(timing.stageSeconds)}</strong>
+      {/* How long it's been since they accepted, and when that was: enough to judge whether to go and help */}
+      <div className="rq-teamcall-time">
+        <strong>{clock(timing.stageSeconds)}</strong>
+        <small>Accepted {timeOfDay(alert.acknowledgedAt ?? alert.arrivedAt)}</small>
+      </div>
       {canHelp && (
         <button type="button" className={`rq-help ${help.isPending ? "sending" : ""}`} onClick={() => help.mutate()} disabled={help.isPending || disabled} aria-busy={help.isPending}>
           {help.isPending ? "Letting them know…" : "Help out"}
