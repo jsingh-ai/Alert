@@ -29,7 +29,7 @@ export type Alert = {
   operatorNote?: string | null;
   responderNameText?: string | null;
   acknowledgedByUserId?: string | null;
-  /** People who tapped "Help out" on this call (Response Queue only) */
+  /** People who tapped "Help out" on this call (Team Calls only) */
   helpers?: Array<{ id: string; name: string }>;
   actionAvailable: string;
   elapsedSeconds: number;

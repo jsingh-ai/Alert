@@ -1,5 +1,5 @@
 /*
- * ProcessGuard suite chrome, shared by every page (Machine Station, Response Queue, Floor Status, Reports):
+ * ProcessGuard suite chrome, shared by every page (Machine Station, Team Calls, Floor Status, Reports):
  * the page frame, the textured app bar (logo · centred title with a small label · live state), the status
  * pill, the station menu, the always-on status bar, the offline notice, and team colours.
  * Pages add their own content styles in their own file. Tokens: ui.css.

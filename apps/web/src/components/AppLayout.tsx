@@ -26,7 +26,7 @@ type Icon = (props: SVGProps<SVGSVGElement>) => ReactElement;
 /** Frontend names for each page; the API's nav ids stay the same. */
 const NAV_META: Record<string, { label: string; icon: Icon; section: "live" | "insights" | "utility" }> = {
   floor: { label: "Floor Status", icon: GridIcon, section: "live" },
-  queue: { label: "Response Queue", icon: BellRingIcon, section: "live" },
+  queue: { label: "Team Calls", icon: BellRingIcon, section: "live" },
   operator: { label: "Machine Station", icon: StationIcon, section: "live" },
   reports: { label: "Reports", icon: ChartIcon, section: "insights" },
   admin: { label: "Settings", icon: SettingsIcon, section: "utility" }

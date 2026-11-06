@@ -172,7 +172,7 @@ export function QueuePage() {
   // Waiting count in the browser tab title, so a phone in a pocket shows it at a glance.
   useEffect(() => {
     const base = "ProcessGuard";
-    document.title = waiting.length ? `(${waiting.length}) Response Queue · ${base}` : `Response Queue · ${base}`;
+    document.title = waiting.length ? `(${waiting.length}) Team Calls · ${base}` : `Team Calls · ${base}`;
     return () => { document.title = base; };
   }, [waiting.length]);
 
@@ -192,7 +192,7 @@ export function QueuePage() {
   return (
     <div className={`su-page rq-page ${offline ? "stale" : ""}`}>
       <SuiteHeader
-        eyebrow={["Response queue", group !== "all" ? group : ""].filter(Boolean).join(" · ")}
+        eyebrow={["Team calls", group !== "all" ? group : ""].filter(Boolean).join(" · ")}
         title={department ? <span className="rq-head-team"><TeamIcon department={department} /><span>{department.name}</span></span> : "All departments"}
         status={status}
       >

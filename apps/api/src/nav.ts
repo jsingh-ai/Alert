@@ -9,7 +9,7 @@ export type NavItem = {
 
 const items: Record<string, NavItem> = {
   operator: { id: "operator", label: "Operator", path: "/operator", icon: "radio" },
-  queue: { id: "queue", label: "Department Queue", path: "/queue", icon: "inbox" },
+  queue: { id: "queue", label: "Team Calls", path: "/queue", icon: "inbox" },
   channels: { id: "channels", label: "Communication", path: "/channels", icon: "text" },
   floor: { id: "floor", label: "Live Floor", path: "/floor", icon: "layout" },
   reports: { id: "reports", label: "Reports", path: "/reports", icon: "chart" },
