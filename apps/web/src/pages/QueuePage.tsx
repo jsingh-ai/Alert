@@ -328,9 +328,8 @@ function WaitingCard({ item: { alert, timing }, isNew, showDepartment, disabled 
     onSuccess: () => refresh(),
     onError: () => { void refresh(); }
   });
-  const notes = notesOf(alert);
-  const latest = notes[notes.length - 1];
   const note = alert.displayMessage || alert.operatorNote;
+  const notes = notesOf(alert).filter((message) => message.note !== note);
   // Losing a race to a teammate is normal, not an error
   const failure = accept.isError && (/not open|already/i.test(errorText(accept.error, "")) ? "Someone else just accepted this call." : errorText(accept.error, "That didn't go through. Try again."));
 
@@ -338,16 +337,42 @@ function WaitingCard({ item: { alert, timing }, isNew, showDepartment, disabled 
     <article className={`rq-card waiting ${timing.late ? "late" : ""} ${isNew ? "is-new" : ""}`}>
       <CardHead alert={alert} showDepartment={showDepartment} clockText={clock(timing.waitSeconds)} late={timing.late} />
       {note && <p className="rq-operator-note">“{note}”</p>}
-      {/* The operator's latest message, so it's read before accepting */}
-      {latest && latest.note !== note && (
-        <p className="rq-latest"><MessageIcon /><strong>{latest.actorNameText || "Operator"}</strong><span>{latest.note}</span></p>
-      )}
+      {/* Everything the operator has said, so it's all read before accepting */}
+      {notes.length > 0 && <CallNotes notes={notes} />}
       <button type="button" className={`rq-btn primary ${accept.isPending ? "sending" : ""}`} onClick={() => accept.mutate()} disabled={accept.isPending || disabled} aria-busy={accept.isPending}>
         {accept.isPending ? "Accepting…" : "Accept call"}
         <i className="rq-sweep" aria-hidden="true" />
       </button>
       {failure && <p className="rq-error" role="alert">{failure}</p>}
     </article>
+  );
+}
+
+/** How many of a waiting call's messages a tile shows; older ones are counted, not hidden silently. */
+const TILE_NOTES = 4;
+
+/** The messages on a waiting call, newest last. One sender (the usual case) is named once, above the list. */
+function CallNotes({ notes }: { notes: Note[] }) {
+  const shown = notes.slice(-TILE_NOTES);
+  const earlier = notes.length - shown.length;
+  const senders = new Set(notes.map((message) => message.actorNameText || "Operator"));
+  const oneSender = senders.size === 1 ? Array.from(senders)[0] : "";
+  return (
+    <div className="rq-notes">
+      <p className="rq-notes-head">
+        <MessageIcon />
+        <strong>{oneSender || "Messages"}</strong>
+        {earlier > 0 && <span>+{earlier} earlier</span>}
+      </p>
+      <ol>
+        {shown.map((message) => (
+          <li key={message.id}>
+            <time>{timeOfDay(message.createdAt)}</time>
+            <p>{!oneSender && <strong>{message.actorNameText || "Operator"}: </strong>}{message.note}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

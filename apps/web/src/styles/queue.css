@@ -88,7 +88,17 @@
 @keyframes rqGlow { 0% { background: color-mix(in srgb, var(--rail) 12%, var(--pg-card)); } 100% { background: transparent; } }
 .rq-card.is-new::before, .rq-my.is-moved::before { animation: rqRail 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes rqRail { from { transform: scaleY(0); } }
-.rq-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.9rem; }
+.rq-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "icon name clock" "icon sub sub"; align-items: center; gap: 0.2rem 0.9rem; }
+.rq-card-head > .dept-icon { grid-area: icon; align-self: start; }
+.rq-card-head .rq-card-title { display: contents; }
+.rq-card-head .rq-card-title strong { grid-area: name; min-width: 0; overflow-wrap: anywhere; }
+.rq-card-head .rq-card-title small { grid-area: sub; white-space: normal; overflow: visible; }
+.rq-card-head .rq-card-clock { grid-area: clock; }
+/* A narrow tile (a phone, a long late clock): LATE tucks under the clock so the machine name keeps its room */
+.rq-card { container-type: inline-size; }
+@container (max-width: 380px) {
+  .rq-card-head .rq-card-clock { flex-direction: column-reverse; align-items: flex-end; gap: 0.3rem; }
+}
 .rq-card-head .dept-icon { width: 40px; height: 40px; border-radius: 11px; }
 .rq-card-head .dept-icon svg { width: 22px; height: 22px; }
 .rq-card-title { display: grid; gap: 0.15rem; min-width: 0; }
@@ -99,11 +109,17 @@
 .rq-card.late .rq-card-clock strong { color: var(--pg-wait-text); }
 .rq-late { padding: 0.25rem 0.45rem; border-radius: 6px; box-shadow: inset 0 0 0 1.5px currentColor; color: var(--pg-wait-text); font-style: normal; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.07em; line-height: 1; text-transform: uppercase; }
 .rq-operator-note { padding: 0.6rem 0.8rem; border-radius: 10px; background: var(--pg-track); color: var(--pg-text-2); font-size: 0.9375rem; }
-/* The operator's latest message on a waiting call, one line */
-.rq-latest { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--pg-text-2); font-size: 0.9375rem; }
-.rq-latest svg { flex: none; width: 16px; height: 16px; color: var(--pg-muted); }
-.rq-latest strong { flex: none; font-weight: 600; }
-.rq-latest span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The operator's messages on a waiting call: every one (the newest few), not just the last */
+.rq-notes { display: grid; gap: 0.4rem; min-width: 0; }
+.rq-notes-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--pg-text-2); font-size: 0.875rem; }
+.rq-notes-head svg { flex: none; width: 16px; height: 16px; color: var(--pg-muted); }
+.rq-notes-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rq-notes-head span { flex: none; margin-left: auto; color: var(--pg-muted); }
+.rq-notes ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.rq-notes li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0.6rem; padding: 0.4rem 0.65rem; border-radius: 8px; background: var(--pg-track); }
+.rq-notes time { color: var(--pg-muted); font-size: 0.8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rq-notes li p { color: var(--pg-text); font-size: 0.9375rem; overflow-wrap: anywhere; }
+.rq-notes li p strong { font-weight: 600; }
 
 
 /* One next step per call: dark primary, the same as Machine Station */
