@@ -14,7 +14,7 @@ import "../styles/suite.css";
  */
 
 export type Connection = "connecting" | "live" | "offline";
-export type Tone = "neutral" | "clear" | "waiting" | "late" | "onTheWay" | "onSite";
+export type Tone = "neutral" | "clear" | "waiting" | "late" | "accepted";
 
 /**
  * Offline is judged by how old the data is, not by one failed request (a dropped poll is retried a few

@@ -98,7 +98,7 @@ export async function reportRoutes(app: FastifyInstance) {
 
     for (const alert of alerts) {
       const acknowledgeSeconds = secondsBetween(alert.createdAt, alert.acknowledgedAt);
-      const clearSeconds = secondsBetween(alert.arrivedAt ?? alert.acknowledgedAt, alert.resolvedAt);
+      const clearSeconds = secondsBetween(alert.acknowledgedAt ?? alert.arrivedAt, alert.resolvedAt);
       const resolveSeconds = secondsBetween(alert.createdAt, alert.resolvedAt);
       const departmentStats = byDepartment.get(alert.department.id) ?? { id: alert.department.id, name: alert.department.name, count: 0, acknowledgeSeconds: [], clearSeconds: [] };
       departmentStats.count += 1;
@@ -170,7 +170,7 @@ export async function reportRoutes(app: FastifyInstance) {
         openAlerts: open,
         closedAlerts: closed,
         averageAcknowledgeSeconds: avg(alerts.map((alert) => secondsBetween(alert.createdAt, alert.acknowledgedAt))),
-        averageClearSeconds: avg(alerts.map((alert) => secondsBetween(alert.arrivedAt ?? alert.acknowledgedAt, alert.resolvedAt))),
+        averageClearSeconds: avg(alerts.map((alert) => secondsBetween(alert.acknowledgedAt ?? alert.arrivedAt, alert.resolvedAt))),
         averageResolveSeconds: avg(alerts.map((alert) => secondsBetween(alert.createdAt, alert.resolvedAt))),
         byDepartment: Array.from(byDepartment.values(), (stats) => ({ ...stats, averageAcknowledgeSeconds: avg(stats.acknowledgeSeconds), averageClearSeconds: avg(stats.clearSeconds), acknowledgeSeconds: undefined, clearSeconds: undefined })).sort((a, b) => b.count - a.count),
         byMachine: Array.from(byMachine.values(), (stats) => ({ ...stats, averageAcknowledgeSeconds: avg(stats.acknowledgeSeconds), averageClearSeconds: avg(stats.clearSeconds), acknowledgeSeconds: undefined, clearSeconds: undefined })).sort((a, b) => b.count - a.count),
@@ -210,7 +210,7 @@ export async function reportRoutes(app: FastifyInstance) {
           resolvedAt: alert.resolvedAt,
           cancelledAt: alert.cancelledAt,
           acknowledgeSeconds: secondsBetween(alert.createdAt, alert.acknowledgedAt),
-          clearSeconds: secondsBetween(alert.arrivedAt ?? alert.acknowledgedAt, alert.resolvedAt),
+          clearSeconds: secondsBetween(alert.acknowledgedAt ?? alert.arrivedAt, alert.resolvedAt),
           resolveSeconds: secondsBetween(alert.createdAt, alert.resolvedAt)
         })),
         latest: alerts.slice(0, 25)

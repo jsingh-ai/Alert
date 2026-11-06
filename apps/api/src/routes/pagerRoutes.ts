@@ -96,7 +96,7 @@ export async function pagerRoutes(app: FastifyInstance) {
       const notifications: Array<{ channelId: string; message: any }> = [];
       if (action === "acknowledge" || action === "resolve") {
         const commandLabel = alertCommandLabel(updated);
-        const actionText = action === "acknowledge" ? "acknowledged" : "resolved";
+        const actionText = action === "acknowledge" ? "accepted" : "resolved";
         const message = `${commandLabel} ${updated.department.name} alert ${actionText} on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
         try {
           notifications.push(...await prisma.$transaction((tx) => createAlertSystemMessages(tx, {

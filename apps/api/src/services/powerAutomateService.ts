@@ -88,6 +88,6 @@ export async function triggerAlertAcknowledged(input: {
     acknowledgedAt: input.acknowledgedAt.toISOString(),
     acknowledgeSeconds: input.acknowledgeSeconds,
     source: input.source,
-    message: `${input.departmentName} alert acknowledged on ${machineLabel}.`
+    message: `${input.departmentName} alert accepted on ${machineLabel}.`
   });
 }

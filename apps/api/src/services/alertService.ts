@@ -41,8 +41,8 @@ export function actionAvailable(alert: { status: AlertStatus | string }) {
 export function statusLabel(status: AlertStatus | string) {
   const labels: Record<AlertStatus, string> = {
     OPEN: "Open",
-    ACKNOWLEDGED: "Acknowledged",
-    ARRIVED: "Arrived",
+    ACKNOWLEDGED: "Accepted",
+    ARRIVED: "Accepted",
     RESOLVED: "Resolved",
     CANCELLED: "Cancelled"
   };
@@ -55,15 +55,14 @@ function secondsBetween(start: Date | null, end: Date | null) {
 }
 
 function activeTimerStartedAt(alert: { status: AlertStatus | string; createdAt: Date; acknowledgedAt: Date | null; arrivedAt: Date | null }) {
-  if (alert.status === "ARRIVED" && alert.arrivedAt) return alert.arrivedAt;
-  if (alert.status === "ACKNOWLEDGED" && alert.acknowledgedAt) return alert.acknowledgedAt;
+  // One live step after the call: accepted (older "arrived" calls count as accepted)
+  if (alert.status === "ACKNOWLEDGED" || alert.status === "ARRIVED") return alert.acknowledgedAt ?? alert.arrivedAt ?? alert.createdAt;
   return alert.createdAt;
 }
 
 function activeTimerStage(alert: { status: AlertStatus | string }) {
-  if (alert.status === "ARRIVED") return "CLEAR";
-  if (alert.status === "ACKNOWLEDGED") return "ARRIVE";
-  return "ACKNOWLEDGE";
+  // Once accepted, the only step left is closing the call at the machine
+  return alert.status === "ACKNOWLEDGED" || alert.status === "ARRIVED" ? "CLEAR" : "ACKNOWLEDGE";
 }
 
 export function includeAlert() {
@@ -163,8 +162,8 @@ export function serializeAlert(alert: IncludedAlert) {
     elapsedSeconds: elapsedSeconds(activeTimerStartedAt(alert)),
     acknowledgeSeconds: secondsBetween(alert.createdAt, alert.acknowledgedAt),
     arriveSeconds: secondsBetween(alert.acknowledgedAt, alert.arrivedAt),
-    responseSeconds: secondsBetween(alert.createdAt, alert.arrivedAt),
-    clearSeconds: secondsBetween(alert.arrivedAt ?? alert.acknowledgedAt, alert.resolvedAt),
+    responseSeconds: secondsBetween(alert.createdAt, alert.acknowledgedAt ?? alert.arrivedAt),
+    clearSeconds: secondsBetween(alert.acknowledgedAt ?? alert.arrivedAt, alert.resolvedAt),
     activeTimerStartedAt: activeTimerStartedAt(alert),
     activeTimerStage: activeTimerStage(alert),
     createdAt: alert.createdAt,
@@ -349,7 +348,7 @@ export async function transitionAlert(db: Db, input: {
 
   if (input.action === "resolve") {
     if (alert.status !== "ACKNOWLEDGED" && alert.status !== "ARRIVED") {
-      const err = new Error("Alert must be acknowledged before it can be resolved.") as Error & { statusCode?: number };
+      const err = new Error("Alert must be accepted before it can be closed.") as Error & { statusCode?: number };
       err.statusCode = 409;
       throw err;
     }

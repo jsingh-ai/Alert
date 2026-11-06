@@ -41,8 +41,7 @@
 
 .rq-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pg-faint); }
 .rq-dot.waiting { background: var(--pg-wait); }
-.rq-dot.onTheWay { background: var(--pg-way); }
-.rq-dot.onSite { background: var(--pg-site); }
+.rq-dot.accepted { background: var(--pg-way); }
 
 /* Nothing open */
 .rq-clear { display: grid; justify-items: center; align-content: center; gap: 0.5rem; padding: 3.5rem 1.5rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); text-align: center; }
@@ -65,13 +64,15 @@
 }
 .rq-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
 .rq-card.waiting { --rail: var(--pg-wait); }
-.rq-card.onTheWay { --rail: var(--pg-way); }
-.rq-card.onSite { --rail: var(--pg-site); }
+.rq-card.accepted { --rail: var(--pg-way); }
 /* A new call drops in from the top; a call that just changed stage slides into its new column */
 .rq-card.is-new { animation: rqDrop 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.6s 0.2s ease-out; }
 .rq-card.is-moved { animation: rqSlide 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.4s 0.15s ease-out; }
 @keyframes rqDrop { from { opacity: 0; transform: translateY(-14px); } }
 @keyframes rqSlide { from { opacity: 0; transform: translateX(-24px); } }
+/* Just accepted: the amber dot pops with a ring, so the responder sees it took */
+.rq-card.is-moved .rq-status .rq-dot { animation: rqAccept 0.9s 0.25s cubic-bezier(0.3, 1.5, 0.5, 1) backwards; }
+@keyframes rqAccept { 0% { transform: scale(0); box-shadow: 0 0 0 0 var(--pg-way-soft); } 50% { transform: scale(1.6); box-shadow: 0 0 0 6px var(--pg-way-soft); } 100% { transform: scale(1); box-shadow: 0 0 0 10px transparent; } }
 @keyframes rqGlow { 0% { background: color-mix(in srgb, var(--rail) 12%, var(--pg-card)); } 100% { background: transparent; } }
 .rq-card::before { transform-origin: top; }
 .rq-card.is-new::before, .rq-card.is-moved::before { animation: rqRail 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -132,8 +133,8 @@
   .rq-tabs { display: grid; }
   .rq-board { grid-template-columns: minmax(0, 1fr); }
   .rq-column-head { display: none; }
-  .rq-board[data-tab="waiting"] .rq-column.responding,
-  .rq-board[data-tab="responding"] .rq-column.waiting { display: none; }
+  .rq-board[data-tab="waiting"] .rq-column.accepted,
+  .rq-board[data-tab="accepted"] .rq-column.waiting { display: none; }
   .rq-toolbar label { flex: 1; }
   .rq-page .rq-toolbar select { flex: 1; min-width: 0; }
 }
@@ -143,6 +144,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rq-card.is-new, .rq-card.is-moved, .rq-card.is-new::before, .rq-card.is-moved::before { animation: none; }
+  .rq-card.is-new, .rq-card.is-moved, .rq-card.is-new::before, .rq-card.is-moved::before, .rq-card.is-moved .rq-status .rq-dot { animation: none; }
   .rq-btn.sending .rq-sweep { animation: none; transform: scaleX(0.6); }
 }
