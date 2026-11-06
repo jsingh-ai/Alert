@@ -318,8 +318,8 @@ export function ReportsPage() {
 
       <section className="rp-stats" aria-label="Summary">
         <Stat label="Calls" value={stats.calls.toLocaleString()} delta={before ? delta(stats.calls, before.calls, "neutral") : null} hint={`vs previous ${days === 1 ? "day" : `${days} days`}`} />
-        <Stat label="Avg response" hint="call → acknowledged" value={dur(stats.response)} delta={before ? delta(stats.response, before.response, "down") : null} />
-        <Stat label="Avg fix" hint="acknowledged → closed" value={dur(stats.fix)} delta={before ? delta(stats.fix, before.fix, "down") : null} />
+        <Stat label="Avg response" hint="call → accepted" value={dur(stats.response)} delta={before ? delta(stats.response, before.response, "down") : null} />
+        <Stat label="Avg fix" hint="accepted → closed" value={dur(stats.fix)} delta={before ? delta(stats.fix, before.fix, "down") : null} />
         <Stat label="Machine wait" hint="total, call → closed" value={dur(stats.waitTotal)} delta={before ? delta(stats.waitTotal, before.waitTotal, "down") : null} />
         <Stat label="Late responses" hint={`over ${LATE_AFTER_SECONDS / 60} min`} value={pct(stats.lateShare)} delta={before ? delta(stats.lateShare, before.lateShare, "down", true) : null} />
       </section>
@@ -738,7 +738,7 @@ function CallsTable({ rows, deptById }: { rows: ReportRow[]; deptById: Map<strin
               <td>{r.responder?.name ?? "–"}</td>
               <td className="num">{dur(r.acknowledgeSeconds)}</td>
               <td className="num">{dur(r.clearSeconds)}</td>
-              <td><span className={`rp-status ${r.status.toLowerCase()}`}>{r.status === "RESOLVED" ? "Closed" : r.status === "CANCELLED" ? "Cancelled" : "Open"}</span></td>
+              <td><span className={`rp-status ${r.status.toLowerCase()}`}>{r.status === "RESOLVED" ? "Closed" : r.status === "CANCELLED" ? "Cancelled" : r.status === "OPEN" ? "Open" : "Accepted"}</span></td>
             </tr>
           ))}
         </tbody>

@@ -20,7 +20,7 @@ const OFFLINE_AFTER_MS = 20_000;
 type FloorMachine = { id: string; name: string; code: string; machineGroup?: { id?: string; name?: string } | null };
 type MachineStats = Record<string, { alertsToday?: number }>;
 
-const STAGE_TEXT: Record<CallStage, string> = { waiting: "Waiting", onTheWay: "On the way", onSite: "At machine" };
+const STAGE_TEXT: Record<CallStage, string> = { waiting: "Waiting", accepted: "Accepted" };
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -48,7 +48,7 @@ function floorStatus(connection: Connection, calls: CallSummary[], waitingMachin
     return { tone: stale ? "neutral" : calls.some((c) => c.late) ? "late" : "waiting", text: `${plural(waitingMachines, "machine")} waiting` };
   }
   if (calls.length > 0) {
-    return { tone: stale ? "neutral" : calls.some((c) => c.stage === "onTheWay") ? "onTheWay" : "onSite", text: `${plural(calls.length, "call")} in progress` };
+    return { tone: stale ? "neutral" : "accepted", text: `${plural(calls.length, "call")} in progress` };
   }
   return { tone: "clear", text: "All clear" };
 }
@@ -97,8 +97,7 @@ export function FloorPage() {
   const lanes = calls.flatMap((call) => call.alerts.map((lane) => ({ ...lane, call })));
   const waitingLanes = lanes.filter((lane) => lane.timing.stage === "waiting");
   const lateCount = waitingLanes.filter((lane) => lane.timing.late).length;
-  const onTheWay = lanes.filter((lane) => lane.timing.stage === "onTheWay").length;
-  const atMachine = lanes.filter((lane) => lane.timing.stage === "onSite").length;
+  const acceptedCount = lanes.filter((lane) => lane.timing.stage === "accepted").length;
   const longest = waitingLanes.reduce<(typeof waitingLanes)[number] | null>((best, lane) => (!best || lane.timing.waitSeconds > best.timing.waitSeconds ? lane : best), null);
   const waitingMachines = new Set(waitingCalls.map((call) => call.command.machine.id)).size;
   const callsToday = visibleMachines.reduce((sum, m) => sum + (machineStats[m.id]?.alertsToday ?? 0), 0);
@@ -142,13 +141,9 @@ export function FloorPage() {
               {lateCount > 0 && <small className="fs-late-text">{lateCount} late</small>}
             </dd>
           </div>
-          <div className={onTheWay ? "" : "zero"}>
-            <dt><StatusDot stage="onTheWay" />On the way</dt>
-            <dd>{onTheWay}</dd>
-          </div>
-          <div className={atMachine ? "" : "zero"}>
-            <dt><StatusDot stage="onSite" />At machine</dt>
-            <dd>{atMachine}</dd>
+          <div className={acceptedCount ? "" : "zero"}>
+            <dt><StatusDot stage="accepted" />Teams accepted</dt>
+            <dd>{acceptedCount}</dd>
           </div>
           <div className={longest ? "" : "zero"}>
             <dt>Longest wait</dt>
@@ -315,13 +310,11 @@ type Step = { label: string; state: "done" | "current" | "next"; time?: string; 
 
 function stepsFor(alert: Alert, timing: AlertTiming): Step[] {
   const at = (value?: string | null) => (value ? timeOfDay(value) : undefined);
-  const ack = timing.stage !== "waiting";
-  const arrived = timing.stage === "onSite";
+  const accepted = timing.stage === "accepted";
   return [
     { label: "Called", state: "done", time: at(alert.createdAt) },
-    { label: "Acknowledged", state: ack ? "done" : "current", time: ack ? at(alert.acknowledgedAt) : undefined, duration: clock(timing.waitSeconds) },
-    { label: "Arrived", state: arrived ? "done" : ack ? "current" : "next", time: arrived ? at(alert.arrivedAt) : undefined, duration: ack ? clock(timing.travelSeconds) : undefined },
-    { label: "Closed", state: arrived ? "current" : "next", duration: arrived ? clock(timing.fixSeconds) : undefined }
+    { label: "Accepted", state: accepted ? "done" : "current", time: accepted ? at(alert.acknowledgedAt ?? alert.arrivedAt) : undefined, duration: clock(timing.waitSeconds) },
+    { label: "Closed", state: accepted ? "current" : "next", time: accepted ? "when fixed" : undefined, duration: accepted ? clock(timing.stageSeconds) : undefined }
   ];
 }
 
@@ -336,9 +329,9 @@ function activityFor(call: CallSummary): Activity[] {
   }];
   for (const { alert, timing } of call.alerts) {
     const who = alert.responderNameText?.trim() || alert.department.name;
-    if (alert.acknowledgedAt) items.push({ key: `${alert.id}-a`, at: new Date(alert.acknowledgedAt).getTime(), title: `${who} acknowledged`, detail: `${alert.department.name} · responded in ${clock(timing.waitSeconds)}` });
-    if (alert.arrivedAt) items.push({ key: `${alert.id}-r`, at: new Date(alert.arrivedAt).getTime(), title: `${who} arrived`, detail: `${alert.department.name} · ${clock(timing.travelSeconds)} travel` });
-    if (!alert.acknowledgedAt && timing.late) items.push({ key: `${alert.id}-l`, at: new Date(alert.createdAt).getTime() + LATE_AFTER_SECONDS * 1000, title: `${alert.department.name} is late`, detail: `No response after ${LATE_AFTER_SECONDS / 60} minutes` });
+    const acceptedAt = alert.acknowledgedAt ?? alert.arrivedAt;
+    if (acceptedAt) items.push({ key: `${alert.id}-a`, at: new Date(acceptedAt).getTime(), title: `${who} accepted`, detail: `${alert.department.name} · accepted in ${clock(timing.waitSeconds)}` });
+    if (!acceptedAt && timing.late) items.push({ key: `${alert.id}-l`, at: new Date(alert.createdAt).getTime() + LATE_AFTER_SECONDS * 1000, title: `${alert.department.name} is late`, detail: `No response after ${LATE_AFTER_SECONDS / 60} minutes` });
     for (const event of alert.events ?? []) {
       if (event?.note) items.push({ key: `${alert.id}-${event.id}`, at: new Date(event.createdAt).getTime(), title: event.actorNameText || "Message", detail: alert.department.name, note: event.note });
     }

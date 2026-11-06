@@ -45,7 +45,7 @@ const SIBLING_LOGOS = [
 const WORKFLOW_STEPS: { icon: Icon; title: string; body: string }[] = [
   { icon: BoltIcon, title: "Call for help", body: "Operators raise an alert from the machine in one tap." },
   { icon: LayersIcon, title: "Routed to the right team", body: "Quality, maintenance or supervisors are notified instantly." },
-  { icon: BellRingIcon, title: "Acknowledged anywhere", body: "Responders accept from their phone or pager." },
+  { icon: BellRingIcon, title: "Accepted anywhere", body: "Responders accept calls from their phone or pager." },
   { icon: CheckCircleIcon, title: "Closed out on the machine", body: "Every alert is logged and visible in real time." }
 ];
 

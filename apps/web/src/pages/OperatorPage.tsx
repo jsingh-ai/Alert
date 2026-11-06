@@ -287,7 +287,7 @@ export function OperatorPage() {
 
       <SuiteStatusBar connection={connection} lastGood={lastGood} />
 
-      {celebration && <ClosedCelebration info={celebration} machineName={machine.name} onDone={() => setCelebration(null)} />}
+      {celebration && <ClosedCelebration key={celebration.id} info={celebration} machineName={machine.name} onDone={() => setCelebration(null)} />}
 
       {otherOpen && data && (
         <OtherRequest
@@ -316,7 +316,7 @@ export function OperatorPage() {
 function machineStatus(calls: CallSummary[], connection: Connection): { tone: Tone; text: string } {
   if (connection !== "live" && !(connection === "offline" && calls.length)) return { tone: "neutral", text: connection === "offline" ? "Status unknown" : "Checking…" };
   if (calls.length === 0) return { tone: "clear", text: "Running normally" };
-  const worst: Tone = calls.some((c) => c.stage === "waiting") ? "waiting" : calls.some((c) => c.stage === "onTheWay") ? "onTheWay" : "onSite";
+  const worst: Tone = calls.some((c) => c.stage === "waiting") ? "waiting" : "accepted";
   return { tone: connection === "offline" ? "neutral" : calls.some((c) => c.late) ? "late" : worst, text: `${calls.length} open call${calls.length === 1 ? "" : "s"}` };
 }
 
@@ -470,8 +470,7 @@ function headline(call: CallSummary) {
     const blocking = call.alerts.filter(({ timing }) => timing.stage === "waiting").map(({ alert }) => alert.department.name);
     return `Waiting for ${team || listNames(blocking)}`;
   }
-  if (call.stage === "onTheWay") return team ? `${team} is on the way` : "Help is on the way";
-  return team ? `${team} is at the machine` : "Help is at the machine";
+  return team ? `${team} is on it` : "Every team is on it";
 }
 
 /** "Quality", "Quality and Supervisor", "Quality, Safety and Supervisor" */
@@ -480,12 +479,12 @@ function listNames(names: string[]) {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** Compact Called / Acknowledged / At machine / Closed dots for one team on a multi-team call; same steps as Track. */
+/** Compact Called / Accepted / Closed dots for one team on a multi-team call; same steps as Track. */
 function MiniTrack({ stage }: { stage: CallStage }) {
-  const current = stage === "waiting" ? 1 : stage === "onTheWay" ? 2 : 3;
+  const current = stage === "waiting" ? 1 : 2;
   return (
     <span className={`ms-mini ${stage}`} aria-hidden="true">
-      {[0, 1, 2, 3].map((step) => (
+      {[0, 1, 2].map((step) => (
         <i key={step} className={step < current ? "done" : step === current ? "current" : ""} />
       ))}
     </span>
@@ -493,10 +492,10 @@ function MiniTrack({ stage }: { stage: CallStage }) {
 }
 
 function timerLabel(stage: CallStage) {
-  return stage === "waiting" ? "Wait time" : stage === "onTheWay" ? "Travel time" : "Time on site";
+  return stage === "waiting" ? "Wait time" : "Since accepted";
 }
 
-/** Seconds in the call's current stage: the longest wait, the longest trip, or time on site. */
+/** Seconds in the call's current stage: the longest wait, or the longest time since a team accepted. */
 function stageSeconds(call: CallSummary) {
   const inStage = call.alerts.filter(({ timing }) => timing.stage === call.stage);
   return Math.max(0, ...inStage.map(({ timing }) => timing.stageSeconds));
@@ -505,41 +504,37 @@ function stageSeconds(call: CallSummary) {
 function teamStatus(alert: Alert, timing: AlertTiming) {
   if (timing.stage === "waiting") return "Waiting for a response";
   const who = responder(alert) || "Responder";
-  return `${who} · ${timing.stage === "onTheWay" ? "on the way" : "at the machine"} ${clock(timing.stageSeconds)}`;
+  return `${who} is on it · ${clock(timing.stageSeconds)}`;
 }
 
-/** Grey traceability line: "Acknowledged 11:43 (1:10) · arrived 11:45 (1:40)". The called time is in the card header. */
+/** When the team accepted (older calls may only have an "arrived" time). */
+function acceptedAt(alert: Alert) {
+  return alert.acknowledgedAt ?? alert.arrivedAt ?? alert.createdAt;
+}
+
+/** Grey traceability line: "Accepted at 11:43 AM, 1:10 after the call". The called time is in the card header. */
 function teamTimes(alert: Alert, timing: AlertTiming) {
-  const parts: string[] = [];
-  if (alert.acknowledgedAt) parts.push(`Acknowledged ${timeOfDay(alert.acknowledgedAt)} (${clock(timing.waitSeconds)})`);
-  if (alert.arrivedAt) parts.push(`${parts.length ? "arrived" : "Arrived"} ${timeOfDay(alert.arrivedAt)} (${clock(timing.travelSeconds)})`);
-  return parts.join(" · ");
+  return timing.stage === "waiting" ? "" : `Accepted at ${timeOfDay(acceptedAt(alert))}, ${clock(timing.waitSeconds)} after the call`;
 }
 
-/** One line of progress for a compact row: "Called 11:34 AM · no response yet", "Marcus Lee · on the way since 11:36 AM". */
+/** One line of progress for a compact row: "Called 11:34 AM · no response yet", "Marcus Lee accepted at 11:36 AM". */
 function progressLine(alert: Alert, timing: AlertTiming) {
-  const who = responder(alert) || "Responder";
   if (timing.stage === "waiting") return `Called ${timeOfDay(alert.createdAt)} · no response yet`;
-  if (timing.stage === "onTheWay") return `${who} · on the way since ${timeOfDay(alert.acknowledgedAt ?? alert.createdAt)}`;
-  return `${who} · at the machine since ${timeOfDay(alert.arrivedAt)}`;
+  return `${responder(alert) || "Responder"} accepted at ${timeOfDay(acceptedAt(alert))}`;
 }
 
-/** Called → Acknowledged → At machine → Closed, for a one-team call. */
+/** Called → Accepted → Closed, for a one-team call. The operator closes it here once it's fixed. */
 function Track({ alert, timing }: { alert: Alert; timing: AlertTiming }) {
   const who = responder(alert);
+  const accepted = timing.stage === "accepted";
   const steps: Array<{ label: string; detail: string; state: "done" | "current" | "todo" }> = [
     { label: "Called", detail: timeOfDay(alert.createdAt), state: "done" },
     {
-      label: "Acknowledged",
-      detail: timing.stage === "waiting" ? "No response yet" : [timeOfDay(alert.acknowledgedAt ?? alert.createdAt), who].filter(Boolean).join(" · "),
-      state: timing.stage === "waiting" ? "current" : "done"
+      label: "Accepted",
+      detail: accepted ? [timeOfDay(acceptedAt(alert)), who].filter(Boolean).join(" · ") : "No response yet",
+      state: accepted ? "done" : "current"
     },
-    {
-      label: "At the machine",
-      detail: timing.stage === "onSite" ? timeOfDay(alert.arrivedAt) || "Arrived" : timing.stage === "onTheWay" ? "On the way" : "",
-      state: timing.stage === "onSite" ? "done" : timing.stage === "onTheWay" ? "current" : "todo"
-    },
-    { label: "Closed", detail: timing.stage === "onSite" ? "When it's fixed" : "", state: timing.stage === "onSite" ? "current" : "todo" }
+    { label: "Closed", detail: accepted ? "When it's fixed" : "", state: accepted ? "current" : "todo" }
   ];
   return (
     <ol className={`ms-track ${timing.stage}`} aria-label="Call progress">
@@ -592,8 +587,8 @@ function ActiveCall({ call, compact, threadOpen, onToggleThread, machineId, stal
     onSuccess: (_, { kind, alertIds }) => {
       // The whole call is closed (not one team of several): celebrate the fix
       if (kind === "close" && alertIds.length === call.alerts.length) {
-        const who = call.alerts.map(({ alert }) => responder(alert)).filter(Boolean);
-        onClosed({ teams: call.alerts.map(({ alert }) => alert.department.name), who, seconds: call.totalSeconds });
+        const who = Array.from(new Set(call.alerts.map(({ alert }) => responder(alert)).filter(Boolean)));
+        onClosed({ id: Date.now(), teams: call.alerts.map(({ alert }) => alert.department), who, seconds: call.totalSeconds });
       }
     },
     onSettled: () => {
@@ -838,32 +833,79 @@ function CallThread({ call, disabled, title, onClose }: { call: CallSummary; dis
 
 /* ---------- Closed: a short, encouraging moment ---------- */
 
-type ClosedInfo = { teams: string[]; who: string[]; seconds: number };
+type ClosedInfo = { id: number; teams: Array<Alert["department"]>; who: string[]; seconds: number };
+
+/** How long the moment stays up before it leaves on its own (a tap closes it sooner). */
+const CELEBRATE_MS = 4200;
+
+/** A fixed, even burst (not random) so it looks the same, and tidy, every time. */
+const CONFETTI = Array.from({ length: 28 }, (_, i) => {
+  const angle = (i / 28) * Math.PI * 2;
+  const reach = 120 + ((i * 37) % 80);
+  return { x: Math.round(Math.cos(angle) * reach * 1.25), y: Math.round(Math.sin(angle) * reach * 0.8 - 20), r: ((i * 67) % 300) - 150, d: (i % 4) * 45, c: i % 4 };
+});
 
 function ClosedCelebration({ info, machineName, onDone }: { info: ClosedInfo; machineName: string; onDone: () => void }) {
+  const [leaving, setLeaving] = useState(false);
   const done = useRef(onDone);
   done.current = onDone;
+  // Stay up, then play the exit and remove itself: the operator never has to dismiss it
   useEffect(() => {
-    const timer = window.setTimeout(() => done.current(), 3600);
+    const timer = leaving ? window.setTimeout(() => done.current(), 360) : window.setTimeout(() => setLeaving(true), CELEBRATE_MS);
     return () => window.clearTimeout(timer);
-  }, []);
-  const thanks = info.who.length ? `Thanks, ${info.who.join(" and ")}.` : "Thanks, team.";
+  }, [leaving]);
+  const thanks = info.who.length ? `Thanks, ${listNames(info.who)}` : "Thanks, team";
+
   return (
-    <div className="ms-celebrate" role="status" onClick={onDone}>
-      <div className="ms-celebrate-card">
-        <div className="ms-celebrate-mark" aria-hidden="true">
-          <i className="ms-celebrate-ring" />
-          {Array.from({ length: 12 }, (_, i) => <i key={i} className="ms-celebrate-spark" style={{ "--a": `${i * 30}deg` } as CSSProperties} />)}
-          <svg viewBox="0 0 64 64" width="96" height="96">
-            <circle cx="32" cy="32" r="28" />
-            <path d="M20 33.5 28.5 42 45 24" />
-          </svg>
+    <div className={`ms-celebrate ${leaving ? "leaving" : ""}`} role="status" aria-live="polite" onClick={() => setLeaving(true)}>
+      <div className="ms-celebrate-card" style={{ "--life": `${CELEBRATE_MS}ms` } as CSSProperties}>
+        <div className="ms-celebrate-hero" aria-hidden="true">
+          <div className="ms-celebrate-mark">
+            <span className="ms-confetti">
+              {CONFETTI.map((piece, index) => (
+                <i key={index} className={`c${piece.c}`} style={{ "--x": `${piece.x}px`, "--y": `${piece.y}px`, "--r": `${piece.r}deg`, "--d": `${piece.d}ms` } as CSSProperties} />
+              ))}
+            </span>
+            <i className="ms-celebrate-ring" />
+            <i className="ms-celebrate-ring late" />
+            <svg viewBox="0 0 64 64" width="92" height="92">
+              <circle cx="32" cy="32" r="29" />
+              <path d="M19.5 33.5 28 42 45 24" />
+            </svg>
+          </div>
         </div>
-        <strong>Nice work!</strong>
-        <span>{machineName} is back up · {info.teams.join(" + ")} fixed it in {clock(info.seconds)}</span>
-        <small>{thanks}</small>
+        <div className="ms-celebrate-body">
+          <strong>Nice work!</strong>
+          <span>{machineName} is back up and running.</span>
+          <dl className="ms-celebrate-stats">
+            <div>
+              <dt>Down for</dt>
+              <dd>{clock(info.seconds)}</dd>
+            </div>
+            <div>
+              <dt>{info.teams.length > 1 ? "Teams" : "Team"}</dt>
+              <dd className="ms-celebrate-teams">
+                {info.teams.map((department) => (
+                  <span key={department.id}><TeamIcon department={department} size="sm" />{department.name}</span>
+                ))}
+              </dd>
+            </div>
+          </dl>
+          <small><ThumbsUpIcon />{thanks}</small>
+        </div>
+        {/* Shrinks while the moment is up, so it's clear it goes away by itself */}
+        <i className="ms-celebrate-life" aria-hidden="true" />
       </div>
     </div>
+  );
+}
+
+function ThumbsUpIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Z" />
+      <path d="M7 10l4.2-7.4A1.9 1.9 0 0 1 14.7 4l-.9 5h5.6a2 2 0 0 1 2 2.3l-1.3 8A2 2 0 0 1 18.1 21H7" />
+    </svg>
   );
 }
 

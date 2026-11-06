@@ -1,7 +1,7 @@
 /*
  * Shared design tokens and small components for the redesigned pages.
  * Matches the login page: navy brand, soft off-white canvas, white cards, one blue accent.
- * Stage colours follow the andon convention: red waiting, amber on the way, blue on site, green closed.
+ * Stage colours follow the andon convention: red waiting, amber accepted, green closed.
  */
 :root {
   --pg-navy-1: #070b1a;
@@ -116,8 +116,7 @@
 
 /* ---------- Stage text colours ---------- */
 .pg-t-waiting { color: var(--pg-wait-text); }
-.pg-t-onTheWay { color: var(--pg-way-text); }
-.pg-t-onSite { color: var(--pg-site-text); }
+.pg-t-accepted { color: var(--pg-way-text); }
 
 .pg-late {
   display: inline-flex;

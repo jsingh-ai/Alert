@@ -17,7 +17,7 @@ const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: "
 /** Calls poll every 6s; the queue is called offline after several missed polls, never on one. */
 const OFFLINE_AFTER_MS = 30_000;
 
-type Tab = "waiting" | "responding";
+type Tab = "waiting" | "accepted";
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -62,7 +62,7 @@ export function QueuePage() {
     .sort((a, b) => b.timing.totalSeconds - a.timing.totalSeconds), [active.data, group, now]);
 
   const waiting = items.filter(({ timing }) => timing.stage === "waiting");
-  const responding = items.filter(({ timing }) => timing.stage !== "waiting");
+  const accepted = items.filter(({ timing }) => timing.stage === "accepted");
   const late = waiting.filter(({ timing }) => timing.late).length;
   const connection = connectionState(active, now, OFFLINE_AFTER_MS);
   const offline = connection === "offline";
@@ -78,9 +78,10 @@ export function QueuePage() {
     if (!firstSeen.current) firstSeen.current = new Map();
     for (const alert of list) {
       if (!firstSeen.current.has(alert.id)) firstSeen.current.set(alert.id, initial ? 0 : Date.now());
+      const stage = alert.status === "OPEN" ? "waiting" : "accepted";
       const seen = lastStage.current.get(alert.id);
-      if (!seen) lastStage.current.set(alert.id, { status: alert.status, at: 0 });
-      else if (seen.status !== alert.status) lastStage.current.set(alert.id, { status: alert.status, at: Date.now() });
+      if (!seen) lastStage.current.set(alert.id, { status: stage, at: 0 });
+      else if (seen.status !== stage) lastStage.current.set(alert.id, { status: stage, at: Date.now() });
     }
   }, [active.data]);
   const fresh = new Set(items.filter(({ alert }) => now - (firstSeen.current?.get(alert.id) ?? 0) < 5000).map(({ alert }) => alert.id));
@@ -99,8 +100,8 @@ export function QueuePage() {
     ? { tone: "neutral", text: offline ? "Status unknown" : "Checking…" }
     : waiting.length
       ? { tone: offline ? "neutral" : late ? "late" : "waiting", text: `${waiting.length} waiting` }
-      : responding.length
-        ? { tone: offline ? "neutral" : responding.every(({ timing }) => timing.stage === "onSite") ? "onSite" : "onTheWay", text: `${responding.length} responding` }
+      : accepted.length
+        ? { tone: offline ? "neutral" : "accepted", text: `${accepted.length} accepted` }
         : { tone: "clear", text: "All clear" };
   const nothingOpen = !active.isLoading && items.length === 0;
 
@@ -153,8 +154,8 @@ export function QueuePage() {
         <button type="button" role="tab" aria-selected={tab === "waiting"} className={tab === "waiting" ? "on" : ""} onClick={() => setTab("waiting")}>
           Needs a response {waiting.length > 0 && <em className={late ? "late" : ""}>{waiting.length}</em>}
         </button>
-        <button type="button" role="tab" aria-selected={tab === "responding"} className={tab === "responding" ? "on" : ""} onClick={() => setTab("responding")}>
-          Responding {responding.length > 0 && <em>{responding.length}</em>}
+        <button type="button" role="tab" aria-selected={tab === "accepted"} className={tab === "accepted" ? "on" : ""} onClick={() => setTab("accepted")}>
+          Accepted {accepted.length > 0 && <em>{accepted.length}</em>}
         </button>
       </div>
 
@@ -169,21 +170,21 @@ export function QueuePage() {
             <p className="rq-empty"><CheckCircleIcon />Nobody is waiting. New calls appear here.</p>
           ) : (
             <ol className="rq-list">
-              {waiting.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={fresh.has(alert.id)} isMoved={moved.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
+              {waiting.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={fresh.has(alert.id)} isMoved={moved.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} onAccepted={() => setTab("accepted")} /></li>)}
             </ol>
           )}
         </section>
 
-        <section className="rq-column responding" aria-label="Responding">
+        <section className="rq-column accepted" aria-label="Accepted">
           <header className="rq-column-head">
-            <h2><i className="rq-dot onTheWay" />Responding</h2>
-            <span className="rq-count">{responding.length}</span>
+            <h2><i className="rq-dot accepted" />Accepted</h2>
+            <span className="rq-count">{accepted.length}</span>
           </header>
-          {active.isLoading ? <p className="rq-empty">Loading…</p> : responding.length === 0 ? (
-            <p className="rq-empty">No one is out on a call.</p>
+          {active.isLoading ? <p className="rq-empty">Loading…</p> : accepted.length === 0 ? (
+            <p className="rq-empty">No accepted calls right now.</p>
           ) : (
             <ol className="rq-list">
-              {responding.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={false} isMoved={moved.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
+              {accepted.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={false} isMoved={moved.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
             </ol>
           )}
         </section>
@@ -196,7 +197,7 @@ export function QueuePage() {
   );
 }
 
-function QueueCard({ alert, timing, isNew, isMoved, me, showDepartment }: { alert: Alert; timing: AlertTiming; isNew: boolean; isMoved: boolean; me: string; showDepartment: boolean }) {
+function QueueCard({ alert, timing, isNew, isMoved, me, showDepartment, onAccepted }: { alert: Alert; timing: AlertTiming; isNew: boolean; isMoved: boolean; me: string; showDepartment: boolean; onAccepted?: () => void }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -209,9 +210,13 @@ function QueueCard({ alert, timing, isNew, isMoved, me, showDepartment }: { aler
       queryClient.invalidateQueries({ queryKey: ["active-alerts"] }),
       queryClient.invalidateQueries({ queryKey: ["floor"] })
     ]);
-  const step = useMutation({
-    mutationFn: (action: "acknowledge" | "arrive") => postJson(`/api/alerts/${alert.id}/${action}`, {}),
-    onSuccess: () => refresh(),
+  // One step: accepting the call. The operator closes it at the machine once it's fixed.
+  const accept = useMutation({
+    mutationFn: () => postJson(`/api/alerts/${alert.id}/acknowledge`, {}),
+    onSuccess: async () => {
+      await refresh();
+      onAccepted?.();
+    },
     onError: () => { void refresh(); }
   });
   const send = useMutation({
@@ -228,11 +233,7 @@ function QueueCard({ alert, timing, isNew, isMoved, me, showDepartment }: { aler
     if (text) send.mutate(text);
   }
 
-  const status = timing.stage === "waiting"
-    ? null
-    : timing.stage === "onTheWay"
-      ? `${mine ? "You're" : `${who ?? "Someone"} is`} on the way`
-      : `${mine ? "You're" : `${who ?? "Someone"} is`} at the machine`;
+  const status = timing.stage === "waiting" ? null : `${mine ? "You" : who || "Someone"} accepted`;
 
   return (
     <article className={`rq-card ${timing.stage} ${timing.late ? "late" : ""} ${isNew ? "is-new" : ""} ${isMoved ? "is-moved" : ""}`}>
@@ -244,31 +245,25 @@ function QueueCard({ alert, timing, isNew, isMoved, me, showDepartment }: { aler
         </div>
         <div className="rq-card-clock">
           {timing.late && <em className="rq-late">Late</em>}
-          {/* the clock counts the current stage: waiting time, then time since they set off / arrived */}
+          {/* the clock counts the current stage: waiting time, then time since it was accepted */}
           <strong>{clock(timing.stage === "waiting" ? timing.waitSeconds : timing.stageSeconds)}</strong>
         </div>
       </header>
 
       {status && (
-        <p className="rq-status"><i className={`rq-dot ${timing.stage}`} />{status}<span>since {timeOfDay(timing.stage === "onSite" ? alert.arrivedAt : alert.acknowledgedAt)}</span></p>
+        <p className="rq-status"><i className={`rq-dot ${timing.stage}`} />{status}<span>at {timeOfDay(alert.acknowledgedAt ?? alert.arrivedAt)}</span></p>
       )}
       {(alert.displayMessage || alert.operatorNote) && <p className="rq-operator-note">“{alert.displayMessage || alert.operatorNote}”</p>}
 
-      {timing.stage === "waiting" && (
-        <button type="button" className={`rq-btn primary ${step.isPending ? "sending" : ""}`} onClick={() => step.mutate("acknowledge")} disabled={step.isPending} aria-busy={step.isPending}>
-          {step.isPending ? "Letting them know…" : "I'm on my way"}
+      {timing.stage === "waiting" ? (
+        <button type="button" className={`rq-btn primary ${accept.isPending ? "sending" : ""}`} onClick={() => accept.mutate()} disabled={accept.isPending} aria-busy={accept.isPending}>
+          {accept.isPending ? "Accepting…" : "Accept call"}
           <i className="rq-sweep" aria-hidden="true" />
         </button>
+      ) : (
+        <p className="rq-closes">The operator at {alert.machine.name} closes this call once it's fixed.</p>
       )}
-      {/* only the person who is on the way can say they've arrived */}
-      {timing.stage === "onTheWay" && (mine || !who) && (
-        <button type="button" className={`rq-btn secondary ${step.isPending ? "sending" : ""}`} onClick={() => step.mutate("arrive")} disabled={step.isPending} aria-busy={step.isPending}>
-          {step.isPending ? "Checking you in…" : "I've arrived"}
-          <i className="rq-sweep" aria-hidden="true" />
-        </button>
-      )}
-      {timing.stage === "onSite" && <p className="rq-closes">The operator closes this call at {alert.machine.name}.</p>}
-      {step.isError && <p className="rq-error" role="alert">{errorText(step.error, "That didn't go through. Try again.")}</p>}
+      {accept.isError && <p className="rq-error" role="alert">{errorText(accept.error, "That didn't go through. Try again.")}</p>}
 
       <div className="rq-messages">
         <button type="button" className="rq-messages-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>

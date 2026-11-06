@@ -76,10 +76,8 @@
 .su-status.waiting, .su-status.late { background: var(--pg-wait-soft); box-shadow: inset 0 0 0 1px var(--pg-wait-line); }
 .su-status.waiting i, .su-status.late i { background: var(--pg-wait); }
 .su-status.late i { animation: suPulse 1.8s ease-out infinite; }
-.su-status.onTheWay { background: var(--pg-way-soft); box-shadow: inset 0 0 0 1px var(--pg-way-line); }
-.su-status.onTheWay i { background: var(--pg-way); }
-.su-status.onSite { background: var(--pg-site-soft); box-shadow: inset 0 0 0 1px var(--pg-site-line); }
-.su-status.onSite i { background: var(--pg-site); }
+.su-status.accepted { background: var(--pg-way-soft); box-shadow: inset 0 0 0 1px var(--pg-way-line); }
+.su-status.accepted i { background: var(--pg-way); }
 :root[data-theme="dark"] .su-time { color: #c3cae0; }
 .su-time { color: var(--pg-text-2); font-size: 1rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 

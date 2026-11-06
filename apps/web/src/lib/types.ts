@@ -35,7 +35,7 @@ export type Alert = {
   responseSeconds?: number | null;
   clearSeconds?: number | null;
   activeTimerStartedAt?: string;
-  activeTimerStage?: "ACKNOWLEDGE" | "ARRIVE" | "CLEAR";
+  activeTimerStage?: "ACKNOWLEDGE" | "CLEAR";
   createdAt: string;
   acknowledgedAt?: string | null;
   arrivedAt?: string | null;

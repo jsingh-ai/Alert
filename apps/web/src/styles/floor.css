@@ -14,8 +14,7 @@
 /* Status dot */
 .fs-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.5rem; background: var(--pg-faint); }
 .fs-dot.waiting { background: var(--pg-wait); }
-.fs-dot.onTheWay { background: var(--pg-way); }
-.fs-dot.onSite { background: var(--pg-site); }
+.fs-dot.accepted { background: var(--pg-way); }
 
 /* ---------- Cards ---------- */
 .fs-card { min-width: 0; overflow: hidden; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
@@ -80,8 +79,7 @@
 /* Stage rail, as on Machine Station's call card */
 .fs-call::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
 .fs-call.waiting { --rail: var(--pg-wait); }
-.fs-call.onTheWay { --rail: var(--pg-way); }
-.fs-call.onSite { --rail: var(--pg-site); }
+.fs-call.accepted { --rail: var(--pg-way); }
 .fs-page .fs-call:hover { background: var(--pg-hover); }
 .fs-page .fs-call.selected { background: var(--pg-selected); box-shadow: inset 0 0 0 2px var(--pg-ring); }
 .fs-page .fs-call:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: -3px; }
@@ -131,8 +129,7 @@
 .fs-tile small { display: flex; align-items: center; font-size: 0.8125rem; color: var(--pg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-page .fs-tile.active { border-color: var(--pg-line-2); cursor: pointer; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
 .fs-tile.waiting { --rail: var(--pg-wait); }
-.fs-tile.onTheWay { --rail: var(--pg-way); }
-.fs-tile.onSite { --rail: var(--pg-site); }
+.fs-tile.accepted { --rail: var(--pg-way); }
 .fs-tile.active strong { color: var(--pg-text); font-weight: 600; }
 .fs-tile.active small { color: var(--pg-text-2); }
 .fs-tile.active.late small { color: var(--pg-wait-text); font-weight: 500; }
@@ -180,11 +177,10 @@
 .fs-progress-head .dept-icon { width: 32px; height: 32px; border-radius: 9px; }
 .fs-progress-head .dept-icon svg { width: 18px; height: 18px; }
 .fs-progress-who { margin-left: auto; font-size: 0.875rem; color: var(--pg-muted); }
-.fs-steps { list-style: none; padding: 1rem 1.1rem 1.1rem; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.fs-steps { list-style: none; padding: 1rem 1.1rem 1.1rem; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .fs-steps li { --rail: var(--pg-faint); --rail-soft: var(--pg-track); position: relative; display: grid; align-content: start; justify-items: start; gap: 0.15rem; padding-right: 0.4rem; }
 .fs-steps li.waiting { --rail: var(--pg-wait); --rail-soft: var(--pg-wait-soft); }
-.fs-steps li.onTheWay { --rail: var(--pg-way); --rail-soft: var(--pg-way-soft); }
-.fs-steps li.onSite { --rail: var(--pg-site); --rail-soft: var(--pg-site-soft); }
+.fs-steps li.accepted { --rail: var(--pg-way); --rail-soft: var(--pg-way-soft); }
 .fs-steps li i { position: relative; z-index: 1; box-sizing: border-box; width: 14px; height: 14px; margin-bottom: 0.45rem; border-radius: 50%; border: 2px solid var(--pg-line-2); background: var(--pg-card); }
 .fs-steps li::before { content: ""; position: absolute; top: 6px; left: 14px; right: 0; height: 2px; background: var(--pg-line); }
 .fs-steps li:last-child::before { display: none; }
@@ -236,6 +232,8 @@
   .fs-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .fs-stats > div, .fs-stats > div:first-child { padding: 0 0.75rem; }
   .fs-stats > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+  /* three stats: the last one takes the full row */
+  .fs-stats > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .fs-stats dd { font-size: 1.375rem; }
   .fs-filters, .fs-seg { width: 100%; }
   .fs-page .fs-select { width: 100%; }

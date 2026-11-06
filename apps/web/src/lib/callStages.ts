@@ -1,17 +1,17 @@
 import type { Alert, CommandGroup } from "./types";
 
 /**
- * A call moves through three live stages before the operator closes it at the machine:
- *   waiting   called, nobody has acknowledged yet          (red)
- *   onTheWay  acknowledged, responder travelling           (amber)
- *   onSite    responder marked arrived at the machine      (blue)
+ * A call has two live stages; the operator closes it at the machine once it's fixed:
+ *   waiting   called, no team has accepted it yet        (red)
+ *   accepted  a responder accepted it and is handling it  (amber)
+ * Older calls marked "arrived" (pagers can still send it) count as accepted.
  */
-export type CallStage = "waiting" | "onTheWay" | "onSite";
+export type CallStage = "waiting" | "accepted";
 
-/** A waiting call turns "late" after this long without an acknowledgement. */
+/** A waiting call turns "late" after this long without being accepted. */
 export const LATE_AFTER_SECONDS = 5 * 60;
 
-const STAGE_RANK: Record<CallStage, number> = { waiting: 0, onTheWay: 1, onSite: 2 };
+const STAGE_RANK: Record<CallStage, number> = { waiting: 0, accepted: 1 };
 
 function ms(value: string | null | undefined) {
   if (!value) return null;
@@ -21,10 +21,8 @@ function ms(value: string | null | undefined) {
 
 export type AlertTiming = {
   stage: CallStage;
-  /** seconds spent in each stage so far */
+  /** seconds from the call to it being accepted (or until now, while waiting) */
   waitSeconds: number;
-  travelSeconds: number;
-  fixSeconds: number;
   /** seconds in the current stage */
   stageSeconds: number;
   /** seconds since the call was made */
@@ -35,21 +33,14 @@ export type AlertTiming = {
 
 export function alertTiming(alert: Alert, now: number): AlertTiming {
   const created = ms(alert.createdAt) ?? now;
-  const acknowledged = ms(alert.acknowledgedAt);
-  const arrived = ms(alert.arrivedAt);
-  const stage: CallStage = alert.status === "ARRIVED" || arrived ? "onSite" : alert.status === "OPEN" ? "waiting" : "onTheWay";
-  const ackAt = stage === "waiting" ? null : acknowledged ?? created;
+  const stage: CallStage = alert.status === "OPEN" ? "waiting" : "accepted";
+  const acceptedAt = stage === "waiting" ? null : ms(alert.acknowledgedAt) ?? ms(alert.arrivedAt) ?? created;
   const seconds = (from: number, to: number) => Math.max(0, Math.floor((to - from) / 1000));
-  const waitSeconds = seconds(created, ackAt ?? now);
-  const travelSeconds = ackAt ? seconds(ackAt, stage === "onSite" ? arrived ?? now : now) : 0;
-  const fixSeconds = stage === "onSite" && arrived ? seconds(arrived, now) : 0;
-  const stageStart = stage === "onSite" ? arrived ?? now : stage === "onTheWay" ? ackAt ?? created : created;
+  const waitSeconds = seconds(created, acceptedAt ?? now);
   return {
     stage,
     waitSeconds,
-    travelSeconds,
-    fixSeconds,
-    stageSeconds: seconds(stageStart, now),
+    stageSeconds: seconds(acceptedAt ?? created, now),
     totalSeconds: seconds(created, now),
     late: stage === "waiting" && waitSeconds >= LATE_AFTER_SECONDS,
     createdAt: created
@@ -71,7 +62,7 @@ export function summarizeCall(command: CommandGroup, now: number): CallSummary {
   const alerts = command.alerts
     .map((alert) => ({ alert, timing: alertTiming(alert, now) }))
     .sort((a, b) => STAGE_RANK[a.timing.stage] - STAGE_RANK[b.timing.stage] || b.timing.totalSeconds - a.timing.totalSeconds);
-  const stage = alerts.reduce<CallStage>((worst, { timing }) => (STAGE_RANK[timing.stage] < STAGE_RANK[worst] ? timing.stage : worst), "onSite");
+  const stage = alerts.reduce<CallStage>((worst, { timing }) => (STAGE_RANK[timing.stage] < STAGE_RANK[worst] ? timing.stage : worst), "accepted");
   const created = ms(command.createdAt) ?? Math.min(...alerts.map(({ timing }) => timing.createdAt));
   return {
     command,
@@ -104,17 +95,13 @@ export function mergeByCall(commands: CommandGroup[]): CommandGroup[] {
   return Array.from(merged.values());
 }
 
-/** Most urgent first: waiting calls by longest wait, then on-the-way, then on-site. */
+/** Most urgent first: waiting calls by longest wait, then accepted calls, oldest first. */
 export function sortCalls(calls: CallSummary[]) {
   return [...calls].sort((a, b) =>
     STAGE_RANK[a.stage] - STAGE_RANK[b.stage] ||
     b.longestWaitSeconds - a.longestWaitSeconds ||
     b.totalSeconds - a.totalSeconds
   );
-}
-
-export function stageLabel(stage: CallStage) {
-  return stage === "waiting" ? "Waiting" : stage === "onTheWay" ? "On the way" : "On site";
 }
 
 /** Clock-style duration: 0:45, 7:41, 1:02:10 */
