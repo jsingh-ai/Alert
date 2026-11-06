@@ -9,7 +9,7 @@ import fiveStarLogoWhite from "../assets/logos/five-star-logo-white.svg";
 import "../styles/suite.css";
 
 /*
- * Suite chrome shared by every page, so Machine Station, Response Queue, Floor Status and Reports read
+ * Suite chrome shared by every page, so Machine Station, Team Calls, Floor Status and Reports read
  * as one product: the app bar, the status pill, the station menu, the status bar, and team colours.
  */
 

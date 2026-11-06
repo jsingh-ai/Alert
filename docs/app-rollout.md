@@ -276,7 +276,7 @@ If the server's outbound traffic goes through an inspecting proxy, use the same 
 lets the Power Automate notifications out (for example `NODE_EXTRA_CA_CERTS` for the proxy's
 certificate).
 
-**Each person:** open the app → **Response Queue** → **Turn on** in the card at the top (or the bell in
+**Each person:** open the app → **Team Calls** → **Turn on** in the card at the top (or the bell in
 the header) → **Allow**.
 
 - **Android:** works in Chrome, installed or not.
@@ -305,6 +305,6 @@ address keeps working throughout, as long as it is still listed in `CORS_ORIGIN`
 | Station signed out or forgot its machine | Expected once per device after moving to the new address. If it keeps happening, the browser is clearing its data (kiosk mode, private window, cleanup policy). |
 | Still showing the previous version after a deploy | Close the app window and open it again. The new version loads on the next open. |
 | Pagers stopped working | Port 5003 was closed or narrowed too far. See step 5. |
-| No notifications bell or card on the Response Queue | The page isn't on `https://`, the keys aren't in `.env` (step 9), or this is an iPhone in a Safari tab (add it to the Home Screen first). |
+| No notifications bell or card on Team Calls | The page isn't on `https://`, the keys aren't in `.env` (step 9), or this is an iPhone in a Safari tab (add it to the Home Screen first). |
 | Bell is greyed out | Notifications are blocked for this site: the phone's Settings -> Notifications (iPhone: the ProcessGuard app; Android: Chrome -> the site). |
 | Turned on but nothing arrives | Check the server log for "push to ... failed". Usually outbound 443 to the push service is blocked (step 9). |

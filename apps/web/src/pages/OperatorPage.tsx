@@ -6,7 +6,7 @@ import { useAuth } from "../lib/auth";
 import type { Alert, CommandGroup } from "../lib/types";
 import { clock, mergeByCall, summarizeCall } from "../lib/callStages";
 import type { AlertTiming, CallStage, CallSummary } from "../lib/callStages";
-import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState } from "../components/Suite";
+import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState, teamHue } from "../components/Suite";
 import type { Connection, Tone } from "../components/Suite";
 import { CheckCircleIcon, ChevronRightIcon, CloseIcon, LayersIcon, MessageIcon, PlusIcon, SendIcon, SettingsIcon } from "../components/icons";
 import "../styles/station.css";
@@ -24,6 +24,21 @@ type Template = { id: string; buttonLabel: string; targets: Array<{ departmentId
 type IssueType = { id: string; name: string; departmentId: string };
 type Bootstrap = { machines: Machine[]; departments: Department[]; issueTypes: IssueType[]; commandTemplates: Template[] };
 type Snapshot = { data?: { commands?: CommandGroup[] } };
+
+/** Phones get their own compact layout (calls as rows, messages behind a button). */
+const PHONE_QUERY = "(max-width: 640px)";
+
+function usePhone() {
+  const [phone, setPhone] = useState(() => typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches);
+  useEffect(() => {
+    const query = window.matchMedia(PHONE_QUERY);
+    const update = () => setPhone(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return phone;
+}
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -104,6 +119,7 @@ export function OperatorPage() {
   const [celebration, setCelebration] = useState<ClosedInfo | null>(null);
   // With several calls open, a call's messages show in the side panel so the rows never change height
   const [threadFor, setThreadFor] = useState<string | null>(null);
+  const phone = usePhone();
 
   const bootstrap = useQuery({ queryKey: ["operator-bootstrap"], queryFn: () => api<{ data?: Bootstrap }>("/api/operator/bootstrap") });
   const snapshot = useQuery({
@@ -204,7 +220,10 @@ export function OperatorPage() {
     );
   }
 
-  const threadCall = calls.length > 1 ? calls.find((call) => call.command.id === threadFor) : undefined;
+  // Several calls, or any call on a phone, show as compact rows with messages behind a button.
+  // On a phone the messages open inside the call; on a bigger screen, in the side rail.
+  const compactCalls = calls.length > 1 || phone;
+  const threadCall = compactCalls && !phone ? calls.find((call) => call.command.id === threadFor) : undefined;
   const available = templates.filter((template) => !template.targets.some((t) => busyDepartments.has(t.departmentId)));
   const sendingId = createCall.isPending ? (createCall.variables?.templateId as string | undefined) : undefined;
   const callTemplate = (template: Template) => {
@@ -240,7 +259,8 @@ export function OperatorPage() {
               <ActiveCall
                 key={call.command.id}
                 call={call}
-                compact={calls.length > 1}
+                compact={compactCalls}
+                inlineThread={phone}
                 threadOpen={threadFor === call.command.id}
                 onToggleThread={() => setThreadFor((current) => (current === call.command.id ? null : call.command.id))}
                 machineId={machineId}
@@ -355,6 +375,7 @@ function CallForHelp({ templates, issueTypes, sendingId, disabled, error, onCall
               key={template.id}
               type="button"
               className={`ms-tile ${sending ? "sending" : ""}`}
+              style={{ "--hue": teamHue(department) } as CSSProperties}
               disabled={disabled}
               aria-busy={sending}
               onPointerDown={press(template.id)}
@@ -373,6 +394,7 @@ function CallForHelp({ templates, issueTypes, sendingId, disabled, error, onCall
 
       <div className="ms-more">
         <div className="ms-list ms-list-grid">
+          <h2 className="ms-list-head ms-more-head">More requests</h2>
           {combined.map((template) => (
             <CallRow key={template.id} template={template} sending={sendingId === template.id} disabled={disabled} onCall={() => onCall(template)} />
           ))}
@@ -557,9 +579,11 @@ function CheckIcon() {
   );
 }
 
-function ActiveCall({ call, compact, threadOpen, onToggleThread, machineId, stale, disabled, onChange, onClosed }: {
+function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, machineId, stale, disabled, onChange, onClosed }: {
   call: CallSummary;
   compact: boolean;
+  /** Phone: the messages open inside this call instead of the side rail */
+  inlineThread: boolean;
   threadOpen: boolean;
   onToggleThread: () => void;
   machineId: string;
@@ -654,6 +678,7 @@ function ActiveCall({ call, compact, threadOpen, onToggleThread, machineId, stal
         </div>
         <div className="ms-row-actions">{confirm || action}</div>
         {error}
+        {inlineThread && threadOpen && <CallThread call={call} disabled={disabled} onClose={onToggleThread} inline />}
       </article>
     );
   }
@@ -715,6 +740,7 @@ function ActiveCall({ call, compact, threadOpen, onToggleThread, machineId, stal
       {compact ? null : <CallThread call={call} disabled={disabled} />}
       </div>
       {compact && <ThreadToggle call={call} open={threadOpen} onToggle={onToggleThread} />}
+      {compact && inlineThread && threadOpen && <CallThread call={call} disabled={disabled} onClose={onToggleThread} inline />}
 
       {confirm || (action && (
         <footer className="ms-call-foot">
@@ -730,7 +756,6 @@ function ActiveCall({ call, compact, threadOpen, onToggleThread, machineId, stal
 /* ---------- Messages on a call ---------- */
 
 type Note = { id: string; note: string; createdAt: string; actorNameText?: string | null; clientMessageId?: string | null; user?: { id: string } | null };
-const OPERATOR_REPLIES = ["Machine is down", "Please hurry", "Thank you"];
 
 /** Messages across every team on the call, oldest first. A message sent to several teams is stored once per team; show it once. */
 function callNotes(call: CallSummary): Note[] {
@@ -753,13 +778,13 @@ function ThreadToggle({ call, open, onToggle }: { call: CallSummary; open: boole
   return (
     <button type="button" className={`ms-thread-toggle ${open ? "open" : ""}`} aria-expanded={open} onClick={onToggle}>
       <MessageIcon />
-      {count ? `Messages · ${count}` : "Message the team"}
+      {count ? `Messages · ${count}` : "Send message"}
     </button>
   );
 }
 
-/** Thread + one-tap replies + compose. Sends to every team still working the call. */
-function CallThread({ call, disabled, title, onClose }: { call: CallSummary; disabled: boolean; title?: string; onClose?: () => void }) {
+/** Thread + compose. Sends to every team still working the call. */
+function CallThread({ call, disabled, title, onClose, inline = false }: { call: CallSummary; disabled: boolean; title?: string; onClose?: () => void; inline?: boolean }) {
   const { session } = useAuth();
   const queryClient = useQueryClient();
   const me = session?.user.id;
@@ -770,7 +795,7 @@ function CallThread({ call, disabled, title, onClose }: { call: CallSummary; dis
   const teams = call.alerts.map(({ alert }) => alert.department.name).join(" and ");
 
   const send = useMutation({
-    mutationFn: async ({ body }: { body: string; fromInput: boolean }) => {
+    mutationFn: async (body: string) => {
       // One base id per message, suffixed per team, so a resend never duplicates and the station can show it once
       const base = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const results = await Promise.allSettled(targets.map((id) => postJson(`/api/alerts/${id}/notes`, { note: body, clientMessageId: `${base}:${id}` })));
@@ -778,9 +803,8 @@ function CallThread({ call, disabled, title, onClose }: { call: CallSummary; dis
       if (failed === results.length) throw new Error("Message not sent. Try again.");
       if (failed) throw new Error("Sent, but not every team got it. Check with the team.");
     },
-    onSettled: (_, error, { fromInput }) => {
-      // Only a typed message clears the box (a one-tap reply leaves a half-written draft alone)
-      if (fromInput && (!error || error.message.startsWith("Sent"))) setText("");
+    onSettled: (_, error) => {
+      if (!error || error.message.startsWith("Sent")) setText("");
       return queryClient.invalidateQueries({ queryKey: ["operator-snapshot"] });
     }
   });
@@ -793,11 +817,11 @@ function CallThread({ call, disabled, title, onClose }: { call: CallSummary; dis
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     const body = text.trim();
-    if (body) send.mutate({ body, fromInput: true });
+    if (body) send.mutate(body);
   }
 
   return (
-    <section className={`ms-thread ${onClose ? "panel" : ""}`} aria-label="Messages">
+    <section className={`ms-thread ${inline ? "inline" : onClose ? "panel" : ""}`} aria-label="Messages">
       <header className="ms-thread-top">
         <h3 className="ms-thread-head">{title ? `Messages · ${title}` : "Messages"}</h3>
         {onClose && <button type="button" className="ms-thread-close" onClick={onClose} aria-label="Close messages"><CloseIcon /></button>}
@@ -817,13 +841,9 @@ function CallThread({ call, disabled, title, onClose }: { call: CallSummary; dis
       ) : (
         <p className="ms-thread-empty">No messages yet. Anything you send goes to {teams}.</p>
       )}
-      <div className="ms-thread-quick">
-        {OPERATOR_REPLIES.map((reply) => (
-          <button key={reply} type="button" onClick={() => { haptic(); send.mutate({ body: reply, fromInput: false }); }} disabled={send.isPending || disabled || !targets.length}>{reply}</button>
-        ))}
-      </div>
       <form className="ms-thread-compose" onSubmit={onSubmit}>
-        <input value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message ${teams}`} aria-label="Message" disabled={disabled} />
+        {/* Opened from "Send message" on a phone: ready to type straight away */}
+        <input value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message ${teams}`} aria-label="Message" disabled={disabled} autoFocus={inline} />
         <button type="submit" aria-label="Send" disabled={!text.trim() || send.isPending || disabled || !targets.length}><SendIcon /></button>
       </form>
       {send.isError && <p className="ms-error" role="alert">{errorText(send.error, "Message not sent. Try again.")}</p>}

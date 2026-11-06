@@ -59,7 +59,7 @@ const DEPARTMENT_ICONS: Record<string, Icon> = {
 
 const QUICK_PROFILES: { key: "operator" | "department" | "manager"; label: string; hint: string; icon: Icon }[] = [
   { key: "operator", label: "Operator", hint: "Call for help", icon: BoltIcon },
-  { key: "department", label: "Department", hint: "Response queue", icon: LayersIcon },
+  { key: "department", label: "Department", hint: "Team calls", icon: LayersIcon },
   { key: "manager", label: "Manager", hint: "Live floor", icon: GridIcon }
 ];
 

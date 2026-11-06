@@ -7,9 +7,9 @@ const priorities = ["LOW", "NORMAL", "HIGH", "CRITICAL"];
 const roles = ["ADMIN", "MANAGER", "OPERATOR", "RESPONDER", "VIEWER"];
 const quickLoginProfiles = [
   { id: "operator", label: "Operator", detail: "Operator page" },
-  { id: "quality", label: "Quality", detail: "Department queue" },
-  { id: "supervisor", label: "Supervisor", detail: "Department queue" },
-  { id: "maintenance", label: "Maintenance", detail: "Department queue" },
+  { id: "quality", label: "Quality", detail: "Team calls" },
+  { id: "supervisor", label: "Supervisor", detail: "Team calls" },
+  { id: "maintenance", label: "Maintenance", detail: "Team calls" },
   { id: "manager", label: "Manager", detail: "Live floor and reports" }
 ];
 

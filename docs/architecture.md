@@ -63,7 +63,7 @@ PostgreSQL is the source of truth. Browser state is cached with TanStack Query. 
 ADMIN      Full setup and all pages
 MANAGER    Live floor, queue, operator page, reports
 OPERATOR   Call Help only
-RESPONDER  Department Queue and Live Floor
+RESPONDER  Team Calls and Live Floor
 VIEWER     Live Floor and Queue read access
 ```
 

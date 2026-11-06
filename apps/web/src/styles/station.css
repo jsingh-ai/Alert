@@ -401,11 +401,6 @@
 .ms-thread-meta time { font-size: 0.8125rem; color: var(--pg-muted); }
 .ms-thread-list p { margin: 0.15rem 0 0; font-size: 1rem; color: var(--pg-text); overflow-wrap: anywhere; }
 .ms-thread-empty { flex: 1; display: grid; place-items: center; min-height: 120px; padding: 1rem; border: 1px dashed var(--pg-line-2); border-radius: 12px; color: var(--pg-muted); text-align: center; }
-.ms-thread-quick { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.ms-page .ms-thread-quick button { min-height: 44px; padding: 0 1rem; border: 0; border-radius: 999px; background: var(--pg-track); color: var(--pg-text); font-size: 0.9375rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
-.ms-page .ms-thread-quick button:hover:not(:disabled) { background: var(--pg-line); }
-.ms-page .ms-thread-quick button:active:not(:disabled) { transform: scale(0.97); }
-.ms-page .ms-thread-quick button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ms-thread-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; }
 .ms-page .ms-thread-compose input { width: 100%; height: 52px; padding: 0 1rem; border: 1px solid var(--pg-line-2); border-radius: 12px; background: var(--pg-input); color: var(--pg-text); font-size: 16px; box-sizing: border-box; }
 .ms-page .ms-thread-compose input:focus { outline: none; border-color: var(--pg-accent); box-shadow: 0 0 0 3px var(--pg-ring); }
@@ -511,4 +506,65 @@
   .ms-celebrate-body > *, .ms-celebrate-body > small svg { animation: none !important; }
   .ms-ripple, .ms-confetti, .ms-celebrate-ring { display: none; }
   .ms-celebrate-mark circle, .ms-celebrate-mark path { animation: none; stroke-dashoffset: 0; }
+}
+
+/* "More requests" names the extra requests' card; only phones show it, where they become one list */
+.ms-more-head { display: none; }
+
+/* ---------- Phone ---------- */
+/* The machine is the hero; the team calls stand out in their colours; the other requests sit quietly
+   in one list; an open call is a compact row with its messages behind "Send message". */
+@media (max-width: 640px) {
+  /* App bar: machine name large, with its area and code above; the state is a small line under it */
+  .ms-page .su-head { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title menu" "status status"; align-items: start; row-gap: 0.65rem; min-height: 0; padding-top: 0.9rem; padding-bottom: 1rem; }
+  .ms-page .su-head-side { display: contents; }
+  .ms-page .su-title { grid-area: title; gap: 0.3rem; }
+  .ms-page .su-eyebrow { display: block; font-size: 0.6875rem; letter-spacing: 0.16em; }
+  .ms-page .su-head h1 { max-width: 100%; font-size: 2.25rem; letter-spacing: -0.035em; }
+  .ms-page .su-status { grid-area: status; justify-self: start; height: 30px; gap: 0.5rem; padding: 0 0.75rem 0 0.65rem; font-size: 0.8125rem; }
+  .ms-page .su-status i { width: 8px; height: 8px; }
+  .ms-page .su-menu { grid-area: menu; }
+
+  /* Team calls: tinted in the team's colour with a solid icon, so each one is unmistakable */
+  .ms-tiles { gap: 0.75rem; }
+  .ms-page .ms-tile { min-height: 104px; padding: 1.1rem 1.2rem 1.1rem 1.35rem; border-color: color-mix(in srgb, var(--hue) 32%, var(--pg-line)); background: color-mix(in srgb, var(--hue) 8%, var(--pg-card)); box-shadow: inset 5px 0 0 var(--hue), 0 1px 2px rgba(15, 23, 42, 0.05); }
+  :root[data-theme="dark"] .ms-page .ms-tile { background: color-mix(in srgb, var(--hue) 16%, var(--pg-card)); }
+  .ms-tile .dept-icon { width: 60px; height: 60px; border-radius: 16px; background: var(--hue); color: #fff; box-shadow: none; }
+  .ms-tile .dept-icon svg { width: 30px; height: 30px; }
+  .ms-tile-label { font-size: 1.5rem; }
+  .ms-tile-sub { color: var(--pg-text-2); font-size: 0.9375rem; }
+  .ms-page .ms-tile:active:not(:disabled) { transform: scale(0.98); border-color: var(--hue); }
+
+  /* Other requests (and "Call another team" during a call): one quiet list card with smaller rows */
+  .ms-more-head { display: block; }
+  .ms-list-grid, .ms-rail .ms-list { grid-template-columns: minmax(0, 1fr); gap: 0; overflow: hidden; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); }
+  .ms-page .ms-list .ms-row { min-height: 60px; padding: 0.6rem 1rem; border: 0; border-radius: 0; box-shadow: none; }
+  .ms-page .ms-list .ms-row + .ms-row { border-top: 1px solid var(--pg-line); }
+  .ms-list .ms-row .dept-icon, .ms-list .ms-glyph { width: 32px; height: 32px; border-radius: 9px; }
+  .ms-list .ms-row .dept-icon svg, .ms-list .ms-glyph svg { width: 18px; height: 18px; }
+  .ms-list .ms-row-text strong { font-size: 1rem; }
+  .ms-list .ms-row-text small { font-size: 0.8125rem; }
+
+  /* An open call: headline and timer side by side, the progress line across, one action, then messages on request */
+  .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head timer" "progress progress" "actions actions" "toggle toggle" "thread thread"; align-items: start; gap: 0.8rem 1rem; padding: 1.1rem 1.1rem 1.15rem 1.4rem; }
+  .ms-row-main { display: contents; }
+  .ms-row-main h2 { grid-area: head; align-self: center; font-size: 1.375rem; }
+  .ms-row-progress { grid-area: progress; gap: 0.6rem; font-size: 0.9375rem; }
+  .ms-call-row .ms-thread-toggle { grid-area: toggle; }
+  .ms-row-timer { grid-area: timer; justify-items: end; text-align: right; }
+  .ms-row-timer span { font-size: 0.6875rem; }
+  .ms-row-timer strong { font-size: 2.5rem; }
+  .ms-row-timer small { font-size: 0.8125rem; }
+  .ms-row-actions { grid-area: actions; }
+  .ms-page .ms-row-actions > .ms-btn, .ms-page .ms-row-actions > .ms-btn.big { min-height: 52px; }
+  .ms-call-row > .ms-thread.inline { grid-area: thread; }
+
+  /* Messages, opened inside the call */
+  .ms-thread.inline { gap: 0.6rem; padding: 0.9rem 0 0; border-left: 0; border-top: 1px solid var(--pg-line); animation: msUp 0.2s ease; }
+  .ms-thread.inline .ms-thread-list { flex: none; min-height: 0; max-height: 240px; }
+  .ms-thread.inline .ms-thread-empty { min-height: 0; padding: 0.75rem; font-size: 0.875rem; }
+  .ms-page .ms-thread.inline .ms-thread-close { width: 36px; height: 36px; }
+}
+@media (max-width: 640px) and (prefers-reduced-motion: reduce) {
+  .ms-thread.inline { animation: none; }
 }

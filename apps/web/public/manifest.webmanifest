@@ -2,7 +2,7 @@
   "id": "/",
   "name": "ProcessGuard Andon",
   "short_name": "ProcessGuard",
-  "description": "Live andon calls, response queue and floor status for Five Star manufacturing.",
+  "description": "Live andon calls, team calls and floor status for Five Star manufacturing.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -18,7 +18,7 @@
   ],
   "shortcuts": [
     { "name": "Machine Station", "url": "/operator", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Response Queue", "url": "/queue", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Team Calls", "url": "/queue", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
     { "name": "Floor", "url": "/floor", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
     { "name": "Reports", "url": "/reports", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
   ]
