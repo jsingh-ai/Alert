@@ -4,6 +4,7 @@ import jwt from "@fastify/jwt";
 import type { Membership, MembershipScope, User, Company } from "@prisma/client";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
+import { navForRole } from "../nav.js";
 
 export type SessionToken = {
   userId: string;
@@ -47,6 +48,21 @@ export function signSession(app: FastifyInstance, membership: Membership) {
     role: membership.role as Role
   };
   return app.jwt.sign(payload, { expiresIn: "12h" });
+}
+
+/**
+ * Sign-in plus: this person's role has this page in its menu (nav.ts). A page's API answers exactly
+ * the roles that can open the page, so calling the API directly gets no more than the screens show.
+ */
+export function requirePage(app: FastifyInstance, pageId: string) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    await app.authenticate(request, reply);
+    if (reply.sent) return;
+    const role = (request.membershipContext?.role ?? "") as Role;
+    if (!navForRole(role).some((item) => item.id === pageId)) {
+      return reply.code(403).send({ success: false, error: "Your role doesn't have this page." });
+    }
+  };
 }
 
 export const authPlugin = fp(async (app) => {

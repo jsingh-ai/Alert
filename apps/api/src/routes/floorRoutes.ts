@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
+import { requirePage } from "../services/auth.js";
 import { alertCommandLabel, includeAlert, serializeAlert } from "../services/alertService.js";
 import { ACTIVE_ALERT_STATUSES, machineWhereForContext } from "../services/permissions.js";
 import { startOfDayInTimeZone } from "../utils/time.js";
@@ -32,7 +33,7 @@ function groupCommands(alerts: any[]) {
 }
 
 export async function floorRoutes(app: FastifyInstance) {
-  app.get("/api/floor/active", { preHandler: app.authenticate }, async (request) => {
+  app.get("/api/floor/active", { preHandler: requirePage(app, "floor") }, async (request) => {
     const ctx = request.membershipContext!;
     const fetched = await prisma.machine.findMany({
       where: machineWhereForContext(ctx),
