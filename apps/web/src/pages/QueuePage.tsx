@@ -67,18 +67,24 @@ export function QueuePage() {
   const connection = connectionState(active, now, OFFLINE_AFTER_MS);
   const offline = connection === "offline";
 
-  // Calls that appear after the page loaded get a brief highlight (first-seen time per call).
+  // Calls that appear after the page loaded drop in; a call that changes stage slides into its new column.
+  // Worked out while rendering (not in an effect) so the animation starts on the same frame the card appears.
   const firstSeen = useRef<Map<string, number> | null>(null);
-  useEffect(() => {
+  const lastStage = useRef(new Map<string, { status: string; at: number }>());
+  useMemo(() => {
     const list = active.data?.data;
     if (!list) return;
-    if (!firstSeen.current) {
-      firstSeen.current = new Map(list.map((alert) => [alert.id, 0]));
-      return;
+    const initial = !firstSeen.current;
+    if (!firstSeen.current) firstSeen.current = new Map();
+    for (const alert of list) {
+      if (!firstSeen.current.has(alert.id)) firstSeen.current.set(alert.id, initial ? 0 : Date.now());
+      const seen = lastStage.current.get(alert.id);
+      if (!seen) lastStage.current.set(alert.id, { status: alert.status, at: 0 });
+      else if (seen.status !== alert.status) lastStage.current.set(alert.id, { status: alert.status, at: Date.now() });
     }
-    for (const alert of list) if (!firstSeen.current.has(alert.id)) firstSeen.current.set(alert.id, Date.now());
   }, [active.data]);
   const fresh = new Set(items.filter(({ alert }) => now - (firstSeen.current?.get(alert.id) ?? 0) < 5000).map(({ alert }) => alert.id));
+  const moved = new Set(items.filter(({ alert }) => now - (lastStage.current.get(alert.id)?.at ?? 0) < 2500).map(({ alert }) => alert.id));
 
   // Waiting count in the browser tab title, so a phone in a pocket shows it at a glance.
   useEffect(() => {
@@ -163,7 +169,7 @@ export function QueuePage() {
             <p className="rq-empty"><CheckCircleIcon />Nobody is waiting. New calls appear here.</p>
           ) : (
             <ol className="rq-list">
-              {waiting.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={fresh.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
+              {waiting.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={fresh.has(alert.id)} isMoved={moved.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
             </ol>
           )}
         </section>
@@ -177,7 +183,7 @@ export function QueuePage() {
             <p className="rq-empty">No one is out on a call.</p>
           ) : (
             <ol className="rq-list">
-              {responding.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={false} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
+              {responding.map(({ alert, timing }) => <li key={alert.id}><QueueCard alert={alert} timing={timing} isNew={false} isMoved={moved.has(alert.id)} me={session?.user.displayName ?? ""} showDepartment={!departmentId} /></li>)}
             </ol>
           )}
         </section>
@@ -190,7 +196,7 @@ export function QueuePage() {
   );
 }
 
-function QueueCard({ alert, timing, isNew, me, showDepartment }: { alert: Alert; timing: AlertTiming; isNew: boolean; me: string; showDepartment: boolean }) {
+function QueueCard({ alert, timing, isNew, isMoved, me, showDepartment }: { alert: Alert; timing: AlertTiming; isNew: boolean; isMoved: boolean; me: string; showDepartment: boolean }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -198,13 +204,15 @@ function QueueCard({ alert, timing, isNew, me, showDepartment }: { alert: Alert;
   const who = alert.responderNameText?.trim();
   const mine = Boolean(who && me && who === me);
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["active-alerts"] });
-    queryClient.invalidateQueries({ queryKey: ["floor"] });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["active-alerts"] }),
+      queryClient.invalidateQueries({ queryKey: ["floor"] })
+    ]);
   const step = useMutation({
     mutationFn: (action: "acknowledge" | "arrive") => postJson(`/api/alerts/${alert.id}/${action}`, {}),
-    onSettled: refresh
+    onSuccess: () => refresh(),
+    onError: () => { void refresh(); }
   });
   const send = useMutation({
     mutationFn: (note: string) => postJson(`/api/alerts/${alert.id}/notes`, { note, clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}` }),
@@ -227,7 +235,7 @@ function QueueCard({ alert, timing, isNew, me, showDepartment }: { alert: Alert;
       : `${mine ? "You're" : `${who ?? "Someone"} is`} at the machine`;
 
   return (
-    <article className={`rq-card ${timing.stage} ${timing.late ? "late" : ""} ${isNew ? "is-new" : ""}`}>
+    <article className={`rq-card ${timing.stage} ${timing.late ? "late" : ""} ${isNew ? "is-new" : ""} ${isMoved ? "is-moved" : ""}`}>
       <header className="rq-card-head">
         <TeamIcon department={alert.department} />
         <div className="rq-card-title">
@@ -247,14 +255,16 @@ function QueueCard({ alert, timing, isNew, me, showDepartment }: { alert: Alert;
       {(alert.displayMessage || alert.operatorNote) && <p className="rq-operator-note">“{alert.displayMessage || alert.operatorNote}”</p>}
 
       {timing.stage === "waiting" && (
-        <button type="button" className="rq-btn primary" onClick={() => step.mutate("acknowledge")} disabled={step.isPending}>
-          {step.isPending ? "Sending…" : "I'm on my way"}
+        <button type="button" className={`rq-btn primary ${step.isPending ? "sending" : ""}`} onClick={() => step.mutate("acknowledge")} disabled={step.isPending} aria-busy={step.isPending}>
+          {step.isPending ? "Letting them know…" : "I'm on my way"}
+          <i className="rq-sweep" aria-hidden="true" />
         </button>
       )}
       {/* only the person who is on the way can say they've arrived */}
       {timing.stage === "onTheWay" && (mine || !who) && (
-        <button type="button" className="rq-btn secondary" onClick={() => step.mutate("arrive")} disabled={step.isPending}>
-          {step.isPending ? "Sending…" : "I've arrived"}
+        <button type="button" className={`rq-btn secondary ${step.isPending ? "sending" : ""}`} onClick={() => step.mutate("arrive")} disabled={step.isPending} aria-busy={step.isPending}>
+          {step.isPending ? "Checking you in…" : "I've arrived"}
+          <i className="rq-sweep" aria-hidden="true" />
         </button>
       )}
       {timing.stage === "onSite" && <p className="rq-closes">The operator closes this call at {alert.machine.name}.</p>}

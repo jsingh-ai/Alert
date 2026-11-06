@@ -67,8 +67,15 @@
 .rq-card.waiting { --rail: var(--pg-wait); }
 .rq-card.onTheWay { --rail: var(--pg-way); }
 .rq-card.onSite { --rail: var(--pg-site); }
-.rq-card.is-new { animation: rqNew 1.4s ease-out 2; }
-@keyframes rqNew { 0% { background: var(--pg-selected); } 100% { background: transparent; } }
+/* A new call drops in from the top; a call that just changed stage slides into its new column */
+.rq-card.is-new { animation: rqDrop 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.6s 0.2s ease-out; }
+.rq-card.is-moved { animation: rqSlide 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.4s 0.15s ease-out; }
+@keyframes rqDrop { from { opacity: 0; transform: translateY(-14px); } }
+@keyframes rqSlide { from { opacity: 0; transform: translateX(-24px); } }
+@keyframes rqGlow { 0% { background: color-mix(in srgb, var(--rail) 12%, var(--pg-card)); } 100% { background: transparent; } }
+.rq-card::before { transform-origin: top; }
+.rq-card.is-new::before, .rq-card.is-moved::before { animation: rqRail 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes rqRail { from { transform: scaleY(0); } }
 .rq-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.9rem; }
 .rq-card-head .dept-icon { width: 40px; height: 40px; border-radius: 11px; }
 .rq-card-head .dept-icon svg { width: 22px; height: 22px; }
@@ -85,12 +92,18 @@
 .rq-closes { color: var(--pg-muted); font-size: 0.9375rem; }
 
 /* One next step per call: dark primary (same as Machine Station), outlined secondary */
-.rq-page .rq-btn { width: 100%; min-height: 54px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 12px; font-size: 1.0625rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.rq-page .rq-btn { position: relative; overflow: hidden; width: 100%; min-height: 54px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 12px; font-size: 1.0625rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
 .rq-page .rq-btn.primary { background: var(--pg-text); color: var(--pg-card); }
 .rq-page .rq-btn.primary:hover:not(:disabled) { background: var(--pg-text-2); }
 .rq-page .rq-btn.secondary { border-color: var(--pg-line-2); background: var(--pg-card); color: var(--pg-text); }
 .rq-page .rq-btn.secondary:hover:not(:disabled) { background: var(--pg-hover); }
+.rq-page .rq-btn:active:not(:disabled) { transform: scale(0.985); }
 .rq-page .rq-btn:disabled { opacity: 0.55; cursor: progress; }
+/* Sending: the button stays solid and a light bar runs along it until the call has moved */
+.rq-page .rq-btn.sending:disabled { opacity: 1; }
+.rq-sweep { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: currentColor; opacity: 0.55; transform: scaleX(0); transform-origin: left; pointer-events: none; }
+.rq-btn.sending .rq-sweep { animation: rqSweep 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+@keyframes rqSweep { to { transform: scaleX(0.92); } }
 .rq-page .rq-btn:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
 
 /* Messages */
@@ -130,5 +143,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rq-card.is-new { animation: none; }
+  .rq-card.is-new, .rq-card.is-moved, .rq-card.is-new::before, .rq-card.is-moved::before { animation: none; }
+  .rq-btn.sending .rq-sweep { animation: none; transform: scaleX(0.6); }
 }
