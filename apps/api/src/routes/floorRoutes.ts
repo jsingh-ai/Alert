@@ -37,7 +37,8 @@ export async function floorRoutes(app: FastifyInstance) {
     const machines = await prisma.machine.findMany({
       where: machineWhereForContext(ctx),
       include: { machineGroup: true },
-      orderBy: [{ machineGroup: { sortOrder: "asc" } }, { sortOrder: "asc" }]
+      // Ties (sortOrder defaults to 0) fall back to names, so the floor's order never shuffles
+      orderBy: [{ machineGroup: { sortOrder: "asc" } }, { machineGroup: { name: "asc" } }, { sortOrder: "asc" }, { name: "asc" }]
     });
     const machineIds = machines.map((machine) => machine.id);
     const todayStart = startOfDayInTimeZone(new Date(), config.reportTimeZone);
@@ -54,6 +55,17 @@ export async function floorRoutes(app: FastifyInstance) {
       where: { companyId: ctx.companyId, machineId: { in: machineIds }, createdAt: { gte: todayStart } },
       _count: { _all: true }
     });
+    // Calls today, not team alerts: a call to two teams is one call
+    const todayRows = await prisma.andonAlert.findMany({
+      where: { companyId: ctx.companyId, machineId: { in: machineIds }, createdAt: { gte: todayStart } },
+      select: { id: true, machineId: true, commandId: true }
+    });
+    const todayCalls = new Map<string, Set<string>>();
+    for (const row of todayRows) {
+      const set = todayCalls.get(row.machineId) ?? new Set<string>();
+      set.add(row.commandId ?? row.id);
+      todayCalls.set(row.machineId, set);
+    }
     const latestAlerts = await prisma.andonAlert.findMany({
       where: { companyId: ctx.companyId, machineId: { in: machineIds } },
       orderBy: { createdAt: "desc" },
@@ -72,6 +84,7 @@ export async function floorRoutes(app: FastifyInstance) {
     }));
     const machineStats = Object.fromEntries(machineIds.map((machineId) => [machineId, {
       alertsToday: todayCounts.get(machineId) ?? 0,
+      callsToday: todayCalls.get(machineId)?.size ?? 0,
       activeAlerts: activeCounts.get(machineId) ?? 0,
       lastAlert: latestByMachine.get(machineId) ?? null
     }]));

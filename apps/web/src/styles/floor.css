@@ -1,46 +1,44 @@
 /*
- * Floor Status (managers and supervisors, with the sidebar).
- * Same suite as Machine Station: the shared app bar and status bar (suite.css), 14px cards with
- * their headings inside, a coloured stage rail on each call, big tabular timers.
- * Under the app bar: a toolbar card (counts + filters), the calls board, then the whole floor.
+ * Floor Status (managers and supervisors, with the sidebar; also fine on a wall screen).
+ * Same suite as the other pages: shared app bar and status bar (suite.css), 14px cards with headings inside.
+ *   Overview   one bar: machines running, teams waiting (late), being handled, longest wait, calls today; area filter
+ *   The floor  one card per area; every machine a tile in a fixed order. Running = calm green accent,
+ *              waiting = red tint, accepted = amber tint. Each area shows a small health bar.
+ *   Teams      one card per department with only its own calls (waiting first). Departments never mix.
  * Greyscale UI; colour only for status and the soft team tints. Tokens: ui.css.
  */
 
-.fs-page dl, .fs-page dd, .fs-page ol { margin: 0; }
+.fs-page dl, .fs-page dd, .fs-page ol, .fs-page ul, .fs-page h2, .fs-page h3, .fs-page p { margin: 0; }
 .fs-page .num { font-variant-numeric: tabular-nums; }
 .fs-page .fs-late-text { color: var(--pg-wait-text); }
 :root[data-theme="dark"] .fs-page .fs-late-text { color: #f87171; }
 
 /* Status dot */
-.fs-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.5rem; background: var(--pg-faint); }
+.fs-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pg-faint); }
+.fs-dot.running { background: var(--pg-done); }
 .fs-dot.waiting { background: var(--pg-wait); }
 .fs-dot.accepted { background: var(--pg-way); }
 
 /* ---------- Cards ---------- */
 .fs-card { min-width: 0; overflow: hidden; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
-/* Card heading, inside the card: small spaced label over a hairline (as .ms-list-head on Machine Station) */
 .fs-card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 52px; box-sizing: border-box; margin: 0; padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--pg-line); font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pg-muted); }
-.fs-card-head h2 { font: inherit; letter-spacing: inherit; }
-.fs-card-meta { font-size: 0.875rem; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--pg-muted); font-variant-numeric: tabular-nums; }
-.fs-count { min-width: 28px; height: 24px; box-sizing: border-box; padding: 0 8px; display: inline-grid; place-items: center; border-radius: 99px; background: var(--pg-track); color: var(--pg-text-2); font-size: 0.8125rem; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; }
-.fs-count.waiting { background: var(--pg-wait-soft); box-shadow: inset 0 0 0 1px var(--pg-wait-line); color: var(--pg-wait-text); }
-.fs-empty { display: flex; align-items: center; gap: 0.6rem; margin: 0; padding: 1.1rem 1.25rem; color: var(--pg-muted); }
-.fs-empty svg { width: 20px; height: 20px; color: var(--pg-done); }
+.fs-empty { display: flex; align-items: center; gap: 0.6rem; padding: 1.1rem 1.25rem; color: var(--pg-muted); }
 
-/* ---------- Toolbar: counts + filters ---------- */
-.fs-toolbar { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1.5rem; padding: 0.85rem 0.85rem 0.85rem 1.5rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
-.fs-stats { display: flex; flex-wrap: wrap; align-items: stretch; row-gap: 0.75rem; min-width: 0; }
-.fs-stats > div { display: grid; align-content: center; gap: 0.3rem; padding: 0.1rem 1.75rem; }
-.fs-stats > div:first-child { padding-left: 0; }
-.fs-stats > div + div { border-left: 1px solid var(--pg-line); }
-.fs-stats dt { display: flex; align-items: center; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pg-muted); white-space: nowrap; }
-.fs-stats dd { display: flex; align-items: baseline; gap: 0.55rem; font-size: 1.625rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.fs-stats .zero dd { color: var(--pg-faint); }
-.fs-stats .zero .fs-dot { background: var(--pg-line-2); }
-.fs-stats dd small { font-size: 0.875rem; font-weight: 500; letter-spacing: 0; color: var(--pg-muted); }
-.fs-stats dd small.fs-late-text { font-weight: 600; }
+/* ---------- Overview ---------- */
+.fs-overview { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: center; gap: 0.9rem 1.5rem; padding: 1rem 1rem 1rem 1.5rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.fs-kpis { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(0, auto)); justify-content: space-between; row-gap: 0.9rem; min-width: 0; padding-right: 1rem; }
+.fs-kpi { display: grid; align-content: center; gap: 0.35rem; padding: 0.1rem 1.75rem; border-left: 1px solid var(--pg-line); min-width: 0; }
+.fs-kpi:first-child { padding-left: 0; border-left: 0; }
+.fs-kpi dt { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pg-muted); white-space: nowrap; }
+.fs-kpi dd { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; font-size: 2.125rem; font-weight: 650; letter-spacing: -0.025em; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fs-kpi dd small { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; font-size: 0.875rem; font-weight: 500; letter-spacing: 0; color: var(--pg-muted); }
+.fs-kpi dd small.fs-late-text { font-weight: 600; }
+.fs-kpi.zero dd { color: var(--pg-faint); }
+.fs-kpi.zero .fs-dot { background: var(--pg-line-2); }
+.fs-kpi-total { font-size: 1.125rem; font-weight: 500; color: var(--pg-muted); letter-spacing: 0; }
 
 .fs-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-left: auto; }
+.fs-filters > span { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pg-muted); }
 .fs-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--pg-track); box-shadow: inset 0 0 0 1px var(--pg-line); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .fs-seg::-webkit-scrollbar { display: none; }
 .fs-page .fs-seg button { flex: none; height: 40px; padding: 0 1.1rem; border: 0; border-radius: 9px; background: transparent; color: var(--pg-muted); font-size: 0.9375rem; font-weight: 500; cursor: pointer; white-space: nowrap; }
@@ -48,25 +46,110 @@
 .fs-page .fs-seg button.on { background: var(--pg-card); color: var(--pg-text); font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1), 0 0 0 1px var(--pg-line); }
 :root[data-theme="dark"] .fs-page .fs-seg button.on { background: #2a3558; box-shadow: none; }
 .fs-page .fs-seg button:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 0; }
-.fs-page .fs-select { width: auto; height: 46px; padding: 0 2.25rem 0 0.9rem; border: 1px solid var(--pg-line-2); border-radius: 12px; background-color: var(--pg-card); color: var(--pg-text); font-size: 0.9375rem; font-weight: 500; cursor: pointer; }
-.fs-page .fs-select:focus { outline: none; border-color: var(--pg-accent); box-shadow: 0 0 0 3px var(--pg-ring); }
-/* Too narrow for one row (e.g. 1366 with the sidebar): filters take a second row of their own */
-@container (max-width: 1180px) {
-  .fs-filters { width: 100%; margin-left: 0; padding-top: 0.75rem; border-top: 1px solid var(--pg-line); }
+/* Narrower: the filter gets a row of its own; only well below laptop width do the counts wrap */
+@container (max-width: 1100px) {
+  .fs-kpis { padding-right: 0; }
+  .fs-filters { width: 100%; margin-left: 0; padding-top: 0.85rem; border-top: 1px solid var(--pg-line); }
+}
+@container (max-width: 860px) {
+  .fs-kpis { grid-template-columns: repeat(3, minmax(0, auto)); justify-content: start; }
+  .fs-kpi:nth-child(4) { padding-left: 0; border-left: 0; }
 }
 
-/* ---------- Board: waiting | being handled ---------- */
-.fs-board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; align-items: start; }
-.fs-calls { list-style: none; padding: 0; }
-.fs-calls li + li { border-top: 1px solid var(--pg-line); }
+/* ---------- Layout: the floor | teams ---------- */
+.fs-layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 28%, 400px); gap: 1.5rem; align-items: start; }
+.fs-floor, .fs-teams { display: grid; gap: 1.25rem; align-content: start; min-width: 0; }
 
-.fs-page .fs-call {
+/* ---------- The floor: one card per area ---------- */
+.fs-area-head { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.25rem; min-height: 62px; box-sizing: border-box; padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--pg-line); }
+.fs-area-head h2 { min-width: 0; overflow-wrap: anywhere; font-size: 1.0625rem; font-weight: 650; letter-spacing: -0.01em; color: var(--pg-text); }
+.fs-area-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; margin-left: auto; font-size: 0.875rem; color: var(--pg-muted); font-variant-numeric: tabular-nums; }
+.fs-area-meta span { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+.fs-area-meta strong { color: var(--pg-text); font-weight: 600; }
+/* Health bar: the share of the area running, waiting and being handled */
+.fs-health { position: absolute; left: 0; right: 0; bottom: -1px; display: flex; height: 3px; background: var(--pg-track); }
+.fs-health i { display: block; height: 100%; }
+.fs-health .running { background: var(--pg-done); }
+.fs-health .accepted { background: var(--pg-way); }
+.fs-health .waiting { background: var(--pg-wait); }
+
+.fs-tiles { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; padding: 1.1rem 1.25rem 1.25rem; }
+.fs-tiles > li { display: grid; min-width: 0; }
+.fs-page .fs-tile {
+  --rail: var(--pg-done);
+  --tint: var(--pg-card);
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 80px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name name" "state clock";
+  align-content: center;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  padding: 0.8rem 1rem 0.8rem 1.25rem;
+  border: 1px solid var(--pg-line);
+  border-radius: 12px;
+  background: var(--tint);
+  color: var(--pg-text);
+  font-weight: 400;
+  text-align: left;
+}
+.fs-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
+.fs-tile-name { grid-area: name; min-width: 0; font-size: 1.0625rem; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-tile-clock { grid-area: clock; font-size: 1.625rem; font-weight: 650; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; }
+.fs-tile-state { grid-area: state; display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-size: 0.875rem; color: var(--pg-text-2); }
+.fs-tile-who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-tile-teams { display: inline-flex; flex: none; gap: 3px; }
+.fs-tile-teams .dept-icon { width: 22px; height: 22px; border-radius: 6px; }
+.fs-tile-teams .dept-icon svg { width: 13px; height: 13px; }
+/* Running: calm. The green accent says "good" without shouting. */
+.fs-tile.running .fs-tile-name { color: var(--pg-text-2); font-weight: 600; }
+.fs-tile.running .fs-tile-state { color: var(--pg-muted); }
+.fs-tile-today { grid-area: clock; color: var(--pg-muted); font-size: 0.8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Problems get a heavier rail */
+.fs-tile.waiting::before, .fs-tile.accepted::before { width: 6px; }
+/* Needs a team / being handled: tinted so they stand out across the room */
+.fs-tile.waiting { --rail: var(--pg-wait); --tint: color-mix(in srgb, var(--pg-wait) 12%, var(--pg-card)); border-color: var(--pg-wait); }
+.fs-tile.accepted { --rail: var(--pg-way); --tint: color-mix(in srgb, var(--pg-way) 13%, var(--pg-card)); border-color: var(--pg-way-line); }
+:root[data-theme="dark"] .fs-tile.accepted { --tint: color-mix(in srgb, var(--pg-way) 17%, var(--pg-card)); }
+.fs-tile.late { --tint: color-mix(in srgb, var(--pg-wait) 19%, var(--pg-card)); box-shadow: inset 0 0 0 1px var(--pg-wait); }
+.fs-tile.waiting .fs-tile-state, .fs-tile.accepted .fs-tile-state { color: var(--pg-text); font-weight: 600; }
+.fs-tile.late .fs-tile-clock { color: var(--pg-wait-text); }
+:root[data-theme="dark"] .fs-tile.late .fs-tile-clock { color: #f87171; }
+.fs-page button.fs-tile { cursor: pointer; transition: filter 0.12s ease; }
+.fs-page button.fs-tile:hover { filter: brightness(0.97); }
+:root[data-theme="dark"] .fs-page button.fs-tile:hover { filter: brightness(1.12); }
+.fs-page .fs-tile.selected { box-shadow: 0 0 0 3px var(--pg-ring); border-color: var(--pg-accent); }
+.fs-page .fs-tile:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
+.fs-late { padding: 0.22rem 0.42rem; border-radius: 6px; box-shadow: inset 0 0 0 1.5px currentColor; color: var(--pg-wait-text); font-style: normal; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.07em; line-height: 1; text-transform: uppercase; }
+:root[data-theme="dark"] .fs-late { color: #f87171; }
+
+/* ---------- Teams: one card per department ---------- */
+.fs-team-head { --hue: #475569; display: flex; align-items: center; gap: 0.75rem; min-height: 62px; box-sizing: border-box; padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--pg-line); background: color-mix(in srgb, var(--hue) 5%, var(--pg-card)); }
+/* The name always keeps room; the counts wrap under it on a narrow column */
+.fs-team-head { flex-wrap: wrap; }
+.fs-team-head h2 { flex: 1 1 auto; min-width: 7ch; font-size: 1.0625rem; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-team-head .dept-icon { width: 34px; height: 34px; border-radius: 10px; }
+.fs-team-head .dept-icon svg { width: 18px; height: 18px; }
+.fs-team-counts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.4rem; margin-left: auto; }
+.fs-chip { display: inline-flex; align-items: center; gap: 0.4rem; height: 26px; padding: 0 0.6rem; border-radius: 99px; background: var(--pg-track); color: var(--pg-text-2); font-size: 0.8125rem; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fs-chip.waiting { background: var(--pg-wait-soft); box-shadow: inset 0 0 0 1px var(--pg-wait-line); color: var(--pg-wait-text); }
+.fs-chip.accepted { background: var(--pg-way-soft); box-shadow: inset 0 0 0 1px var(--pg-way-line); color: var(--pg-way-text); }
+
+.fs-team-list { list-style: none; padding: 0; }
+.fs-team-list li + li { border-top: 1px solid var(--pg-line); }
+.fs-page .fs-row {
   --rail: var(--pg-faint);
   position: relative;
   width: 100%;
   display: grid;
-  gap: 0.85rem;
-  padding: 1.1rem 1.25rem 1.15rem 1.6rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.15rem 0.9rem;
+  padding: 0.75rem 1.1rem 0.75rem 1.4rem;
   border: 0;
   border-radius: 0;
   background: var(--pg-card);
@@ -76,67 +159,29 @@
   cursor: pointer;
   transition: background 0.12s ease;
 }
-/* Stage rail, as on Machine Station's call card */
-.fs-call::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
-.fs-call.waiting { --rail: var(--pg-wait); }
-.fs-call.accepted { --rail: var(--pg-way); }
-.fs-page .fs-call:hover { background: var(--pg-hover); }
-.fs-page .fs-call.selected { background: var(--pg-selected); box-shadow: inset 0 0 0 2px var(--pg-ring); }
-.fs-page .fs-call:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: -3px; }
-.fs-call-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.fs-call-title { display: grid; gap: 0.15rem; min-width: 0; }
-.fs-call-title strong { font-size: 1.1875rem; font-weight: 650; letter-spacing: -0.01em; }
-.fs-call-title small { font-size: 0.875rem; color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-call-clock { display: inline-flex; align-items: center; gap: 0.75rem; }
-.fs-call-clock strong { font-size: 2rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
-.fs-call.late .fs-call-clock strong { color: var(--pg-wait-text); }
-:root[data-theme="dark"] .fs-call.late .fs-call-clock strong { color: #f87171; }
-.fs-late { padding: 0.28rem 0.5rem; border-radius: 6px; box-shadow: inset 0 0 0 1.5px currentColor; color: var(--pg-wait-text); font-style: normal; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.07em; line-height: 1; text-transform: uppercase; }
-:root[data-theme="dark"] .fs-late { color: #f87171; }
-
-.fs-call-teams { display: grid; gap: 0.5rem; }
-.fs-call-team { display: grid; grid-template-columns: 26px minmax(90px, 150px) minmax(0, 1fr) auto; gap: 0.65rem; align-items: center; font-size: 0.9375rem; }
-.fs-call-team .dept-icon { width: 26px; height: 26px; border-radius: 8px; }
-.fs-call-team .dept-icon svg { width: 15px; height: 15px; }
-.fs-call-team-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-call-team-state { display: flex; align-items: center; min-width: 0; color: var(--pg-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-call-team-time { color: var(--pg-muted); }
-
-/* ---------- Machines ---------- */
-.fs-groups { display: grid; gap: 1.25rem; padding: 1.1rem 1.25rem 1.25rem; }
-.fs-group h3 { margin-bottom: 0.6rem; font-size: 0.875rem; font-weight: 600; color: var(--pg-text-2); }
-.fs-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.6rem; }
-.fs-page .fs-tile {
-  --rail: transparent;
-  position: relative;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 64px;
-  box-sizing: border-box;
-  display: grid;
-  align-content: center;
-  gap: 0.2rem;
-  padding: 0.65rem 0.9rem 0.65rem 1.05rem;
-  border: 1px solid var(--pg-line);
-  border-radius: 10px;
-  background: var(--pg-card);
-  color: var(--pg-text);
-  font-weight: 400;
-  text-align: left;
-}
-.fs-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
-.fs-tile strong { font-size: 0.9375rem; font-weight: 500; color: var(--pg-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-tile small { display: flex; align-items: center; font-size: 0.8125rem; color: var(--pg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-page .fs-tile.active { border-color: var(--pg-line-2); cursor: pointer; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
-.fs-tile.waiting { --rail: var(--pg-wait); }
-.fs-tile.accepted { --rail: var(--pg-way); }
-.fs-tile.active strong { color: var(--pg-text); font-weight: 600; }
-.fs-tile.active small { color: var(--pg-text-2); }
-.fs-tile.active.late small { color: var(--pg-wait-text); font-weight: 500; }
-:root[data-theme="dark"] .fs-tile.active.late small { color: #f87171; }
-.fs-page .fs-tile.active:hover { background: var(--pg-hover); }
-.fs-page .fs-tile.selected { border-color: var(--pg-accent); box-shadow: 0 0 0 3px var(--pg-ring); }
-.fs-page .fs-tile:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
+.fs-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--rail); }
+.fs-row.waiting { --rail: var(--pg-wait); }
+.fs-row.accepted { --rail: var(--pg-way); }
+.fs-page .fs-row:hover { background: var(--pg-hover); }
+.fs-page .fs-row.selected { background: var(--pg-selected); }
+.fs-page .fs-row:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: -3px; }
+.fs-row-main { display: grid; gap: 0.1rem; min-width: 0; }
+.fs-row-main strong { font-size: 0.9875rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-row-main small { display: flex; align-items: center; gap: 0.45rem; min-width: 0; font-size: 0.8125rem; color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-row-time { display: grid; justify-items: end; gap: 0.1rem; }
+.fs-row-time strong { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 1.3125rem; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.fs-row-time small { font-size: 0.75rem; color: var(--pg-muted); white-space: nowrap; }
+.fs-row.late .fs-row-time strong { color: var(--pg-wait-text); }
+:root[data-theme="dark"] .fs-row.late .fs-row-time strong { color: #f87171; }
+/* Teams with nothing open: one quiet card, not a stack of empty ones */
+.fs-quiet { display: flex; align-items: flex-start; gap: 0.7rem; padding: 0.95rem 1.1rem; }
+.fs-quiet > svg { flex: none; width: 20px; height: 20px; margin-top: 1px; color: var(--pg-done); }
+.fs-quiet p { display: grid; gap: 0.55rem; min-width: 0; }
+.fs-quiet strong { font-weight: 600; }
+.fs-quiet-teams { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; color: var(--pg-text-2); font-size: 0.9375rem; }
+.fs-quiet-teams > span { display: inline-flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.fs-quiet-teams .dept-icon { width: 24px; height: 24px; border-radius: 7px; }
+.fs-quiet-teams .dept-icon svg { width: 14px; height: 14px; }
 
 /* ---------- Detail panel (slide-over) ---------- */
 .fs-page .fs-backdrop { position: fixed; inset: 0; z-index: 60; padding: 0; border: 0; border-radius: 0; background: rgba(7, 11, 26, 0.32); cursor: default; animation: fsFade 0.18s ease; }
@@ -213,38 +258,36 @@
 .fs-page .fs-compose-row button:disabled { opacity: 0.3; cursor: not-allowed; }
 .fs-compose-row button svg { width: 18px; height: 18px; }
 
-/* ---------- Offline: the data may be old, so stage colour steps back (as on Machine Station) ---------- */
+/* ---------- Offline: the data may be old, so status colour steps back ---------- */
 /* :root keeps these above the dark-mode colour rules in both themes */
-:root .fs-page.stale .fs-call, :root .fs-page.stale .fs-tile.active { --rail: var(--pg-faint); }
-:root .fs-page.stale .fs-call.late .fs-call-clock strong, :root .fs-page.stale .fs-late, :root .fs-page.stale .fs-late-text, :root .fs-page.stale .fs-tile.active.late small { color: var(--pg-faint); }
-:root .fs-page.stale .fs-count.waiting { background: var(--pg-track); box-shadow: none; color: var(--pg-text-2); }
+:root .fs-page.stale .fs-tile, :root .fs-page.stale .fs-row { --rail: var(--pg-faint); --tint: var(--pg-card); border-color: var(--pg-line); box-shadow: none; }
+:root .fs-page.stale .fs-health i, :root .fs-page.stale .fs-dot { background: var(--pg-faint); }
+:root .fs-page.stale .fs-quiet > svg { color: var(--pg-faint); }
+:root .fs-page.stale .fs-chip.waiting, :root .fs-page.stale .fs-chip.accepted { background: var(--pg-track); box-shadow: none; color: var(--pg-text-2); }
+:root .fs-page.stale .fs-late, :root .fs-page.stale .fs-late-text, :root .fs-page.stale .fs-tile.late .fs-tile-clock, :root .fs-page.stale .fs-row.late .fs-row-time strong { color: var(--pg-faint); }
 
 @keyframes fsFade { from { opacity: 0; } }
 @keyframes fsSlide { from { transform: translateX(16px); opacity: 0; } }
 
 /* ---------- Responsive ---------- */
+/* Narrower screens: teams above the floor (who's waiting matters first), side by side when there's room */
 @media (max-width: 1180px) {
-  .fs-board { grid-template-columns: minmax(0, 1fr); }
-  .fs-filters { margin-left: 0; }
+  .fs-layout { grid-template-columns: minmax(0, 1fr); }
+  .fs-teams { order: -1; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); align-items: start; }
 }
 @media (max-width: 640px) {
-  .fs-toolbar { padding: 0.85rem 1rem; }
-  .fs-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .fs-stats > div, .fs-stats > div:first-child { padding: 0 0.75rem; }
-  .fs-stats > div:nth-child(odd) { padding-left: 0; border-left: 0; }
-  /* three stats: the last one takes the full row */
-  .fs-stats > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .fs-stats dd { font-size: 1.375rem; }
+  .fs-overview { padding: 0.9rem 1rem; }
+  .fs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .fs-kpi, .fs-kpi:first-child, .fs-kpi:nth-child(4) { padding: 0 0.75rem; border-left: 1px solid var(--pg-line); }
+  .fs-kpi:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .fs-kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .fs-kpi dd { font-size: 1.5rem; }
   .fs-filters, .fs-seg { width: 100%; }
-  .fs-page .fs-select { width: 100%; }
-  .fs-call-clock strong { font-size: 1.5rem; }
-  .fs-call-team { grid-template-columns: 26px minmax(0, 1fr) auto; }
-  .fs-call-team-state { grid-column: 2 / -1; grid-row: 2; }
-  .fs-call-team-time { grid-column: 3; grid-row: 1; }
-  .fs-tiles { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .fs-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); padding: 0.85rem; gap: 0.6rem; }
+  .fs-tile-clock { font-size: 1.125rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .fs-panel, .fs-page .fs-backdrop { animation: none; }
-  .fs-page .fs-call { transition: none; }
+  .fs-page .fs-row, .fs-page button.fs-tile { transition: none; }
 }
