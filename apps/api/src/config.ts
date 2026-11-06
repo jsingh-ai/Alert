@@ -188,7 +188,23 @@ export const config = {
     intFromEnv(
       process.env.SOCKET_REVALIDATE_MS,
       5 * 60 * 1000
-    )
+    ),
+
+  // Call notifications on phones (Web Push). Make the pair once with `npm run push:keys`;
+  // leave blank to keep push off. Changing the keys signs every device out of notifications.
+  push: {
+    publicKey:
+      (process.env.VAPID_PUBLIC_KEY ?? "").trim(),
+
+    privateKey:
+      (process.env.VAPID_PRIVATE_KEY ?? "").trim(),
+
+    // Who push services contact about these notifications: "mailto:" an IT address, or the app's https URL
+    subject:
+      (process.env.VAPID_SUBJECT ?? "").trim() ||
+      (process.env.PUBLIC_URL ?? "").trim() ||
+      "mailto:it@example.com"
+  }
 };
 
 if (isProduction) {

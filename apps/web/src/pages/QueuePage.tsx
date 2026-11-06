@@ -9,7 +9,9 @@ import type { AlertTiming } from "../lib/callStages";
 import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState, timeOfDay } from "../components/Suite";
 import type { Tone } from "../components/Suite";
 import { useKiosk } from "../lib/kiosk";
-import { CheckCircleIcon, MessageIcon, SendIcon } from "../components/icons";
+import { usePush } from "../lib/push";
+import type { PushState } from "../lib/push";
+import { BellRingIcon, CheckCircleIcon, CloseIcon, MessageIcon, SendIcon } from "../components/icons";
 import "../styles/queue.css";
 
 /*
@@ -93,6 +95,10 @@ export function QueuePage() {
   const departments = (session?.departments ?? []) as Array<{ id: string; name: string; color?: string }>;
   const [departmentId, setDepartmentId] = useState(departments.length === 1 ? departments[0].id : "");
   const [group, setGroup] = useState("all");
+  const push = usePush(userId);
+  const [pushDismissed, dismissPush] = usePromptDismissed(userId);
+  // The first-time card and the bell do the same job: show one at a time
+  const pushPrompt = !pushDismissed && (push.state === "off" || push.state === "install");
 
   const active = useQuery({
     queryKey: ["active-alerts", departmentId],
@@ -190,6 +196,7 @@ export function QueuePage() {
         title={department ? <span className="rq-head-team"><TeamIcon department={department} /><span>{department.name}</span></span> : "All departments"}
         status={status}
       >
+        {!pushPrompt && <PushBell state={push.state} busy={push.busy} onEnable={push.enable} onDisable={push.disable} />}
         {kiosk && <SuiteMenu label="Menu" />}
       </SuiteHeader>
 
@@ -218,6 +225,11 @@ export function QueuePage() {
       )}
 
       {offline && <OfflineNotice lastGood={active.dataUpdatedAt} />}
+      {push.error ? (
+        <p className="rq-push error" role="alert"><BellRingIcon /><span>{push.error}</span></p>
+      ) : pushPrompt && (
+        <PushPrompt state={push.state} busy={push.busy} team={department?.name} onEnable={push.enable} onDismiss={dismissPush} />
+      )}
       {/* One steady live region, so screen readers hear when a call is taken or cancelled */}
       <p className="su-sr" aria-live="polite">{announce}</p>
 
@@ -285,6 +297,74 @@ export function QueuePage() {
 
       <SuiteStatusBar connection={connection} lastGood={active.dataUpdatedAt} />
     </div>
+  );
+}
+
+/* ---------- Call notifications on this phone ---------- */
+
+const PUSH_DISMISSED = "pg_push_prompt_dismissed";
+
+/** The bell in the header: on, off, or blocked. Hidden where notifications can't work at all. */
+function PushBell({ state, busy, onEnable, onDisable }: { state: PushState; busy: boolean; onEnable: () => void; onDisable: () => void }) {
+  if (state !== "on" && state !== "off" && state !== "denied") return null;
+  const label = state === "on" ? "Call notifications are on. Turn off" : state === "denied" ? "Notifications are blocked in this browser's settings" : "Turn on call notifications";
+  return (
+    <button
+      type="button"
+      className={`rq-bell ${state}`}
+      aria-pressed={state === "on"}
+      aria-label={label}
+      title={label}
+      disabled={busy || state === "denied"}
+      onClick={() => (state === "on" ? onDisable() : onEnable())}
+    >
+      <BellRingIcon />
+      {state !== "on" && <i aria-hidden="true" />}
+    </button>
+  );
+}
+
+/** "Not now" on the notifications card, remembered per person on this device. */
+function usePromptDismissed(userId: string): [boolean, () => void] {
+  const key = `${PUSH_DISMISSED}:${userId}`;
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismiss = () => {
+    try {
+      localStorage.setItem(key, "1");
+    } catch {
+      // private mode: it just shows again next time
+    }
+    setDismissed(true);
+  };
+  return [dismissed, dismiss];
+}
+
+/** One quiet card the first time: what notifications do here, and one button. After "Not now", the bell in the header does the same. */
+function PushPrompt({ state, busy, team, onEnable, onDismiss }: { state: PushState; busy: boolean; team?: string; onEnable: () => void; onDismiss: () => void }) {
+  return (
+    <section className="rq-push" aria-label="Call notifications">
+      <BellRingIcon />
+      <p>
+        <strong>Get a buzz when a machine calls{team ? ` ${team}` : ""}</strong>
+        <span>
+          {state === "install"
+            ? "On iPhone, add this app to your Home Screen first: tap Share, then Add to Home Screen, and open it from there."
+            : "Even with the app closed. You'll also hear when someone accepts a call, and when there's a message on a call you're on."}
+        </span>
+      </p>
+      <div className="rq-push-actions">
+        {state === "off" && (
+          <button type="button" className="rq-push-on" onClick={onEnable} disabled={busy}>{busy ? "Turning on…" : "Turn on"}</button>
+        )}
+        <button type="button" className="rq-push-later" onClick={onDismiss} aria-label="Not now"><CloseIcon /></button>
+      </div>
+    </section>
   );
 }
 

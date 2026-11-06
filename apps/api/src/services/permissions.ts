@@ -3,7 +3,10 @@ import type { MembershipContext } from "./auth.js";
 
 export const ACTIVE_ALERT_STATUSES = ["OPEN", "ACKNOWLEDGED", "ARRIVED"] as const;
 
-function scopeIds(ctx: MembershipContext, type: "DEPARTMENT" | "MACHINE_GROUP" | "MACHINE") {
+/** Only the role and scopes matter, so these also work for a membership loaded without its user and company. */
+type ScopedRole = Pick<MembershipContext, "role" | "scopes">;
+
+function scopeIds(ctx: ScopedRole, type: "DEPARTMENT" | "MACHINE_GROUP" | "MACHINE") {
   return ctx.scopes.filter((scope) => scope.scopeType === type).map((scope) => scope.scopeId);
 }
 
@@ -37,18 +40,18 @@ export function departmentWhereForContext(ctx: MembershipContext): Prisma.Depart
   return { ...base, id: { in: departmentIds } };
 }
 
-export function scopedDepartmentIds(ctx: MembershipContext) {
+export function scopedDepartmentIds(ctx: ScopedRole) {
   return scopeIds(ctx, "DEPARTMENT");
 }
 
-export function canSeeDepartment(ctx: MembershipContext, departmentId: string) {
+export function canSeeDepartment(ctx: ScopedRole, departmentId: string) {
   if (ctx.role === "ADMIN") return true;
   const ids = scopedDepartmentIds(ctx);
   if (ctx.role === "MANAGER" && ids.length === 0) return true;
   return ids.includes(departmentId);
 }
 
-export function canActAsResponder(ctx: MembershipContext, departmentId: string) {
+export function canActAsResponder(ctx: ScopedRole, departmentId: string) {
   if (ctx.role === "ADMIN") return true;
   if (ctx.role === "MANAGER") return canSeeDepartment(ctx, departmentId);
   if (ctx.role !== "RESPONDER") return false;
