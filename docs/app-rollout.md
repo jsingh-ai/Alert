@@ -19,6 +19,7 @@ Nothing below changes the M5 pagers or the Teams bridge.
 | IT / server | Permission to install Caddy **or** configure IIS on the app VM; inbound TCP 443 open |
 | IT / device management | Trust for the certificate on devices that are not domain-joined (Option A only); optional silent-install policy |
 | App owner | The hostname to use, and which devices are company-managed |
+| IT / network | For call notifications: the app server can reach the phone makers' push services over outbound HTTPS 443 (step 9) |
 
 ## Order of work
 
@@ -30,6 +31,7 @@ Nothing below changes the M5 pagers or the Teams bridge.
 6. [Check it from one PC](#6-check-it-from-one-pc)
 7. [Install on devices](#7-install-on-devices)
 8. [Retire the old address](#8-retire-the-old-address)
+9. [Turn on call notifications](#9-call-notifications-on-phones)
 
 ---
 
@@ -239,6 +241,55 @@ When every device uses the HTTPS address:
 2. Narrow the 5003 firewall rule to pagers only (step 5).
 3. Update bookmarks, shortcuts and any printed QR codes.
 
+## 9. Call notifications on phones
+
+Once the app is on HTTPS, responders can get a notification on their phone when a machine calls
+their department, even with the app closed. They also get a quieter one when someone accepts the call
+(so two people don't both go), and one for a message on a call they accepted or are helping on.
+
+**Server, once:**
+
+```powershell
+cd C:\Apps\processguard-andon
+npm run push:keys
+```
+
+Paste the three lines it prints into `.env` (put an IT mailbox in `VAPID_SUBJECT`), then restart:
+
+```powershell
+Restart-Service ProcessGuardAndon
+```
+
+Keep these keys. New keys switch notifications off on every phone until each person turns them on
+again. Without keys, notifications stay off and the app doesn't offer them.
+
+**Network:** the app server sends each notification to the phone maker's push service. Allow outbound
+HTTPS (443) from the server to:
+
+| Devices | Host |
+|---|---|
+| Android, Chrome, Edge on Windows | `fcm.googleapis.com`, `*.notify.windows.com` |
+| iPhone, iPad, Safari on Mac | `*.push.apple.com` |
+| Firefox | `updates.push.services.mozilla.com` |
+
+If the server's outbound traffic goes through an inspecting proxy, use the same setup that already
+lets the Power Automate notifications out (for example `NODE_EXTRA_CA_CERTS` for the proxy's
+certificate).
+
+**Each person:** open the app → **Response Queue** → **Turn on** in the card at the top (or the bell in
+the header) → **Allow**.
+
+- **Android:** works in Chrome, installed or not.
+- **iPhone and iPad:** needs iOS 16.4 or later, and only works in the app added to the Home Screen
+  (step 7), not in a Safari tab. The card explains this on an iPhone.
+- **Shared phones:** a phone belongs to whoever last signed in on it. Signing out stops its
+  notifications.
+- **Silent mode:** a web app can't ring through silent or Do Not Disturb. People on call should
+  leave notifications audible for the ProcessGuard app.
+
+**Check it:** turn notifications on, close the app, then raise a test call for that department from
+another device. The phone should show "Press 9 needs Maintenance" within a few seconds.
+
 ## Rolling back
 
 Stop the proxy (`Stop-Service Caddy`, or stop the IIS site). The old `http://192.168.26.2:5003`
@@ -254,3 +305,6 @@ address keeps working throughout, as long as it is still listed in `CORS_ORIGIN`
 | Station signed out or forgot its machine | Expected once per device after moving to the new address. If it keeps happening, the browser is clearing its data (kiosk mode, private window, cleanup policy). |
 | Still showing the previous version after a deploy | Close the app window and open it again. The new version loads on the next open. |
 | Pagers stopped working | Port 5003 was closed or narrowed too far. See step 5. |
+| No notifications bell or card on the Response Queue | The page isn't on `https://`, the keys aren't in `.env` (step 9), or this is an iPhone in a Safari tab (add it to the Home Screen first). |
+| Bell is greyed out | Notifications are blocked for this site: the phone's Settings -> Notifications (iPhone: the ProcessGuard app; Android: Chrome -> the site). |
+| Turned on but nothing arrives | Check the server log for "push to ... failed". Usually outbound 443 to the push service is blocked (step 9). |

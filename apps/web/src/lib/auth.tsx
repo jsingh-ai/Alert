@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api, getToken, postJson, setToken } from "./api";
 import type { Session } from "./types";
+import { forgetPushDevice, handOverPushDevice } from "./push";
 
 type AuthContextValue = {
   token: string | null;
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(username: string, password: string, companyId?: string) {
     const result = await postJson<any>("/api/auth/login", { username, password, companyId });
     if (result.needsCompany) return result;
+    if (result.session?.user?.id) handOverPushDevice(result.session.user.id);
     applyToken(result.token);
     setSession(result.session);
     return result;
@@ -56,11 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function demoLogin(profile: string) {
     const result = await postJson<any>("/api/auth/demo", { profile });
+    if (result.session?.user?.id) handOverPushDevice(result.session.user.id);
     applyToken(result.token);
     setSession(result.session);
   }
 
   function logout() {
+    // This device stops getting this person's calls (a shared phone shouldn't buzz for the last user)
+    forgetPushDevice();
     applyToken(null);
     setSession(null);
   }

@@ -5,6 +5,7 @@ import { alertCommandLabel, includePagerAlert, serializePagerAlert, transitionAl
 import { createAlertSystemMessages, serializeMessage } from "../services/communicationService.js";
 import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
 import { triggerAlertAcknowledged } from "../services/powerAutomateService.js";
+import { notifyAccepted } from "../services/push.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 import { sha256 } from "../utils/crypto.js";
 
@@ -144,6 +145,7 @@ export async function pagerRoutes(app: FastifyInstance) {
         }
       }
 
+      if (action === "acknowledge") notifyAccepted(updated, updated.responderNameText || responderNameText, null);
       emitCompany(pager.companyId, "alert.changed", { alertId: updated.id, commandId: updated.commandId, action, source: "pager" });
       for (const notification of notifications) {
         emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message as any));
