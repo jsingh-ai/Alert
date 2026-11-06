@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { nanoid } from "nanoid";
 
 import { prisma } from "../db.js";
+import { requirePage } from "../services/auth.js";
 
 import {
   alertCommandLabel,
@@ -42,7 +43,8 @@ type PendingSystemPost = {
 export async function commandRoutes(app: FastifyInstance) {
   app.post(
     "/api/commands",
-    { preHandler: app.authenticate },
+    // Raising a call is Machine Station's job: the roles that have that page
+    { preHandler: requirePage(app, "operator") },
     async (request, reply) => {
       const ctx = request.membershipContext!;
 

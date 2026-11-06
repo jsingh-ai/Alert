@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
+import { requirePage } from "../services/auth.js";
 import { alertCommandLabel } from "../services/alertService.js";
 import { departmentWhereForContext, machineWhereForContext } from "../services/permissions.js";
 import { dayKeyInTimeZone, parseDateInputEnd, parseDateInputStart } from "../utils/time.js";
@@ -43,7 +44,7 @@ function parseReportBoundary(value: unknown, fallback: Date, timeZone: string, b
 }
 
 export async function reportRoutes(app: FastifyInstance) {
-  app.get("/api/reports/summary", { preHandler: app.authenticate }, async (request, reply) => {
+  app.get("/api/reports/summary", { preHandler: requirePage(app, "reports") }, async (request, reply) => {
     const ctx = request.membershipContext!;
     const query = request.query as { start?: string; end?: string; departmentId?: string; machineGroupId?: string; machineId?: string; responderId?: string };
     const timeZone = config.reportTimeZone;

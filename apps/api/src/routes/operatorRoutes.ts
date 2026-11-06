@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db.js";
+import { requirePage } from "../services/auth.js";
 import { alertCommandLabel, includeAlert, serializeAlert } from "../services/alertService.js";
 import { ACTIVE_ALERT_STATUSES, canUseMachine, machineWhereForContext } from "../services/permissions.js";
 
@@ -30,7 +31,7 @@ function groupCommands(alerts: any[]) {
 }
 
 export async function operatorRoutes(app: FastifyInstance) {
-  app.get("/api/operator/bootstrap", { preHandler: app.authenticate }, async (request) => {
+  app.get("/api/operator/bootstrap", { preHandler: requirePage(app, "operator") }, async (request) => {
     const ctx = request.membershipContext!;
     const machines = await prisma.machine.findMany({
       where: machineWhereForContext(ctx),
@@ -62,7 +63,7 @@ export async function operatorRoutes(app: FastifyInstance) {
     return { success: true, data: { machines, machineGroups, departments, issueTypes, commandTemplates } };
   });
 
-  app.get("/api/operator/snapshot", { preHandler: app.authenticate }, async (request, reply) => {
+  app.get("/api/operator/snapshot", { preHandler: requirePage(app, "operator") }, async (request, reply) => {
     const ctx = request.membershipContext!;
     const query = request.query as { machineId?: string };
     const requestedMachineId = cleanString(query.machineId);
