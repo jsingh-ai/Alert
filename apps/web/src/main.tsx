@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { ErrorToastHost } from "./lib/errorToast";
 import { RealtimeBridge } from "./lib/realtime";
+import { registerServiceWorker } from "./lib/pwa";
 import { AppLayout } from "./components/AppLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { OperatorPage } from "./pages/OperatorPage";
@@ -61,3 +62,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>
 );
+
+registerServiceWorker();
