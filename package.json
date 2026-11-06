@@ -41,5 +41,12 @@
     "@prisma/client": "^6.14.0",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7"
+  },
+  "allowScripts": {
+    "prisma@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "@prisma/client@6.19.3": true,
+    "esbuild@0.28.1": true,
+    "esbuild@0.25.12": true
   }
 }
