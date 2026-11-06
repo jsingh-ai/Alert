@@ -191,7 +191,7 @@ export function notifyMessage(alert: AlertLike & { status: string; acknowledgedB
     });
     // Only people still active and still responding for this department (not someone since moved or switched off)
     const allowed = new Set(await responders(alert.companyId, alert.departmentId));
-    const userIds = [alert.acknowledgedByUserId, ...helpers.map((helper) => helper.userId)].filter((id): id is string => Boolean(id) && id !== fromUserId && allowed.has(id));
+    const userIds = [alert.acknowledgedByUserId, ...helpers.map((helper) => helper.userId)].filter((id): id is string => typeof id === "string" && id !== fromUserId && allowed.has(id));
     await sendToUsers(alert.companyId, userIds, {
       title: `${alert.machine.name} · ${fromName}`,
       body: text,
