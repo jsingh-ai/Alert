@@ -45,6 +45,75 @@ function optionalRole(value: unknown) {
   return ["ADMIN", "MANAGER", "OPERATOR", "RESPONDER", "VIEWER"].includes(String(value)) ? value : null;
 }
 
+/* ---------- What a user covers, by role ---------- */
+
+type Access = { departmentIds: string[]; machineGroupIds: string[]; machineIds: string[] };
+
+/** Read { departmentIds, machineGroupIds, machineIds } from a request; a string error when malformed. */
+function parseAccess(value: unknown): Access | string {
+  const body = (value ?? {}) as Record<string, unknown>;
+  const read = (key: string, label: string) => {
+    const list = body[key] ?? [];
+    if (!Array.isArray(list)) return `${label} must be a list.`;
+    const ids = list.map(cleanString);
+    if (ids.some((id) => !id)) return `${label} contains an invalid id.`;
+    if (new Set(ids).size !== ids.length) return `${label} lists something twice.`;
+    return ids;
+  };
+  const departmentIds = read("departmentIds", "Departments");
+  const machineGroupIds = read("machineGroupIds", "Machine groups");
+  const machineIds = read("machineIds", "Machines");
+  for (const result of [departmentIds, machineGroupIds, machineIds]) if (typeof result === "string") return result;
+  return { departmentIds: departmentIds as string[], machineGroupIds: machineGroupIds as string[], machineIds: machineIds as string[] };
+}
+
+/**
+ * The access each role takes (see permissions.ts):
+ *   Operator   exactly one machine, or (a shared station) one or more machine groups
+ *   Responder  at least one department; machine groups and/or machines optional (none = every machine)
+ *   Manager    machine groups only (none = everything)
+ *   Admin      nothing: admins see everything
+ */
+function accessProblem(role: string, access: Access) {
+  const { departmentIds, machineGroupIds, machineIds } = access;
+  switch (role) {
+    case "OPERATOR":
+      if (departmentIds.length) return "Operators aren't given departments.";
+      if (machineIds.length === 1 && machineGroupIds.length === 0) return null;
+      if (machineIds.length === 0 && machineGroupIds.length > 0) return null;
+      return "Give an operator one machine (or, for a shared station, one or more machine groups).";
+    case "RESPONDER":
+      return departmentIds.length ? null : "Pick at least one department for a responder.";
+    case "MANAGER":
+      return departmentIds.length || machineIds.length ? "Managers are given machine groups only (or none, to see everything)." : null;
+    case "ADMIN":
+      return departmentIds.length || machineGroupIds.length || machineIds.length ? "Admins see everything; they aren't given limits." : null;
+    default:
+      return "Viewer is no longer used. Pick Operator, Responder, Manager or Admin.";
+  }
+}
+
+/** Every id must belong to this company. */
+async function accessInCompany(companyId: string, access: Access) {
+  const [departments, groups, machines] = await Promise.all([
+    access.departmentIds.length ? prisma.department.count({ where: { companyId, id: { in: access.departmentIds } } }) : 0,
+    access.machineGroupIds.length ? prisma.machineGroup.count({ where: { companyId, id: { in: access.machineGroupIds } } }) : 0,
+    access.machineIds.length ? prisma.machine.count({ where: { companyId, id: { in: access.machineIds } } }) : 0
+  ]);
+  if (departments !== access.departmentIds.length) return "One or more departments are invalid.";
+  if (groups !== access.machineGroupIds.length) return "One or more machine groups are invalid.";
+  if (machines !== access.machineIds.length) return "One or more machines are invalid.";
+  return null;
+}
+
+function scopeRows(membershipId: string, access: Access) {
+  return [
+    ...access.departmentIds.map((scopeId) => ({ membershipId, scopeType: "DEPARTMENT" as const, scopeId })),
+    ...access.machineGroupIds.map((scopeId) => ({ membershipId, scopeType: "MACHINE_GROUP" as const, scopeId })),
+    ...access.machineIds.map((scopeId) => ({ membershipId, scopeType: "MACHINE" as const, scopeId }))
+  ];
+}
+
 function changed(companyId: string) {
   emitCompany(companyId, "admin.changed", { at: new Date().toISOString() });
 }
@@ -96,7 +165,7 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.pagerDevice.findMany({ where: { companyId }, include: { department: true }, orderBy: { name: "asc" } }),
       getQuickLoginProfiles(companyId)
     ]);
-    const scopedUsers = users.map((user) => ({
+    const scopedUsers = users.map(({ passwordHash: _hash, ...user }) => ({
       ...user,
       active: user.active && Boolean(user.memberships[0]?.active)
     }));
@@ -442,21 +511,33 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/admin/users", adminWriteOptions, async (request, reply) => {
-    const body = request.body as { username?: string; password?: string; displayName?: string; role?: any };
+    const body = request.body as { username?: string; password?: string; displayName?: string; role?: any; access?: unknown };
     const username = cleanString(body.username).toLowerCase();
     const displayName = cleanString(body.displayName);
     const role = optionalRole(body.role);
     if (!username || !body.password || !displayName || !role) return reply.code(400).send({ success: false, error: "Username, password, displayName, and valid role are required." });
     if (body.password.length < 8) return reply.code(400).send({ success: false, error: "Password must be at least 8 characters." });
+    // The user and what they cover are saved together, so nobody is ever left half set up
+    const access = parseAccess(body.access);
+    if (typeof access === "string") return reply.code(400).send({ success: false, error: access });
+    const problem = accessProblem(String(role), access) ?? await accessInCompany(request.session.companyId, access);
+    if (problem) return reply.code(400).send({ success: false, error: problem });
     const passwordHash = await bcrypt.hash(body.password, 10);
     try {
-      const item = await prisma.user.create({
-        data: {
-          username,
-          passwordHash,
-          displayName,
-          memberships: { create: { companyId: request.session.companyId, role: role as any } }
-        }
+      const item = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            username,
+            passwordHash,
+            displayName,
+            memberships: { create: { companyId: request.session.companyId, role: role as any } }
+          },
+          include: { memberships: { where: { companyId: request.session.companyId } } }
+        });
+        const rows = scopeRows(user.memberships[0].id, access);
+        if (rows.length) await tx.membershipScope.createMany({ data: rows });
+        const { passwordHash: _hash, ...safe } = user;
+        return safe;
       });
       changed(request.session.companyId);
       return { success: true, data: item };
@@ -470,7 +551,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.patch("/api/admin/users/:id", adminWriteOptions, async (request, reply) => {
     const params = request.params as { id: string };
-    const body = request.body as { active?: boolean; username?: string; displayName?: string; password?: string; role?: any };
+    const body = request.body as { active?: boolean; username?: string; displayName?: string; password?: string; role?: any; access?: unknown };
     const active = optionalBoolean(body.active);
     if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
 
@@ -492,12 +573,27 @@ export async function adminRoutes(app: FastifyInstance) {
     if (active !== undefined) membershipData.active = active;
     if (role !== undefined) membershipData.role = role;
 
-    if (Object.keys(userData).length === 0 && Object.keys(membershipData).length === 0) {
+    const access = body.access === undefined ? undefined : parseAccess(body.access);
+    if (typeof access === "string") return reply.code(400).send({ success: false, error: access });
+
+    if (Object.keys(userData).length === 0 && Object.keys(membershipData).length === 0 && !access) {
       return reply.code(400).send({ success: false, error: "No changes provided." });
     }
 
-    const allowed = await prisma.membership.findFirst({ where: { userId: params.id, companyId: request.session.companyId }, select: { id: true } });
+    const allowed = await prisma.membership.findFirst({ where: { userId: params.id, companyId: request.session.companyId }, select: { id: true, role: true } });
     if (!allowed) return reply.code(404).send({ success: false, error: "User not found." });
+    // Viewer is retired: an existing viewer keeps working until changed, but nobody becomes one
+    if (role === "VIEWER" && allowed.role !== "VIEWER") return reply.code(400).send({ success: false, error: "Viewer is no longer used. Pick Operator, Responder, Manager or Admin." });
+    if (access) {
+      const problem = accessProblem(String(role ?? allowed.role), access) ?? await accessInCompany(request.session.companyId, access);
+      if (problem) return reply.code(400).send({ success: false, error: problem });
+    } else if (role !== undefined && role !== allowed.role) {
+      // A new role without new access: what they have now must suit it
+      const current = await prisma.membershipScope.findMany({ where: { membershipId: allowed.id }, select: { scopeType: true, scopeId: true } });
+      const of = (type: string) => current.filter((scope) => scope.scopeType === type).map((scope) => scope.scopeId);
+      const problem = accessProblem(String(role), { departmentIds: of("DEPARTMENT"), machineGroupIds: of("MACHINE_GROUP"), machineIds: of("MACHINE") });
+      if (problem) return reply.code(400).send({ success: false, error: `${problem} Send what they cover with the new role.` });
+    }
     try {
       const item = await prisma.$transaction(async (tx) => {
         const membership = await tx.membership.findUniqueOrThrow({ where: { id: allowed.id }, select: { active: true, role: true } });
@@ -512,9 +608,15 @@ export async function adminRoutes(app: FastifyInstance) {
         }
         if (Object.keys(membershipData).length) await tx.membership.update({ where: { id: allowed.id }, data: membershipData });
         if (Object.keys(userData).length) await tx.user.update({ where: { id: params.id }, data: userData });
+        if (access) {
+          await tx.membershipScope.deleteMany({ where: { membershipId: allowed.id } });
+          const rows = scopeRows(allowed.id, access);
+          if (rows.length) await tx.membershipScope.createMany({ data: rows });
+        }
         if (active) await tx.user.update({ where: { id: params.id }, data: { active: true } });
         const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
-        return { ...user, active: user.active && Boolean(user.memberships[0]?.active) };
+        const { passwordHash: _hash, ...safe } = user;
+        return { ...safe, active: user.active && Boolean(user.memberships[0]?.active) };
       });
       changed(request.session.companyId);
       return { success: true, data: item };
@@ -542,7 +644,8 @@ export async function adminRoutes(app: FastifyInstance) {
       }
       await tx.membership.update({ where: { id: allowed.id }, data: { active: false } });
       const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
-      return { ...user, active: false };
+      const { passwordHash: _hash, ...safe } = user;
+      return { ...safe, active: false };
     });
     changed(request.session.companyId);
     return { success: true, data: item };
@@ -603,8 +706,10 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.code(400).send({ success: false, error: "Duplicate scopes are not allowed." });
     }
 
-    const membership = await prisma.membership.findFirst({ where: { userId: params.userId, companyId }, select: { id: true } });
+    const membership = await prisma.membership.findFirst({ where: { userId: params.userId, companyId }, select: { id: true, role: true } });
     if (!membership) return reply.code(404).send({ success: false, error: "User not found." });
+    const roleProblem = membership.role === "VIEWER" ? null : accessProblem(membership.role, { departmentIds, machineGroupIds, machineIds });
+    if (roleProblem) return reply.code(400).send({ success: false, error: roleProblem });
 
     const [departmentCount, machineGroupCount, machineCount] = await Promise.all([
       departmentIds.length ? prisma.department.count({ where: { companyId, id: { in: departmentIds } } }) : 0,

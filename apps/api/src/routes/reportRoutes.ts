@@ -56,14 +56,16 @@ export async function reportRoutes(app: FastifyInstance) {
       return reply.code(400).send({ success: false, error: `Report range cannot exceed ${MAX_REPORT_RANGE_DAYS} days.` });
     }
 
+    // A filter only narrows what this person may see (spreading it would replace their limit with the filter)
     const machineWhere = {
-      ...machineWhereForContext(ctx),
-      ...(query.machineGroupId ? { machineGroupId: query.machineGroupId } : {}),
-      ...(query.machineId ? { id: query.machineId } : {})
+      AND: [
+        machineWhereForContext(ctx),
+        ...(query.machineGroupId ? [{ machineGroupId: query.machineGroupId }] : []),
+        ...(query.machineId ? [{ id: query.machineId }] : [])
+      ]
     };
     const departmentWhere = {
-      ...departmentWhereForContext(ctx),
-      ...(query.departmentId ? { id: query.departmentId } : {})
+      AND: [departmentWhereForContext(ctx), ...(query.departmentId ? [{ id: query.departmentId }] : [])]
     };
 
     const alerts = await prisma.andonAlert.findMany({
