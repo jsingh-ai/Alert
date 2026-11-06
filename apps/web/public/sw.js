@@ -8,6 +8,9 @@
  *   - /icons/*, manifest: served from cache, refreshed in the background
  * Live data is never cached: /api and /socket.io always go straight to the network.
  *
+ * It also shows call notifications (Web Push): the server encrypts each one for this device,
+ * and tapping it opens the app on the page it names.
+ *
  * Bump VERSION to drop every cache from the previous version on the next visit.
  */
 const VERSION = "pg-v1";
@@ -117,3 +120,47 @@ async function trimCache(cache, max) {
   const keys = await cache.keys();
   await Promise.all(keys.slice(0, Math.max(0, keys.length - max)).map((key) => cache.delete(key)));
 }
+
+/* ---------- Call notifications ---------- */
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  const silent = Boolean(data.silent);
+  event.waitUntil(
+    self.registration.showNotification(data.title || "ProcessGuard", {
+      body: data.body || "",
+      // One notification per call: a later update (accepted) replaces it instead of stacking
+      tag: data.tag || undefined,
+      renotify: Boolean(data.tag) && !silent,
+      silent,
+      vibrate: silent ? undefined : [200, 100, 200, 100, 200],
+      icon: "/icons/icon-192.png",
+      timestamp: Date.now(),
+      data: { url: data.url || "/" }
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin);
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const ours = windows.filter((client) => new URL(client.url).origin === self.location.origin);
+      // Already on that page: just bring it forward. Otherwise use an open window, or open one.
+      const exact = ours.find((client) => new URL(client.url).pathname === target.pathname);
+      if (exact) return exact.focus();
+      if (ours[0]) {
+        const client = await ours[0].focus();
+        return client && "navigate" in client ? client.navigate(target.href).catch(() => undefined) : undefined;
+      }
+      return self.clients.openWindow(target.href);
+    })()
+  );
+});

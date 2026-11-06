@@ -33,6 +33,7 @@ model Company {
   communicationChannels CommunicationChannel[]
   communicationMessages CommunicationMessage[]
   communicationAttachments CommunicationAttachment[]
+  pushSubscriptions PushSubscription[]
 
   @@map("companies")
 }
@@ -60,6 +61,7 @@ model User {
   preferences         UserPreference[]
   communicationMembers CommunicationChannelMember[]
   communicationMessages CommunicationMessage[]
+  pushSubscriptions   PushSubscription[]
 
   @@map("users")
 }
@@ -454,4 +456,24 @@ model CommunicationAttachment {
 
   @@index([companyId, messageId])
   @@map("communication_attachments")
+}
+
+/// A phone or browser that turned on call notifications. The device belongs to whoever last
+/// signed in on it (shared phones move to the new person); signing out removes it.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId])
+  @@map("push_subscriptions")
 }

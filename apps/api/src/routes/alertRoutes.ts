@@ -4,6 +4,7 @@ import { alertCommandLabel, includeAlert, serializeAlert, transitionAlert } from
 import { createAlertSystemMessages, createCommunicationMessage, ensureMachineCommunicationChannel, serializeMessage } from "../services/communicationService.js";
 import { ACTIVE_ALERT_STATUSES, canActAsResponder, canSeeDepartment, canUseMachine, machineWhereForContext, scopedDepartmentIds } from "../services/permissions.js";
 import { triggerAlertAcknowledged } from "../services/powerAutomateService.js";
+import { notifyAccepted, notifyMessage } from "../services/push.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 
 function cleanString(value: unknown) {
@@ -143,9 +144,12 @@ export async function alertRoutes(app: FastifyInstance) {
           return {
             channelId: channel.id,
             message,
+            created: true,
             alert: await tx.andonAlert.findUniqueOrThrow({ where: { id: alert.id }, include: includeAlert() })
           };
         });
+        // A resend of the same message (same clientMessageId) doesn't buzz anyone twice
+        if ("created" in result) notifyMessage(result.alert, ctx.userId, ctx.user.displayName, note);
         emitChannel(result.channelId, "communication.message.created", serializeMessage(result.message as any));
         emitCompany(ctx.companyId, "alert.changed", { alertId: alert.id, commandId: alert.commandId, action: "note" });
         return { success: true, data: serializeAlert(result.alert as any) };
@@ -228,6 +232,7 @@ export async function alertRoutes(app: FastifyInstance) {
         }
       }
 
+      if (action === "acknowledge") notifyAccepted(updated, updated.responderNameText || ctx.user.displayName, ctx.userId);
       emitCompany(ctx.companyId, "alert.changed", { alertId: updated.id, commandId: updated.commandId, action });
       for (const notification of notifications) {
         emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message as any));

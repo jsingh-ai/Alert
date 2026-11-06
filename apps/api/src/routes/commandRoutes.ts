@@ -26,6 +26,7 @@ import {
 } from "../services/realtime.js";
 
 import { triggerPowerAutomate } from "../services/powerAutomateService.js";
+import { notifyNewCall } from "../services/push.js";
 
 
 
@@ -587,6 +588,8 @@ export async function commandRoutes(app: FastifyInstance) {
 
 
         for (const alert of result.createdAlerts) {
+          // Phones of the people who respond for this department (sent after the response)
+          notifyNewCall({ ...alert, machine });
           try {
             const webhookResult = await triggerPowerAutomate({
               event: "ALERT_CREATED",
