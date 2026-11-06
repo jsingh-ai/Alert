@@ -1,9 +1,10 @@
 /*
  * Floor Status (managers and supervisors, with the sidebar; also fine on a wall screen).
  * Same suite as the other pages: shared app bar and status bar (suite.css), 14px cards with headings inside.
- *   Overview   one bar: machines running, teams waiting (late), being handled, longest wait, calls today; area filter
+ *   Overview   three blocks: machine states (donut + legend), longest wait, calls today (+ busiest machines); area filter
  *   The floor  one card per area; every machine a tile in a fixed order. Running = calm green accent,
- *              waiting = red tint, accepted = amber tint. Each area shows a small health bar.
+ *              waiting = red tint, accepted = amber tint. A machine with a call gets a double-width tile with
+ *              one line per team. Each area shows a small health bar.
  *   Teams      one card per department with only its own calls (waiting first). Departments never mix.
  * Greyscale UI; colour only for status and the soft team tints. Tokens: ui.css.
  */
@@ -25,19 +26,59 @@
 .fs-empty { display: flex; align-items: center; gap: 0.6rem; padding: 1.1rem 1.25rem; color: var(--pg-muted); }
 
 /* ---------- Overview ---------- */
-.fs-overview { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: center; gap: 0.9rem 1.5rem; padding: 1rem 1rem 1rem 1.5rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
-.fs-kpis { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(0, auto)); justify-content: space-between; row-gap: 0.9rem; min-width: 0; padding-right: 1rem; }
-.fs-kpi { display: grid; align-content: center; gap: 0.35rem; padding: 0.1rem 1.75rem; border-left: 1px solid var(--pg-line); min-width: 0; }
-.fs-kpi:first-child { padding-left: 0; border-left: 0; }
-.fs-kpi dt { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pg-muted); white-space: nowrap; }
-.fs-kpi dd { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; font-size: 2.125rem; font-weight: 650; letter-spacing: -0.025em; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.fs-kpi dd small { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; font-size: 0.875rem; font-weight: 500; letter-spacing: 0; color: var(--pg-muted); }
-.fs-kpi dd small.fs-late-text { font-weight: 600; }
-.fs-kpi.zero dd { color: var(--pg-faint); }
-.fs-kpi.zero .fs-dot { background: var(--pg-line-2); }
-.fs-kpi-total { font-size: 1.125rem; font-weight: 500; color: var(--pg-muted); letter-spacing: 0; }
+.fs-overview { container-type: inline-size; overflow: hidden; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+.fs-ov { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1.2fr); }
+.fs-ov-block { min-width: 0; padding: 1.2rem 1.5rem; }
+.fs-ov-block + .fs-ov-block { border-left: 1px solid var(--pg-line); }
+.fs-ov-label { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pg-muted); white-space: nowrap; }
+.fs-ov-big { font-size: 2.25rem; font-weight: 650; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fs-ov-big.zero { color: var(--pg-faint); }
+.fs-ov-sub { display: flex; align-items: center; gap: 0.45rem; min-width: 0; color: var(--pg-text-2); font-size: 0.9375rem; }
+.fs-ov-sub > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-ov-sub .dept-icon { flex: none; width: 22px; height: 22px; border-radius: 6px; }
+.fs-ov-sub .dept-icon svg { width: 13px; height: 13px; }
 
-.fs-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-left: auto; }
+/* Machine states: a ring with the running count in the middle, and its legend */
+.fs-ov-states { display: flex; align-items: center; gap: 1.5rem; }
+.fs-donut { position: relative; flex: none; width: 104px; height: 104px; }
+.fs-donut svg { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
+.fs-donut circle { fill: none; stroke-width: 12; }
+.fs-donut-track { stroke: var(--pg-track); }
+.fs-donut-part { transition: stroke-dasharray 0.4s ease, stroke-dashoffset 0.4s ease; }
+.fs-donut-part.running { stroke: var(--pg-done); }
+.fs-donut-part.accepted { stroke: var(--pg-way); }
+.fs-donut-part.waiting { stroke: var(--pg-wait); }
+.fs-donut-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 0.2rem; line-height: 1; }
+.fs-donut-center strong { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.fs-donut-center small { font-size: 0.8125rem; color: var(--pg-muted); font-variant-numeric: tabular-nums; }
+.fs-legend { flex: 0 1 300px; min-width: 0; display: grid; gap: 0.6rem; }
+.fs-legend ul { list-style: none; padding: 0; display: grid; gap: 0.55rem; }
+.fs-legend li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; color: var(--pg-text-2); font-size: 0.9375rem; }
+/* Labels wrap rather than cut off ("· 1 late" drops to a second line when it must) */
+.fs-legend li > span { min-width: 0; line-height: 1.3; }
+.fs-legend li em { font-style: normal; font-weight: 600; white-space: nowrap; }
+.fs-legend li strong { min-width: 2ch; text-align: right; color: var(--pg-text); font-size: 1.375rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.fs-legend .fs-dot { width: 10px; height: 10px; border-radius: 3px; }
+.fs-legend li.zero strong { color: var(--pg-faint); }
+
+/* Longest wait */
+.fs-ov-wait { display: grid; align-content: center; gap: 0.55rem; }
+
+/* Calls today, with the machines calling most as small bars (grey: it's volume, not a status) */
+.fs-ov-today { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1.75rem; }
+.fs-ov-today-head { display: grid; gap: 0.55rem; }
+.fs-ov-today > .fs-ov-sub { color: var(--pg-muted); }
+.fs-bars { display: grid; gap: 0.45rem; min-width: 0; }
+.fs-bars ol { list-style: none; padding: 0; display: grid; gap: 0.35rem; }
+.fs-bars li { display: grid; grid-template-columns: minmax(4.5rem, 8rem) minmax(0, 1fr) 2.5ch; align-items: center; gap: 0.65rem; font-size: 0.875rem; }
+.fs-bar-name { min-width: 0; color: var(--pg-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-bar-track { height: 6px; overflow: hidden; border-radius: 99px; background: var(--pg-track); }
+.fs-bar-track i { display: block; height: 100%; border-radius: inherit; background: #94a3b8; }
+:root[data-theme="dark"] .fs-bar-track i { background: #64748b; }
+.fs-bars li strong { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Area filter: its own row along the bottom of the summary */
+.fs-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 0.9rem; padding: 0.75rem 1.5rem; border-top: 1px solid var(--pg-line); }
 .fs-filters > span { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pg-muted); }
 .fs-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--pg-track); box-shadow: inset 0 0 0 1px var(--pg-line); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .fs-seg::-webkit-scrollbar { display: none; }
@@ -46,14 +87,37 @@
 .fs-page .fs-seg button.on { background: var(--pg-card); color: var(--pg-text); font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1), 0 0 0 1px var(--pg-line); }
 :root[data-theme="dark"] .fs-page .fs-seg button.on { background: #2a3558; box-shadow: none; }
 .fs-page .fs-seg button:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 0; }
-/* Narrower: the filter gets a row of its own; only well below laptop width do the counts wrap */
-@container (max-width: 1100px) {
-  .fs-kpis { padding-right: 0; }
-  .fs-filters { width: 100%; margin-left: 0; padding-top: 0.85rem; border-top: 1px solid var(--pg-line); }
+
+/* Laptop with the sidebar: the three blocks tighten up */
+@container (max-width: 1150px) {
+  .fs-ov-block { padding: 1.1rem 1.25rem; }
+  .fs-ov-states { gap: 1.1rem; }
+  .fs-donut { width: 88px; height: 88px; }
+  .fs-donut-center strong { font-size: 1.5rem; }
+  .fs-ov-today { gap: 1.25rem; }
+  .fs-bars li { grid-template-columns: minmax(3.5rem, 6rem) minmax(0, 1fr) 2.5ch; }
 }
-@container (max-width: 860px) {
-  .fs-kpis { grid-template-columns: repeat(3, minmax(0, auto)); justify-content: start; }
-  .fs-kpi:nth-child(4) { padding-left: 0; border-left: 0; }
+/* Tablet: machine states take the full first row; wait and today share the second */
+@container (max-width: 900px) {
+  .fs-ov { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); }
+  .fs-ov-states { grid-column: 1 / -1; border-bottom: 1px solid var(--pg-line); }
+  .fs-ov-block.fs-ov-wait { border-left: 0; }
+}
+/* Phone: machine states on top; longest wait and calls today side by side under it (no bar list), so the calls come sooner */
+@container (max-width: 600px) {
+  .fs-ov-block { padding: 1rem 1.1rem; }
+  .fs-ov-block + .fs-ov-block { border-left: 0; border-top: 1px solid var(--pg-line); }
+  .fs-ov-states { border-bottom: 0; gap: 1.1rem; }
+  .fs-donut { width: 88px; height: 88px; }
+  .fs-ov { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .fs-ov-states { grid-column: 1 / -1; }
+  .fs-ov-block.fs-ov-today { border-left: 1px solid var(--pg-line); }
+  .fs-ov-today { grid-template-columns: minmax(0, 1fr); gap: 0.55rem; }
+  .fs-bars { display: none; }
+  .fs-ov-today > .fs-ov-sub { display: none; }
+  .fs-ov-big { font-size: 1.875rem; }
+  .fs-filters { padding: 0.75rem 1.1rem; }
+  .fs-seg { width: 100%; }
 }
 
 /* ---------- Layout: the floor | teams ---------- */
@@ -73,22 +137,32 @@
 .fs-health .accepted { background: var(--pg-way); }
 .fs-health .waiting { background: var(--pg-wait); }
 
-.fs-tiles { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; padding: 1.1rem 1.25rem 1.25rem; }
+.fs-area { container-type: inline-size; }
+.fs-tiles { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.75rem; padding: 1.1rem 1.25rem 1.25rem; }
 .fs-tiles > li { display: grid; min-width: 0; }
+/* A machine with a call is twice as wide, so its teams, LATE and clock all have room */
+.fs-tiles > li.wide { grid-column: span 2; }
+/* Phone: two columns, so a machine with a call spans the full width (.fs-area raises these above the phone media rule further down) */
+@container (max-width: 400px) {
+  .fs-area .fs-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Too narrow for two tiles side by side: everything is one column */
+@container (max-width: 290px) {
+  .fs-area .fs-tiles { grid-template-columns: minmax(0, 1fr); }
+  .fs-area .fs-tiles > li.wide { grid-column: auto; }
+}
 .fs-page .fs-tile {
   --rail: var(--pg-done);
   --tint: var(--pg-card);
   position: relative;
   overflow: hidden;
   min-width: 0;
-  min-height: 80px;
+  min-height: 78px;
   box-sizing: border-box;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "name name" "state clock";
-  align-content: center;
-  align-items: center;
-  gap: 0.35rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.45rem;
   padding: 0.8rem 1rem 0.8rem 1.25rem;
   border: 1px solid var(--pg-line);
   border-radius: 12px;
@@ -98,25 +172,34 @@
   text-align: left;
 }
 .fs-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
-.fs-tile-name { grid-area: name; min-width: 0; font-size: 1.0625rem; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-tile-clock { grid-area: clock; font-size: 1.625rem; font-weight: 650; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; }
-.fs-tile-state { grid-area: state; display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-size: 0.875rem; color: var(--pg-text-2); }
-.fs-tile-who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-tile-teams { display: inline-flex; flex: none; gap: 3px; }
-.fs-tile-teams .dept-icon { width: 22px; height: 22px; border-radius: 6px; }
-.fs-tile-teams .dept-icon svg { width: 13px; height: 13px; }
+.fs-tile-name { min-width: 0; font-size: 1.0625rem; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Running: calm. The green accent says "good" without shouting. */
 .fs-tile.running .fs-tile-name { color: var(--pg-text-2); font-weight: 600; }
-.fs-tile.running .fs-tile-state { color: var(--pg-muted); }
-.fs-tile-today { grid-area: clock; color: var(--pg-muted); font-size: 0.8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fs-tile-ok { display: flex; align-items: center; gap: 0.45rem; color: var(--pg-muted); font-size: 0.875rem; }
+/* A machine with a call: name, LATE and the clock on top; one line per team under it */
+.fs-tile-top { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.fs-tile-top .fs-late { flex: none; }
+.fs-tile-clock small { margin-right: 0.4rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pg-muted); vertical-align: 0.2em; }
+.fs-tile-clock { flex: none; margin-left: auto; padding-left: 0.5rem; white-space: nowrap; font-size: 1.625rem; font-weight: 650; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; }
+.fs-tile-lanes { display: grid; gap: 0.3rem; min-width: 0; }
+.fs-lane { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; min-width: 0; font-size: 0.875rem; }
+.fs-lane .dept-icon { width: 22px; height: 22px; border-radius: 6px; }
+.fs-lane .dept-icon svg { width: 13px; height: 13px; }
+.fs-lane-team { min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The team's state as a small label on the card colour, so it reads on the tint */
+.fs-lane-who { min-width: 0; color: var(--pg-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-lane-state { flex: none; padding: 0.15rem 0.5rem; border-radius: 99px; background: var(--pg-card); font-size: 0.8125rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-lane.waiting .fs-lane-state { color: var(--pg-wait-text); }
+.fs-lane.accepted .fs-lane-state { color: var(--pg-way-text); }
+:root[data-theme="dark"] .fs-lane.waiting .fs-lane-state { color: #f87171; }
+.fs-lane-more { font-size: 0.8125rem; color: var(--pg-text-2); }
 /* Problems get a heavier rail */
 .fs-tile.waiting::before, .fs-tile.accepted::before { width: 6px; }
 /* Needs a team / being handled: tinted so they stand out across the room */
-.fs-tile.waiting { --rail: var(--pg-wait); --tint: color-mix(in srgb, var(--pg-wait) 12%, var(--pg-card)); border-color: var(--pg-wait); }
-.fs-tile.accepted { --rail: var(--pg-way); --tint: color-mix(in srgb, var(--pg-way) 13%, var(--pg-card)); border-color: var(--pg-way-line); }
+.fs-tile.waiting { --rail: var(--pg-wait); --tint: color-mix(in srgb, var(--pg-wait) 10%, var(--pg-card)); border-color: var(--pg-wait); }
+.fs-tile.accepted { --rail: var(--pg-way); --tint: color-mix(in srgb, var(--pg-way) 12%, var(--pg-card)); border-color: var(--pg-way-line); }
 :root[data-theme="dark"] .fs-tile.accepted { --tint: color-mix(in srgb, var(--pg-way) 17%, var(--pg-card)); }
-.fs-tile.late { --tint: color-mix(in srgb, var(--pg-wait) 19%, var(--pg-card)); box-shadow: inset 0 0 0 1px var(--pg-wait); }
-.fs-tile.waiting .fs-tile-state, .fs-tile.accepted .fs-tile-state { color: var(--pg-text); font-weight: 600; }
+.fs-tile.late { --tint: color-mix(in srgb, var(--pg-wait) 16%, var(--pg-card)); box-shadow: inset 0 0 0 1px var(--pg-wait); }
 .fs-tile.late .fs-tile-clock { color: var(--pg-wait-text); }
 :root[data-theme="dark"] .fs-tile.late .fs-tile-clock { color: #f87171; }
 .fs-page button.fs-tile { cursor: pointer; transition: filter 0.12s ease; }
@@ -167,7 +250,7 @@
 .fs-page .fs-row:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: -3px; }
 .fs-row-main { display: grid; gap: 0.1rem; min-width: 0; }
 .fs-row-main strong { font-size: 0.9875rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-row-main small { display: flex; align-items: center; gap: 0.45rem; min-width: 0; font-size: 0.8125rem; color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-row-main small { display: block; min-width: 0; font-size: 0.8125rem; color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-row-time { display: grid; justify-items: end; gap: 0.1rem; }
 .fs-row-time strong { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 1.3125rem; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .fs-row-time small { font-size: 0.75rem; color: var(--pg-muted); white-space: nowrap; }
@@ -262,6 +345,8 @@
 /* :root keeps these above the dark-mode colour rules in both themes */
 :root .fs-page.stale .fs-tile, :root .fs-page.stale .fs-row { --rail: var(--pg-faint); --tint: var(--pg-card); border-color: var(--pg-line); box-shadow: none; }
 :root .fs-page.stale .fs-health i, :root .fs-page.stale .fs-dot { background: var(--pg-faint); }
+:root .fs-page.stale .fs-donut-part { stroke: var(--pg-faint); }
+:root .fs-page.stale .fs-lane-state { color: var(--pg-text-2); }
 :root .fs-page.stale .fs-quiet > svg { color: var(--pg-faint); }
 :root .fs-page.stale .fs-chip.waiting, :root .fs-page.stale .fs-chip.accepted { background: var(--pg-track); box-shadow: none; color: var(--pg-text-2); }
 :root .fs-page.stale .fs-late, :root .fs-page.stale .fs-late-text, :root .fs-page.stale .fs-tile.late .fs-tile-clock, :root .fs-page.stale .fs-row.late .fs-row-time strong { color: var(--pg-faint); }
@@ -276,18 +361,11 @@
   .fs-teams { order: -1; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); align-items: start; }
 }
 @media (max-width: 640px) {
-  .fs-overview { padding: 0.9rem 1rem; }
-  .fs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .fs-kpi, .fs-kpi:first-child, .fs-kpi:nth-child(4) { padding: 0 0.75rem; border-left: 1px solid var(--pg-line); }
-  .fs-kpi:nth-child(odd) { padding-left: 0; border-left: 0; }
-  .fs-kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .fs-kpi dd { font-size: 1.5rem; }
-  .fs-filters, .fs-seg { width: 100%; }
-  .fs-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); padding: 0.85rem; gap: 0.6rem; }
-  .fs-tile-clock { font-size: 1.125rem; }
+  .fs-tiles { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); padding: 0.85rem; gap: 0.6rem; }
+  .fs-tile-clock { font-size: 1.375rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .fs-panel, .fs-page .fs-backdrop { animation: none; }
-  .fs-page .fs-row, .fs-page button.fs-tile { transition: none; }
+  .fs-page .fs-row, .fs-page button.fs-tile, .fs-donut-part { transition: none; }
 }
