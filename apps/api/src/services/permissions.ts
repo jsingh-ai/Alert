@@ -15,6 +15,17 @@ export function hasScopedRestriction(ctx: MembershipContext, types: Array<"DEPAR
   return ctx.scopes.some((scope) => types.includes(scope.scopeType as any));
 }
 
+/*
+ * Who covers what (set in Admin -> Users):
+ *   Operator   one machine (their station opens on it), or machine groups for a shared station
+ *   Responder  one or more departments, AND the machines they cover: machine groups and/or single
+ *              machines, or every machine when none are picked. They see and take a call only when
+ *              both match: "Maintenance, Press 1-6" never sees Quality's calls or Extrusion's.
+ *              ("Every machine" applies to their calls only: Team Calls, accepting, phone notifications.
+ *              machineWhereForContext, which other pages use, still gives a responder only picked machines.)
+ *   Manager    machine groups, or everything when none are picked
+ *   Admin      everything
+ */
 export function machineWhereForContext(ctx: MembershipContext): Prisma.MachineWhereInput {
   const base: Prisma.MachineWhereInput = { companyId: ctx.companyId, active: true, machineGroup: { active: true } };
   const machineIds = scopeIds(ctx, "MACHINE");
@@ -51,11 +62,20 @@ export function canSeeDepartment(ctx: ScopedRole, departmentId: string) {
   return ids.includes(departmentId);
 }
 
-export function canActAsResponder(ctx: ScopedRole, departmentId: string) {
+/** Whether the machine is one this person covers. No machine limits: every machine (managers and responders). */
+export function coversMachine(ctx: ScopedRole, machine: { id: string; machineGroupId: string }) {
   if (ctx.role === "ADMIN") return true;
-  if (ctx.role === "MANAGER") return canSeeDepartment(ctx, departmentId);
-  if (ctx.role !== "RESPONDER") return false;
-  return canSeeDepartment(ctx, departmentId);
+  const machineIds = scopeIds(ctx, "MACHINE");
+  const groupIds = scopeIds(ctx, "MACHINE_GROUP");
+  if (machineIds.length === 0 && groupIds.length === 0) return ctx.role === "MANAGER" || ctx.role === "RESPONDER";
+  return machineIds.includes(machine.id) || groupIds.includes(machine.machineGroupId);
+}
+
+/** Can take this call: the department is theirs and (when the machine is known) they cover the machine. */
+export function canActAsResponder(ctx: ScopedRole, departmentId: string, machine?: { id: string; machineGroupId: string }) {
+  if (ctx.role === "ADMIN") return true;
+  if (ctx.role !== "MANAGER" && ctx.role !== "RESPONDER") return false;
+  return canSeeDepartment(ctx, departmentId) && (!machine || coversMachine(ctx, machine));
 }
 
 export async function canUseMachine(ctx: MembershipContext, machineId: string, prisma: { machine: { findFirst: Function } }) {

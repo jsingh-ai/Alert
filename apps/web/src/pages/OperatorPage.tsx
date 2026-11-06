@@ -137,7 +137,15 @@ export function OperatorPage() {
   const data = bootstrap.data?.data;
   const machines = useMemo(() => [...(data?.machines ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)), [data?.machines]);
   const templates = data?.commandTemplates ?? [];
-  const machine = machines.find((m) => m.id === machineId);
+  // Someone given one machine (an operator's own) never picks: the station is that machine
+  const assigned = machines.length === 1 ? machines[0] : null;
+  useEffect(() => {
+    if (assigned && machineId !== assigned.id) {
+      saveMachineId(assigned.id);
+      setMachineId(assigned.id);
+    }
+  }, [assigned, machineId]);
+  const machine = assigned ?? machines.find((m) => m.id === machineId);
 
   // Forget a saved machine that no longer exists; auto-pick when there is only one.
   useEffect(() => {
@@ -208,7 +216,7 @@ export function OperatorPage() {
     );
   }
 
-  if (!machine || pickerOpen) {
+  if (!machine || (pickerOpen && !assigned)) {
     return (
       <div className="su-page ms-page">
         <SuiteHeader eyebrow="Station setup" title="Which machine is this?">
@@ -246,7 +254,7 @@ export function OperatorPage() {
       >
         <SuiteMenu
           signOutLabel="Sign out of this station"
-          items={(close) => <HoldButton onHold={() => { close(); setPickerOpen(true); }} />}
+          items={assigned ? undefined : (close) => <HoldButton onHold={() => { close(); setPickerOpen(true); }} />}
         />
       </SuiteHeader>
 

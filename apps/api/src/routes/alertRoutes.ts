@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { alertCommandLabel, includeAlert, serializeAlert, transitionAlert } from "../services/alertService.js";
 import { createAlertSystemMessages, createCommunicationMessage, ensureMachineCommunicationChannel, serializeMessage } from "../services/communicationService.js";
@@ -25,9 +26,20 @@ export async function alertRoutes(app: FastifyInstance) {
       return reply.code(403).send({ success: false, error: "Machine is outside your scope." });
     }
 
-    const accessFilters: Array<{ departmentId?: { in: string[] }; machineId?: { in: string[] } }> = [];
+    const accessFilters: Prisma.AndonAlertWhereInput[] = [];
     const managerHasGlobalAlertAccess = ctx.role === "MANAGER" && ctx.scopes.length === 0;
-    if (ctx.role !== "ADMIN" && !managerHasGlobalAlertAccess) {
+    const responderDepartments = ctx.role === "RESPONDER" ? scopedDepartmentIds(ctx) : [];
+    if (responderDepartments.length) {
+      // Their departments AND the machines they cover (every machine when none are picked). Matched by id and
+      // group, not by "active", so an open call never vanishes because its machine was just switched off.
+      const machineIds = ctx.scopes.filter((scope: { scopeType: string }) => scope.scopeType === "MACHINE").map((scope: { scopeId: string }) => scope.scopeId);
+      const groupIds = ctx.scopes.filter((scope: { scopeType: string }) => scope.scopeType === "MACHINE_GROUP").map((scope: { scopeId: string }) => scope.scopeId);
+      accessFilters.push({
+        departmentId: { in: responderDepartments },
+        ...(machineIds.length || groupIds.length ? { OR: [{ machineId: { in: machineIds } }, { machine: { machineGroupId: { in: groupIds } } }] } : {})
+      });
+    } else if (ctx.role !== "ADMIN" && !managerHasGlobalAlertAccess) {
+      // (Includes responders set up before departments were required: they keep their old view until edited)
       const departmentIds = scopedDepartmentIds(ctx);
       if (departmentIds.length) accessFilters.push({ departmentId: { in: departmentIds } });
 
@@ -100,7 +112,7 @@ export async function alertRoutes(app: FastifyInstance) {
     const actionNote = typeof body.note === "string" ? body.note.trim() : null;
     if (actionNote && actionNote.length > 4000) return reply.code(400).send({ success: false, error: "Note is too long." });
 
-    const alert = await prisma.andonAlert.findFirst({ where: { id: alertId, companyId: ctx.companyId } });
+    const alert = await prisma.andonAlert.findFirst({ where: { id: alertId, companyId: ctx.companyId }, include: { machine: { select: { id: true, machineGroupId: true } } } });
     if (!alert) return reply.code(404).send({ success: false, error: "Alert not found." });
 
     if (action === "note") {
@@ -110,9 +122,8 @@ export async function alertRoutes(app: FastifyInstance) {
       if (note.length > 4000) return reply.code(400).send({ success: false, error: "Message is too long." });
 
       const canWriteAlertConversation = ctx.role === "ADMIN"
-        || (ctx.role === "MANAGER" && (canSeeDepartment(ctx, alert.departmentId) || await canUseMachine(ctx, alert.machineId, prisma)))
-        || (ctx.role === "RESPONDER" && canSeeDepartment(ctx, alert.departmentId))
-        || await canUseMachine(ctx, alert.machineId, prisma);
+        || ((ctx.role === "MANAGER" || ctx.role === "RESPONDER") && canActAsResponder(ctx, alert.departmentId, alert.machine))
+        || (ctx.role === "OPERATOR" && await canUseMachine(ctx, alert.machineId, prisma));
       if (!canWriteAlertConversation) {
         return reply.code(403).send({ success: false, error: "You cannot message this alert." });
       }
@@ -158,11 +169,11 @@ export async function alertRoutes(app: FastifyInstance) {
       }
     }
 
-    if (action === "acknowledge" && !canActAsResponder(ctx, alert.departmentId)) {
+    if (action === "acknowledge" && !canActAsResponder(ctx, alert.departmentId, alert.machine)) {
       return reply.code(403).send({ success: false, error: "You cannot act for this department." });
     }
-    if (["arrive", "resolve"].includes(action)) {
-      const canRespondForDepartment = canActAsResponder(ctx, alert.departmentId);
+    if (["arrive", "resolve", "cancel"].includes(action)) {
+      const canRespondForDepartment = canActAsResponder(ctx, alert.departmentId, alert.machine);
       const canOperatorActForMachine = ctx.role === "OPERATOR" && await canUseMachine(ctx, alert.machineId, prisma);
       if (!canRespondForDepartment && !canOperatorActForMachine) {
         return reply.code(403).send({ success: false, error: "You cannot act for this alert." });

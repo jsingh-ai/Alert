@@ -128,13 +128,13 @@ function later(work: () => Promise<void>) {
   });
 }
 
-/** Users (with a device turned on) who respond for this department. */
-async function responders(companyId: string, departmentId: string) {
+/** Users (with a device turned on) who respond for this department on this machine. */
+async function responders(companyId: string, departmentId: string, machine: { id: string; machineGroupId: string }) {
   const memberships = await prisma.membership.findMany({
     where: { companyId, active: true, user: { active: true, pushSubscriptions: { some: { companyId } } }, company: { active: true } },
     select: { userId: true, role: true, scopes: true }
   });
-  return memberships.filter((membership) => canActAsResponder(membership, departmentId)).map((membership) => membership.userId);
+  return memberships.filter((membership) => canActAsResponder(membership, departmentId, machine)).map((membership) => membership.userId);
 }
 
 /* ---------- The three moments ---------- */
@@ -144,7 +144,7 @@ type AlertLike = {
   companyId: string;
   departmentId: string;
   department: { name: string };
-  machine: { name: string };
+  machine: { id: string; machineGroupId: string; name: string };
   issueType?: { name: string } | null;
   displayMessage?: string | null;
   operatorNote?: string | null;
@@ -157,7 +157,7 @@ const QUEUE_URL = "/queue";
 export function notifyNewCall(alert: AlertLike) {
   later(async () => {
     const note = alert.displayMessage || alert.operatorNote;
-    await sendToUsers(alert.companyId, await responders(alert.companyId, alert.departmentId), {
+    await sendToUsers(alert.companyId, await responders(alert.companyId, alert.departmentId, alert.machine), {
       title: `${alert.machine.name} needs ${alert.department.name}`,
       body: [alert.issueType?.name, note ? `“${note}”` : ""].filter(Boolean).join(" · ") || "Tap to respond",
       tag: callTag(alert.id),
@@ -169,7 +169,7 @@ export function notifyNewCall(alert: AlertLike) {
 /** Someone took the call: tell the rest of the team quietly, replacing the call notification. */
 export function notifyAccepted(alert: AlertLike, responderName: string, acceptedByUserId: string | null) {
   later(async () => {
-    const userIds = (await responders(alert.companyId, alert.departmentId)).filter((id) => id !== acceptedByUserId);
+    const userIds = (await responders(alert.companyId, alert.departmentId, alert.machine)).filter((id) => id !== acceptedByUserId);
     await sendToUsers(alert.companyId, userIds, {
       title: `${alert.machine.name}: ${responderName} accepted`,
       body: `${alert.department.name}${alert.issueType?.name ? ` · ${alert.issueType.name}` : ""}`,
@@ -190,7 +190,7 @@ export function notifyMessage(alert: AlertLike & { status: string; acknowledgedB
       select: { userId: true }
     });
     // Only people still active and still responding for this department (not someone since moved or switched off)
-    const allowed = new Set(await responders(alert.companyId, alert.departmentId));
+    const allowed = new Set(await responders(alert.companyId, alert.departmentId, alert.machine));
     const userIds = [alert.acknowledgedByUserId, ...helpers.map((helper) => helper.userId)].filter((id): id is string => typeof id === "string" && id !== fromUserId && allowed.has(id));
     await sendToUsers(alert.companyId, userIds, {
       title: `${alert.machine.name} · ${fromName}`,
