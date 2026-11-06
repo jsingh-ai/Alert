@@ -84,12 +84,12 @@ export function AdminPage() {
   const current = SECTIONS.flatMap((group) => group.items).find((item) => item.id === section);
 
   return (
-    <div className="su-page ad-page">
+    <div className="su-page cfg-page">
       <SuiteHeader eyebrow="Settings" title="Admin" />
-      <div className="ad-layout">
-        <nav className="ad-nav" aria-label="Admin sections">
+      <div className="cfg-layout">
+        <nav className="cfg-nav" aria-label="Admin sections">
           {SECTIONS.map((group) => (
-            <div key={group.group} className="ad-nav-group">
+            <div key={group.group} className="cfg-nav-group">
               <h2>{group.group}</h2>
               {group.items.map((item) => (
                 <button key={item.id} type="button" className={section === item.id ? "on" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => choose(item.id)}>
@@ -100,15 +100,15 @@ export function AdminPage() {
             </div>
           ))}
         </nav>
-        <main className="ad-main" aria-label={current?.label}>
+        <main className="cfg-main" aria-label={current?.label}>
           {section === "status" ? (
             <StatusSection />
           ) : section === "channels" ? (
             <ChannelsSection />
           ) : !data ? (
-            <section className="ad-card">
-              <p className="ad-empty">{admin.isError ? "Admin data couldn't be loaded." : "Loading…"}</p>
-              {admin.isError && <div className="ad-card-foot"><button type="button" className="ad-btn" onClick={() => void admin.refetch()}>Try again</button></div>}
+            <section className="cfg-card">
+              <p className="cfg-empty">{admin.isError ? "Admin data couldn't be loaded." : "Loading…"}</p>
+              {admin.isError && <div className="cfg-card-foot"><button type="button" className="cfg-btn" onClick={() => void admin.refetch()}>Try again</button></div>}
             </section>
           ) : section === "users" ? (
             <UsersSection data={data} />
@@ -133,13 +133,13 @@ export function AdminPage() {
 
 function Card({ title, meta, actions, children, className = "" }: { title: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`ad-card ${className}`}>
-      <header className="ad-card-head">
+    <section className={`cfg-card ${className}`}>
+      <header className="cfg-card-head">
         <div>
           <h2>{title}</h2>
           {meta && <p>{meta}</p>}
         </div>
-        {actions && <div className="ad-card-actions">{actions}</div>}
+        {actions && <div className="cfg-card-actions">{actions}</div>}
       </header>
       {children}
     </section>
@@ -147,22 +147,22 @@ function Card({ title, meta, actions, children, className = "" }: { title: strin
 }
 
 function Status({ active }: { active: boolean }) {
-  return <span className={`ad-badge ${active ? "on" : "off"}`}>{active ? "Active" : "Off"}</span>;
+  return <span className={`cfg-badge ${active ? "on" : "off"}`}>{active ? "Active" : "Off"}</span>;
 }
 
 /** Turn on/off and delete, small and to the right of a row. */
 function RowActions({ active, onToggle, onDelete, deleteLabel = "Delete this? It can't be undone." }: { active?: boolean; onToggle?: () => void; onDelete?: () => void; deleteLabel?: string }) {
   return (
-    <span className="ad-row-actions">
-      {onToggle && <button type="button" className="ad-link" onClick={onToggle}>{active ? "Turn off" : "Turn on"}</button>}
-      {onDelete && <button type="button" className="ad-link danger" onClick={() => window.confirm(deleteLabel) && onDelete()}>Delete</button>}
+    <span className="cfg-row-actions">
+      {onToggle && <button type="button" className="cfg-link" onClick={onToggle}>{active ? "Turn off" : "Turn on"}</button>}
+      {onDelete && <button type="button" className="cfg-link danger" onClick={() => window.confirm(deleteLabel) && onDelete()}>Delete</button>}
     </span>
   );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <label className="ad-field">
+    <label className="cfg-field">
       <span>{label}</span>
       {children}
       {hint && <small>{hint}</small>}
@@ -171,7 +171,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 function Problem({ error }: { error: unknown }) {
-  return error ? <p className="ad-error" role="alert">{errorText(error)}</p> : null;
+  return error ? <p className="cfg-error" role="alert">{errorText(error)}</p> : null;
 }
 
 /* ---------- People: users ---------- */
@@ -231,16 +231,16 @@ function UsersSection({ data }: { data: any }) {
   const counts = (role: Role) => users.filter((user) => roleOf(user) === role).length;
 
   return (
-    <div className="ad-split">
+    <div className="cfg-split">
       <Card
         title="Users"
         meta={`${users.filter((user) => user.active).length} active`}
-        actions={<button type="button" className="ad-btn primary" onClick={() => setSelectedId("new")}><PlusIcon />New user</button>}
-        className="ad-users"
+        actions={<button type="button" className="cfg-btn primary" onClick={() => setSelectedId("new")}><PlusIcon />New user</button>}
+        className="cfg-users"
       >
-        <div className="ad-toolbar">
-          <input className="ad-input" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name" aria-label="Search users" />
-          <div className="ad-seg" role="group" aria-label="Show">
+        <div className="cfg-toolbar">
+          <input className="cfg-input" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name" aria-label="Search users" />
+          <div className="cfg-seg" role="group" aria-label="Show">
             {(["ALL", "OPERATOR", "RESPONDER", "MANAGER", "ADMIN"] as const).map((role) => (
               <button key={role} type="button" aria-pressed={filter === role} className={filter === role ? "on" : ""} onClick={() => setFilter(role)}>
                 {role === "ALL" ? "All" : `${ROLE_LABEL[role]}s`}{role !== "ALL" && <em>{counts(role)}</em>}
@@ -248,29 +248,29 @@ function UsersSection({ data }: { data: any }) {
             ))}
           </div>
         </div>
-        <ul className="ad-list">
+        <ul className="cfg-list">
           {shown.map((user) => (
             <li key={user.id}>
-              <button type="button" className={`ad-user ${selectedId === user.id ? "on" : ""} ${user.active ? "" : "inactive"}`} onClick={() => setSelectedId(user.id)}>
-                <span className="ad-avatar" aria-hidden="true">{initials(user.displayName)}</span>
-                <span className="ad-user-main">
+              <button type="button" className={`cfg-user ${selectedId === user.id ? "on" : ""} ${user.active ? "" : "inactive"}`} onClick={() => setSelectedId(user.id)}>
+                <span className="cfg-avatar" aria-hidden="true">{initials(user.displayName)}</span>
+                <span className="cfg-user-main">
                   <strong>{user.displayName}<small>@{user.username}</small></strong>
                   <span>{accessSummary(user, data)}</span>
                 </span>
-                <span className={`ad-role ${roleOf(user).toLowerCase()}`}>{ROLE_LABEL[roleOf(user)] ?? roleOf(user)}</span>
-                {!user.active && <span className="ad-badge off">Off</span>}
-                <ChevronRightIcon className="ad-chev" />
+                <span className={`cfg-role ${roleOf(user).toLowerCase()}`}>{ROLE_LABEL[roleOf(user)] ?? roleOf(user)}</span>
+                {!user.active && <span className="cfg-badge off">Off</span>}
+                <ChevronRightIcon className="cfg-chev" />
               </button>
             </li>
           ))}
-          {shown.length === 0 && <li className="ad-empty">{users.length ? "No users match." : "No users yet."}</li>}
+          {shown.length === 0 && <li className="cfg-empty">{users.length ? "No users match." : "No users yet."}</li>}
         </ul>
       </Card>
 
       {selectedId ? (
         <UserEditor key={selectedId} user={selected} data={data} onDone={(id) => setSelectedId(id)} onClose={() => setSelectedId(null)} />
       ) : (
-        <section className="ad-card ad-hint">
+        <section className="cfg-card cfg-hint">
           <UsersIcon />
           <p><strong>Pick a user to change them, or add a new one.</strong><span>Each role gets exactly the access it needs: an operator their machine, a responder their department and machines, a manager their machine groups.</span></p>
         </section>
@@ -379,23 +379,23 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
     <Card
       title={isNew ? "New user" : user.displayName}
       meta={isNew ? "Role first, then what they cover." : <>@{user.username} · {user.active ? "Active" : "Turned off"}</>}
-      actions={<button type="button" className="ad-link" onClick={onClose}>Close</button>}
-      className="ad-editor"
+      actions={<button type="button" className="cfg-link" onClick={onClose}>Close</button>}
+      className="cfg-editor"
     >
       <form
-        className="ad-form"
+        className="cfg-form"
         onSubmit={(event) => {
           event.preventDefault();
           if (!blocker) save.mutate(undefined, { onSuccess: (result: any) => { set({ password: "" }); if (isNew && result?.data?.id) onDone(result.data.id); } });
         }}
       >
-        <fieldset className="ad-fieldset">
+        <fieldset className="cfg-fieldset">
           <legend>Role</legend>
-          {!isNew && roleOf(user) === "VIEWER" && <p className="ad-note">Viewer is no longer used. Pick the role this person should have.</p>}
-          {!isNew && legacyAccess(user) && <p className="ad-note">{legacyAccess(user)}</p>}
-          <div className="ad-roles">
+          {!isNew && roleOf(user) === "VIEWER" && <p className="cfg-note">Viewer is no longer used. Pick the role this person should have.</p>}
+          {!isNew && legacyAccess(user) && <p className="cfg-note">{legacyAccess(user)}</p>}
+          <div className="cfg-roles">
             {ROLES.map((role) => (
-              <label key={role.id} className={`ad-role-card ${draft.role === role.id ? "on" : ""}`}>
+              <label key={role.id} className={`cfg-role-card ${draft.role === role.id ? "on" : ""}`}>
                 <input type="radio" name="role" value={role.id} checked={draft.role === role.id} onChange={() => set({ role: role.id, mode: role.id === "OPERATOR" ? "one" : draft.mode === "one" || draft.mode === "shared" ? "all" : draft.mode })} />
                 <strong>{role.label}</strong>
                 <span>{role.detail}</span>
@@ -404,41 +404,41 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
           </div>
         </fieldset>
 
-        <fieldset className="ad-fieldset">
+        <fieldset className="cfg-fieldset">
           <legend>Sign-in</legend>
-          <div className="ad-grid2">
-            <Field label="Name"><input className="ad-input" value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="John Smith" autoComplete="off" /></Field>
-            <Field label="Username"><input className="ad-input" value={draft.username} onChange={(event) => set({ username: event.target.value })} placeholder="jsmith" autoComplete="off" /></Field>
+          <div className="cfg-grid2">
+            <Field label="Name"><input className="cfg-input" value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="John Smith" autoComplete="off" /></Field>
+            <Field label="Username"><input className="cfg-input" value={draft.username} onChange={(event) => set({ username: event.target.value })} placeholder="jsmith" autoComplete="off" /></Field>
           </div>
           <Field label={isNew ? "Password" : "New password"} hint={isNew ? "At least 8 characters." : "Leave blank to keep their password."}>
-            <input className="ad-input" type="password" value={draft.password} onChange={(event) => set({ password: event.target.value })} autoComplete="new-password" />
+            <input className="cfg-input" type="password" value={draft.password} onChange={(event) => set({ password: event.target.value })} autoComplete="new-password" />
           </Field>
         </fieldset>
 
         {draft.role && draft.role !== "ADMIN" && (
-          <fieldset className="ad-fieldset">
+          <fieldset className="cfg-fieldset">
             <legend>{draft.role === "OPERATOR" ? "Machine" : draft.role === "RESPONDER" ? "What they answer" : "What they see"}</legend>
             <AccessPicker draft={draft} data={data} set={set} toggle={toggle} />
           </fieldset>
         )}
-        {draft.role === "ADMIN" && <p className="ad-note">Admins see and manage everything, so there's nothing to limit.</p>}
+        {draft.role === "ADMIN" && <p className="cfg-note">Admins see and manage everything, so there's nothing to limit.</p>}
 
-        <div className="ad-form-foot">
-          {blocker ? <span className="ad-missing">{blocker}</span> : <Problem error={save.error} />}
-          {save.isSuccess && !save.isPending && !blocker && <span className="ad-saved">Saved</span>}
-          <button type="submit" className="ad-btn primary" disabled={Boolean(blocker) || save.isPending}>{save.isPending ? "Saving…" : isNew ? "Create user" : "Save changes"}</button>
+        <div className="cfg-form-foot">
+          {blocker ? <span className="cfg-missing">{blocker}</span> : <Problem error={save.error} />}
+          {save.isSuccess && !save.isPending && !blocker && <span className="cfg-saved">Saved</span>}
+          <button type="submit" className="cfg-btn primary" disabled={Boolean(blocker) || save.isPending}>{save.isPending ? "Saving…" : isNew ? "Create user" : "Save changes"}</button>
         </div>
       </form>
 
       {!isNew && (
         <>
-          <details className="ad-more">
+          <details className="cfg-more">
             <summary>Message channels</summary>
             <ChannelAccess userId={user.id} />
           </details>
-          <div className="ad-danger-zone">
-            <button type="button" className="ad-btn" onClick={() => setActive.mutate(!user.active)} disabled={setActive.isPending}>{user.active ? "Turn off sign-in" : "Turn sign-in back on"}</button>
-            <button type="button" className="ad-btn danger" onClick={() => window.confirm(`Remove ${user.displayName}? They can't sign in any more; their history is kept.`) && remove.mutate(undefined, { onSuccess: onClose })} disabled={remove.isPending}>Remove user</button>
+          <div className="cfg-danger-zone">
+            <button type="button" className="cfg-btn" onClick={() => setActive.mutate(!user.active)} disabled={setActive.isPending}>{user.active ? "Turn off sign-in" : "Turn sign-in back on"}</button>
+            <button type="button" className="cfg-btn danger" onClick={() => window.confirm(`Remove ${user.displayName}? They can't sign in any more; their history is kept.`) && remove.mutate(undefined, { onSuccess: onClose })} disabled={remove.isPending}>Remove user</button>
             <Problem error={setActive.error || remove.error} />
           </div>
         </>
@@ -449,7 +449,7 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
 
 function Choice({ checked, onChange, label, detail }: { checked: boolean; onChange: () => void; label: string; detail?: string }) {
   return (
-    <label className={`ad-choice ${checked ? "on" : ""}`}>
+    <label className={`cfg-choice ${checked ? "on" : ""}`}>
       <input type="radio" checked={checked} onChange={onChange} />
       <span><strong>{label}</strong>{detail && <small>{detail}</small>}</span>
     </label>
@@ -466,10 +466,10 @@ function AccessPicker({ draft, data, set, toggle }: { draft: Draft; data: any; s
 
   if (draft.role === "OPERATOR") {
     return (
-      <div className="ad-access">
+      <div className="cfg-access">
         <Choice checked={draft.mode === "one"} onChange={() => set({ mode: "one" })} label="Their own machine" detail="Machine Station opens straight on it, with no picking." />
         {draft.mode === "one" && (
-          <select className="ad-input" value={draft.machineId} onChange={(event) => set({ machineId: event.target.value })} aria-label="Machine">
+          <select className="cfg-input" value={draft.machineId} onChange={(event) => set({ machineId: event.target.value })} aria-label="Machine">
             <option value="">Pick a machine…</option>
             {groups.map((group) => (
               <optgroup key={group.id} label={group.name}>
@@ -486,17 +486,17 @@ function AccessPicker({ draft, data, set, toggle }: { draft: Draft; data: any; s
 
   if (draft.role === "RESPONDER") {
     return (
-      <div className="ad-access">
-        <div className="ad-sub">Departments</div>
-        <div className="ad-chips">
+      <div className="cfg-access">
+        <div className="cfg-sub">Departments</div>
+        <div className="cfg-chips">
           {departments.map((department) => (
-            <button key={department.id} type="button" className={`ad-chip team ${draft.departmentIds.has(department.id) ? "on" : ""}`} aria-pressed={draft.departmentIds.has(department.id)} onClick={() => toggle("departmentIds", department.id)}>
+            <button key={department.id} type="button" className={`cfg-chip team ${draft.departmentIds.has(department.id) ? "on" : ""}`} aria-pressed={draft.departmentIds.has(department.id)} onClick={() => toggle("departmentIds", department.id)}>
               <TeamIcon department={department} size="sm" />{department.name}
             </button>
           ))}
-          {departments.length === 0 && <span className="ad-empty">Add a department first (Calls → Departments).</span>}
+          {departments.length === 0 && <span className="cfg-empty">Add a department first (Calls → Departments).</span>}
         </div>
-        <div className="ad-sub">Machines they cover</div>
+        <div className="cfg-sub">Machines they cover</div>
         <Choice checked={draft.mode === "all"} onChange={() => set({ mode: "all" })} label="Every machine" />
         <Choice checked={draft.mode === "some"} onChange={() => set({ mode: "some" })} label="Only some machines" detail="Whole machine groups (all Press), single machines (Press 1–6), or both." />
         {draft.mode === "some" && <GroupChecks groups={groups} machinesIn={machinesIn} draft={draft} toggle={toggle} pickMachines />}
@@ -505,7 +505,7 @@ function AccessPicker({ draft, data, set, toggle }: { draft: Draft; data: any; s
   }
 
   return (
-    <div className="ad-access">
+    <div className="cfg-access">
       <Choice checked={draft.mode === "all"} onChange={() => set({ mode: "all" })} label="Every machine group" detail="The whole floor, every report." />
       <Choice checked={draft.mode === "some"} onChange={() => set({ mode: "some" })} label="Only these machine groups" detail="Floor Status, Team Calls and reports show just these." />
       {draft.mode === "some" && <GroupChecks groups={groups} machinesIn={machinesIn} draft={draft} toggle={toggle} pickMachines={false} />}
@@ -516,9 +516,9 @@ function AccessPicker({ draft, data, set, toggle }: { draft: Draft; data: any; s
 /** Machine groups to tick; for responders, each group can open to pick single machines instead. */
 function GroupChecks({ groups, machinesIn, draft, toggle, pickMachines }: { groups: any[]; machinesIn: (groupId: string) => any[]; draft: Draft; toggle: (key: "machineGroupIds" | "machineIds", id: string) => void; pickMachines: boolean }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(groups.filter((group) => machinesIn(group.id).some((machine) => draft.machineIds.has(machine.id))).map((group) => group.id)));
-  if (!groups.length) return <p className="ad-empty">Add machine groups first (Floor → Machines).</p>;
+  if (!groups.length) return <p className="cfg-empty">Add machine groups first (Floor → Machines).</p>;
   return (
-    <ul className="ad-groups">
+    <ul className="cfg-groups">
       {groups.map((group) => {
         const list = machinesIn(group.id);
         const whole = draft.machineGroupIds.has(group.id);
@@ -526,21 +526,21 @@ function GroupChecks({ groups, machinesIn, draft, toggle, pickMachines }: { grou
         const expanded = pickMachines && open.has(group.id) && !whole;
         return (
           <li key={group.id} className={whole || picked ? "on" : ""}>
-            <div className="ad-group-row">
-              <label className="ad-check">
+            <div className="cfg-group-row">
+              <label className="cfg-check">
                 <input type="checkbox" checked={whole} onChange={() => toggle("machineGroupIds", group.id)} />
                 <span><strong>{pickMachines ? `All ${group.name}` : group.name}</strong><small>{list.length} machine{list.length === 1 ? "" : "s"}</small></span>
               </label>
               {pickMachines && !whole && (
-                <button type="button" className="ad-link" aria-expanded={expanded} onClick={() => setOpen((current) => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}>
+                <button type="button" className="cfg-link" aria-expanded={expanded} onClick={() => setOpen((current) => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}>
                   {picked ? `${picked} of ${list.length} picked` : "Pick machines"}
                 </button>
               )}
             </div>
             {expanded && (
-              <div className="ad-chips machines">
+              <div className="cfg-chips machines">
                 {list.map((machine) => (
-                  <button key={machine.id} type="button" className={`ad-chip ${draft.machineIds.has(machine.id) ? "on" : ""}`} aria-pressed={draft.machineIds.has(machine.id)} onClick={() => toggle("machineIds", machine.id)}>
+                  <button key={machine.id} type="button" className={`cfg-chip ${draft.machineIds.has(machine.id) ? "on" : ""}`} aria-pressed={draft.machineIds.has(machine.id)} onClick={() => toggle("machineIds", machine.id)}>
                     {machine.name}
                   </button>
                 ))}
@@ -566,19 +566,19 @@ function ChannelAccess({ userId }: { userId: string }) {
     () => putJson(`/api/admin/users/${userId}/channel-memberships`, { memberships: Object.entries(selected).map(([channelId, value]) => ({ channelId, canRead: true, canWrite: value.canWrite })) }),
     [["admin-user-channel-memberships", userId], ["admin-communication-channels"]]
   );
-  if (memberships.isLoading) return <p className="ad-empty">Loading…</p>;
-  if (!channels.length) return <p className="ad-empty">No channels yet. System → Message channels → Sync.</p>;
+  if (memberships.isLoading) return <p className="cfg-empty">Loading…</p>;
+  if (!channels.length) return <p className="cfg-empty">No channels yet. System → Message channels → Sync.</p>;
   return (
-    <div className="ad-channel-access">
-      <ul className="ad-list compact">
+    <div className="cfg-channel-access">
+      <ul className="cfg-list compact">
         {channels.map((channel) => (
-          <li key={channel.id} className="ad-row">
-            <label className="ad-check"><input type="checkbox" checked={Boolean(selected[channel.id])} onChange={() => setSelected((current) => { const next = { ...current }; if (next[channel.id]) delete next[channel.id]; else next[channel.id] = { canWrite: true }; return next; })} /><span><strong>{channel.name}</strong></span></label>
-            <label className="ad-check small"><input type="checkbox" checked={Boolean(selected[channel.id]?.canWrite)} disabled={!selected[channel.id]} onChange={() => setSelected((current) => ({ ...current, [channel.id]: { canWrite: !current[channel.id]?.canWrite } }))} /><span>Can write</span></label>
+          <li key={channel.id} className="cfg-row">
+            <label className="cfg-check"><input type="checkbox" checked={Boolean(selected[channel.id])} onChange={() => setSelected((current) => { const next = { ...current }; if (next[channel.id]) delete next[channel.id]; else next[channel.id] = { canWrite: true }; return next; })} /><span><strong>{channel.name}</strong></span></label>
+            <label className="cfg-check small"><input type="checkbox" checked={Boolean(selected[channel.id]?.canWrite)} disabled={!selected[channel.id]} onChange={() => setSelected((current) => ({ ...current, [channel.id]: { canWrite: !current[channel.id]?.canWrite } }))} /><span>Can write</span></label>
           </li>
         ))}
       </ul>
-      <div className="ad-form-foot"><Problem error={save.error} /><button type="button" className="ad-btn" onClick={() => save.mutate(undefined)} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save channels"}</button></div>
+      <div className="cfg-form-foot"><Problem error={save.error} /><button type="button" className="cfg-btn" onClick={() => save.mutate(undefined)} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save channels"}</button></div>
     </div>
   );
 }
@@ -591,17 +591,17 @@ function QuickLoginSection({ data }: { data: any }) {
   const save = useSave(() => putJson("/api/admin/quick-login", { profiles: Array.from(selected) }), [["quick-login"]]);
   return (
     <Card title="Quick login" meta="One-tap sign-in buttons on the sign-in screen. Each uses a user with that username (operator, quality, …). Admins always sign in with a password.">
-      <ul className="ad-list">
+      <ul className="cfg-list">
         {QUICK_LOGIN.map((profile) => (
-          <li key={profile.id} className="ad-row">
-            <label className="ad-check">
+          <li key={profile.id} className="cfg-row">
+            <label className="cfg-check">
               <input type="checkbox" checked={selected.has(profile.id)} onChange={() => setSelected((current) => { const next = new Set(current); if (next.has(profile.id)) next.delete(profile.id); else next.add(profile.id); return next; })} />
               <span><strong>{profile.label}</strong><small>{profile.detail} · username "{profile.id}"</small></span>
             </label>
           </li>
         ))}
       </ul>
-      <div className="ad-card-foot"><Problem error={save.error} /><button type="button" className="ad-btn primary" onClick={() => save.mutate(undefined)} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button></div>
+      <div className="cfg-card-foot"><Problem error={save.error} /><button type="button" className="cfg-btn primary" onClick={() => save.mutate(undefined)} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button></div>
     </Card>
   );
 }
@@ -622,23 +622,23 @@ function MachinesSection({ data }: { data: any }) {
   const ungrouped = machines.filter((item) => !groups.some((group) => group.id === item.machineGroupId));
 
   return (
-    <div className="ad-stack">
+    <div className="cfg-stack">
       <Card title="Add" meta="Machine groups are the areas on Floor Status (Press, Molding…). Every machine belongs to one.">
-        <div className="ad-add-grid">
-          <form className="ad-inline" onSubmit={(event) => { event.preventDefault(); if (groupName.trim()) addGroup.mutate(undefined, { onSuccess: () => setGroupName("") }); }}>
-            <Field label="New machine group"><input className="ad-input" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Press" /></Field>
-            <button type="submit" className="ad-btn" disabled={!groupName.trim() || addGroup.isPending}>Add group</button>
+        <div className="cfg-add-grid">
+          <form className="cfg-inline" onSubmit={(event) => { event.preventDefault(); if (groupName.trim()) addGroup.mutate(undefined, { onSuccess: () => setGroupName("") }); }}>
+            <Field label="New machine group"><input className="cfg-input" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Press" /></Field>
+            <button type="submit" className="cfg-btn" disabled={!groupName.trim() || addGroup.isPending}>Add group</button>
           </form>
-          <form className="ad-inline" onSubmit={(event) => { event.preventDefault(); addMachine.mutate(undefined, { onSuccess: () => setMachine({ name: "", code: "", machineGroupId: machine.machineGroupId }) }); }}>
-            <Field label="New machine"><input className="ad-input" value={machine.name} onChange={(event) => setMachine({ ...machine, name: event.target.value })} placeholder="Press 5" /></Field>
-            <Field label="Code"><input className="ad-input short" value={machine.code} onChange={(event) => setMachine({ ...machine, code: event.target.value })} placeholder="P5" /></Field>
+          <form className="cfg-inline" onSubmit={(event) => { event.preventDefault(); addMachine.mutate(undefined, { onSuccess: () => setMachine({ name: "", code: "", machineGroupId: machine.machineGroupId }) }); }}>
+            <Field label="New machine"><input className="cfg-input" value={machine.name} onChange={(event) => setMachine({ ...machine, name: event.target.value })} placeholder="Press 5" /></Field>
+            <Field label="Code"><input className="cfg-input short" value={machine.code} onChange={(event) => setMachine({ ...machine, code: event.target.value })} placeholder="P5" /></Field>
             <Field label="Group">
-              <select className="ad-input" value={machine.machineGroupId} onChange={(event) => setMachine({ ...machine, machineGroupId: event.target.value })}>
+              <select className="cfg-input" value={machine.machineGroupId} onChange={(event) => setMachine({ ...machine, machineGroupId: event.target.value })}>
                 <option value="">Pick…</option>
                 {groups.filter((group) => group.active).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
             </Field>
-            <button type="submit" className="ad-btn" disabled={!machine.name.trim() || !machine.code.trim() || !machine.machineGroupId || addMachine.isPending}>Add machine</button>
+            <button type="submit" className="cfg-btn" disabled={!machine.name.trim() || !machine.code.trim() || !machine.machineGroupId || addMachine.isPending}>Add machine</button>
           </form>
         </div>
         <Problem error={addGroup.error || addMachine.error} />
@@ -653,22 +653,22 @@ function MachinesSection({ data }: { data: any }) {
             meta={`${list.filter((item) => item.active).length} of ${list.length} machines on`}
             actions={<><Status active={group.active} /><RowActions active={group.active} onToggle={() => groupActive.mutate(group)} onDelete={() => groupDelete.mutate(group)} deleteLabel={`Delete the ${group.name} group? Only possible once it has no machines.`} /></>}
           >
-            <ul className="ad-list grid">
+            <ul className="cfg-list grid">
               {list.map((item) => (
-                <li key={item.id} className={`ad-row ${item.active ? "" : "inactive"}`}>
-                  <span className="ad-row-main"><strong>{item.name}</strong><small>{item.code}</small></span>
-                  {!item.active && <span className="ad-badge off">Off</span>}
+                <li key={item.id} className={`cfg-row ${item.active ? "" : "inactive"}`}>
+                  <span className="cfg-row-main"><strong>{item.name}</strong><small>{item.code}</small></span>
+                  {!item.active && <span className="cfg-badge off">Off</span>}
                   <RowActions active={item.active} onToggle={() => machineActive.mutate(item)} onDelete={() => machineDelete.mutate(item)} deleteLabel={`Delete ${item.name}? Turn it off instead if it has call history.`} />
                 </li>
               ))}
-              {list.length === 0 && <li className="ad-empty">No machines in this group yet.</li>}
+              {list.length === 0 && <li className="cfg-empty">No machines in this group yet.</li>}
             </ul>
           </Card>
         );
       })}
       {ungrouped.length > 0 && (
         <Card title="Without a group">
-          <ul className="ad-list grid">{ungrouped.map((item) => <li key={item.id} className="ad-row"><span className="ad-row-main"><strong>{item.name}</strong><small>{item.code}</small></span></li>)}</ul>
+          <ul className="cfg-list grid">{ungrouped.map((item) => <li key={item.id} className="cfg-row"><span className="cfg-row-main"><strong>{item.name}</strong><small>{item.code}</small></span></li>)}</ul>
         </Card>
       )}
       <Problem error={groupActive.error || groupDelete.error || machineActive.error || machineDelete.error} />
@@ -688,20 +688,20 @@ function PagersSection({ data }: { data: any }) {
   const setActive = useSave((item: any) => patchJson(`/api/admin/pager-devices/${item.id}`, { active: !item.active }));
   const remove = useSave((item: any) => deleteJson(`/api/admin/pager-devices/${item.id}`));
   return (
-    <div className="ad-stack">
+    <div className="cfg-stack">
       <Card title="Add a pager" meta="An M5 pager answers calls for one department. Its token is shown once.">
-        <form className="ad-inline" onSubmit={(event) => { event.preventDefault(); create.mutate(undefined, { onSuccess: (result: any) => { setToken(result?.data?.rawToken ?? ""); setPager({ name: "", departmentId: "" }); } }); }}>
-          <Field label="Name"><input className="ad-input" value={pager.name} onChange={(event) => setPager({ ...pager, name: event.target.value })} placeholder="Maintenance pager 1" /></Field>
+        <form className="cfg-inline" onSubmit={(event) => { event.preventDefault(); create.mutate(undefined, { onSuccess: (result: any) => { setToken(result?.data?.rawToken ?? ""); setPager({ name: "", departmentId: "" }); } }); }}>
+          <Field label="Name"><input className="cfg-input" value={pager.name} onChange={(event) => setPager({ ...pager, name: event.target.value })} placeholder="Maintenance pager 1" /></Field>
           <Field label="Department">
-            <select className="ad-input" value={pager.departmentId} onChange={(event) => setPager({ ...pager, departmentId: event.target.value })}>
+            <select className="cfg-input" value={pager.departmentId} onChange={(event) => setPager({ ...pager, departmentId: event.target.value })}>
               <option value="">Pick…</option>
               {departments.filter((d) => d.active).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </Field>
-          <button type="submit" className="ad-btn" disabled={!pager.name.trim() || !pager.departmentId || create.isPending}>Create pager</button>
+          <button type="submit" className="cfg-btn" disabled={!pager.name.trim() || !pager.departmentId || create.isPending}>Create pager</button>
         </form>
         {token && (
-          <div className="ad-token">
+          <div className="cfg-token">
             <strong>Token, shown once</strong>
             <code>{token}</code>
             <span>Put it in CONFIG_PAGER_TOKEN on the device.</span>
@@ -710,19 +710,19 @@ function PagersSection({ data }: { data: any }) {
         <Problem error={create.error} />
       </Card>
       <Card title="Pagers" meta={`${pagers.length} pager${pagers.length === 1 ? "" : "s"}`}>
-        <ul className="ad-list">
+        <ul className="cfg-list">
           {pagers.map((item) => (
-            <li key={item.id} className={`ad-row ${item.active ? "" : "inactive"}`}>
+            <li key={item.id} className={`cfg-row ${item.active ? "" : "inactive"}`}>
               {item.department && <TeamIcon department={item.department} size="sm" />}
-              <span className="ad-row-main"><strong>{item.name}</strong><small>{item.department?.name} · {item.tokenFingerprint}</small></span>
+              <span className="cfg-row-main"><strong>{item.name}</strong><small>{item.department?.name} · {item.tokenFingerprint}</small></span>
               <Status active={item.active && item.department?.active} />
-              <span className="ad-row-actions">
-                <button type="button" className="ad-link" onClick={() => rotate.mutate(item.id, { onSuccess: (result: any) => setToken(result?.data?.rawToken ?? "") })}>New token</button>
+              <span className="cfg-row-actions">
+                <button type="button" className="cfg-link" onClick={() => rotate.mutate(item.id, { onSuccess: (result: any) => setToken(result?.data?.rawToken ?? "") })}>New token</button>
               </span>
               <RowActions active={item.active} onToggle={() => setActive.mutate(item)} onDelete={() => remove.mutate(item)} />
             </li>
           ))}
-          {pagers.length === 0 && <li className="ad-empty">No pagers yet.</li>}
+          {pagers.length === 0 && <li className="cfg-empty">No pagers yet.</li>}
         </ul>
         <Problem error={rotate.error || setActive.error || remove.error} />
       </Card>
@@ -748,23 +748,23 @@ function DepartmentsSection({ data }: { data: any }) {
   const listed = reasons.filter((item) => item.departmentId === selected?.id);
 
   return (
-    <div className="ad-split narrow">
+    <div className="cfg-split narrow">
       <Card title="Departments" meta="The teams machines call.">
-        <ul className="ad-list">
+        <ul className="cfg-list">
           {departments.map((item) => (
             <li key={item.id}>
-              <button type="button" className={`ad-pick ${selected?.id === item.id ? "on" : ""} ${item.active ? "" : "inactive"}`} onClick={() => setSelectedId(item.id)}>
+              <button type="button" className={`cfg-pick ${selected?.id === item.id ? "on" : ""} ${item.active ? "" : "inactive"}`} onClick={() => setSelectedId(item.id)}>
                 <TeamIcon department={item} size="sm" />
-                <span className="ad-row-main"><strong>{item.name}</strong><small>{reasons.filter((r) => r.departmentId === item.id && r.active).length} reasons</small></span>
-                {!item.active && <span className="ad-badge off">Off</span>}
-                <ChevronRightIcon className="ad-chev" />
+                <span className="cfg-row-main"><strong>{item.name}</strong><small>{reasons.filter((r) => r.departmentId === item.id && r.active).length} reasons</small></span>
+                {!item.active && <span className="cfg-badge off">Off</span>}
+                <ChevronRightIcon className="cfg-chev" />
               </button>
             </li>
           ))}
         </ul>
-        <form className="ad-inline ad-card-foot" onSubmit={(event) => { event.preventDefault(); if (name.trim()) addDepartment.mutate(undefined, { onSuccess: (result: any) => { setName(""); if (result?.data?.id) setSelectedId(result.data.id); } }); }}>
-          <input className="ad-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="New department" aria-label="New department" />
-          <button type="submit" className="ad-btn" disabled={!name.trim() || addDepartment.isPending}>Add</button>
+        <form className="cfg-inline cfg-card-foot" onSubmit={(event) => { event.preventDefault(); if (name.trim()) addDepartment.mutate(undefined, { onSuccess: (result: any) => { setName(""); if (result?.data?.id) setSelectedId(result.data.id); } }); }}>
+          <input className="cfg-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="New department" aria-label="New department" />
+          <button type="submit" className="cfg-btn" disabled={!name.trim() || addDepartment.isPending}>Add</button>
         </form>
         <Problem error={addDepartment.error} />
       </Card>
@@ -775,27 +775,27 @@ function DepartmentsSection({ data }: { data: any }) {
           meta="The reasons an operator can pick when calling this team."
           actions={<><Status active={selected.active} /><RowActions active={selected.active} onToggle={() => departmentActive.mutate(selected)} onDelete={() => departmentDelete.mutate(selected)} deleteLabel={`Delete ${selected.name}? Only possible once nothing uses it; turn it off instead.`} /></>}
         >
-          <ul className="ad-list">
+          <ul className="cfg-list">
             {listed.map((item) => (
-              <li key={item.id} className={`ad-row ${item.active ? "" : "inactive"}`}>
-                <span className="ad-row-main"><strong>{item.name}</strong><small>Priority {String(item.defaultPriority).toLowerCase()}</small></span>
-                {!item.active && <span className="ad-badge off">Off</span>}
+              <li key={item.id} className={`cfg-row ${item.active ? "" : "inactive"}`}>
+                <span className="cfg-row-main"><strong>{item.name}</strong><small>Priority {String(item.defaultPriority).toLowerCase()}</small></span>
+                {!item.active && <span className="cfg-badge off">Off</span>}
                 <RowActions active={item.active} onToggle={() => reasonActive.mutate(item)} onDelete={() => reasonDelete.mutate(item)} />
               </li>
             ))}
-            {listed.length === 0 && <li className="ad-empty">No reasons yet.</li>}
+            {listed.length === 0 && <li className="cfg-empty">No reasons yet.</li>}
           </ul>
-          <form className="ad-inline ad-card-foot" onSubmit={(event) => { event.preventDefault(); if (reason.name.trim()) addReason.mutate(undefined, { onSuccess: () => setReason({ ...reason, name: "" }) }); }}>
-            <input className="ad-input" value={reason.name} onChange={(event) => setReason({ ...reason, name: event.target.value })} placeholder="New reason (Jam, Tooling…)" aria-label="New reason" />
-            <select className="ad-input short" value={reason.defaultPriority} onChange={(event) => setReason({ ...reason, defaultPriority: event.target.value })} aria-label="Priority">
+          <form className="cfg-inline cfg-card-foot" onSubmit={(event) => { event.preventDefault(); if (reason.name.trim()) addReason.mutate(undefined, { onSuccess: () => setReason({ ...reason, name: "" }) }); }}>
+            <input className="cfg-input" value={reason.name} onChange={(event) => setReason({ ...reason, name: event.target.value })} placeholder="New reason (Jam, Tooling…)" aria-label="New reason" />
+            <select className="cfg-input short" value={reason.defaultPriority} onChange={(event) => setReason({ ...reason, defaultPriority: event.target.value })} aria-label="Priority">
               {PRIORITIES.map((p) => <option key={p} value={p}>{p[0] + p.slice(1).toLowerCase()}</option>)}
             </select>
-            <button type="submit" className="ad-btn" disabled={!reason.name.trim() || addReason.isPending}>Add reason</button>
+            <button type="submit" className="cfg-btn" disabled={!reason.name.trim() || addReason.isPending}>Add reason</button>
           </form>
           <Problem error={addReason.error || departmentActive.error || departmentDelete.error || reasonActive.error || reasonDelete.error} />
         </Card>
       ) : (
-        <section className="ad-card ad-hint"><WrenchIcon /><p><strong>Add a department to start.</strong><span>Maintenance, Quality, Supervisor…</span></p></section>
+        <section className="cfg-card cfg-hint"><WrenchIcon /><p><strong>Add a department to start.</strong><span>Maintenance, Quality, Supervisor…</span></p></section>
       )}
     </div>
   );
@@ -820,43 +820,43 @@ function CallButtonsSection({ data }: { data: any }) {
   const single = templates.filter((t) => (t.targets?.length ?? 0) === 1);
   const combined = templates.filter((t) => (t.targets?.length ?? 0) !== 1);
   const row = (item: any) => (
-    <li key={item.id} className={`ad-row ${item.active ? "" : "inactive"}`}>
-      {item.targets?.length === 1 ? <TeamIcon department={item.targets[0].department} size="sm" /> : <span className="ad-glyph"><LayersIcon /></span>}
-      <span className="ad-row-main"><strong>{item.buttonLabel}</strong><small>{item.targets?.map((t: any) => `${t.department?.name}: ${t.issueType?.name ?? "any"}`).join(" + ")}</small></span>
-      {!item.active && <span className="ad-badge off">Off</span>}
+    <li key={item.id} className={`cfg-row ${item.active ? "" : "inactive"}`}>
+      {item.targets?.length === 1 ? <TeamIcon department={item.targets[0].department} size="sm" /> : <span className="cfg-glyph"><LayersIcon /></span>}
+      <span className="cfg-row-main"><strong>{item.buttonLabel}</strong><small>{item.targets?.map((t: any) => `${t.department?.name}: ${t.issueType?.name ?? "any"}`).join(" + ")}</small></span>
+      {!item.active && <span className="cfg-badge off">Off</span>}
       <RowActions active={item.active} onToggle={() => setActive.mutate(item)} onDelete={() => remove.mutate(item)} />
     </li>
   );
   return (
-    <div className="ad-split">
-      <div className="ad-stack">
+    <div className="cfg-split">
+      <div className="cfg-stack">
         <Card title="Team buttons" meta="The big buttons on Machine Station: one team each.">
-          <ul className="ad-list">{single.map(row)}{single.length === 0 && <li className="ad-empty">None yet.</li>}</ul>
+          <ul className="cfg-list">{single.map(row)}{single.length === 0 && <li className="cfg-empty">None yet.</li>}</ul>
         </Card>
         <Card title="More requests" meta="Buttons that call several teams at once (Job Approval, Material Clear…).">
-          <ul className="ad-list">{combined.map(row)}{combined.length === 0 && <li className="ad-empty">None yet.</li>}</ul>
+          <ul className="cfg-list">{combined.map(row)}{combined.length === 0 && <li className="cfg-empty">None yet.</li>}</ul>
         </Card>
         <Problem error={setActive.error || remove.error} />
       </div>
       <Card title="New call button" meta="Pick the teams it calls, and the reason each one sees.">
-        <form className="ad-form" onSubmit={(event) => { event.preventDefault(); create.mutate(undefined, { onSuccess: () => { setName(""); setTargets({}); } }); }}>
-          <Field label="Button name"><input className="ad-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Quality Hold" /></Field>
-          <div className="ad-sub">Calls</div>
-          <ul className="ad-list compact">
+        <form className="cfg-form" onSubmit={(event) => { event.preventDefault(); create.mutate(undefined, { onSuccess: () => { setName(""); setTargets({}); } }); }}>
+          <Field label="Button name"><input className="cfg-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Quality Hold" /></Field>
+          <div className="cfg-sub">Calls</div>
+          <ul className="cfg-list compact">
             {departments.map((department) => (
-              <li key={department.id} className="ad-row">
+              <li key={department.id} className="cfg-row">
                 <TeamIcon department={department} size="sm" />
-                <span className="ad-row-main"><strong>{department.name}</strong></span>
-                <select className="ad-input" value={targets[department.id] ?? ""} onChange={(event) => setTargets((current) => ({ ...current, [department.id]: event.target.value }))} aria-label={`${department.name} reason`}>
+                <span className="cfg-row-main"><strong>{department.name}</strong></span>
+                <select className="cfg-input" value={targets[department.id] ?? ""} onChange={(event) => setTargets((current) => ({ ...current, [department.id]: event.target.value }))} aria-label={`${department.name} reason`}>
                   <option value="">Don't call</option>
                   {(reasonsBy.get(department.id) ?? []).map((issue: any) => <option key={issue.id} value={issue.id}>{issue.name}</option>)}
                 </select>
               </li>
             ))}
           </ul>
-          <div className="ad-form-foot">
-            {!name.trim() ? <span className="ad-missing">Name the button.</span> : !chosen.length ? <span className="ad-missing">Pick at least one team to call.</span> : <Problem error={create.error} />}
-            <button type="submit" className="ad-btn primary" disabled={!name.trim() || !chosen.length || create.isPending}>{create.isPending ? "Creating…" : "Create button"}</button>
+          <div className="cfg-form-foot">
+            {!name.trim() ? <span className="cfg-missing">Name the button.</span> : !chosen.length ? <span className="cfg-missing">Pick at least one team to call.</span> : <Problem error={create.error} />}
+            <button type="submit" className="cfg-btn primary" disabled={!name.trim() || !chosen.length || create.isPending}>{create.isPending ? "Creating…" : "Create button"}</button>
           </div>
         </form>
       </Card>
@@ -886,17 +886,17 @@ function StatusSection() {
   const data = status.data?.data;
   const pagers: any[] = data?.pagers ?? [];
   const metric = (label: string, value: ReactNode, detail?: ReactNode) => (
-    <div className="ad-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>
+    <div className="cfg-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>
   );
   return (
-    <div className="ad-stack">
+    <div className="cfg-stack">
       <Card
         title="System"
         meta={data ? `Updated ${new Date(data.server.now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : status.isError ? "Status is unavailable." : "Loading…"}
-        actions={<button type="button" className="ad-btn" onClick={() => void status.refetch()} disabled={status.isFetching}>{status.isFetching ? "Refreshing…" : "Refresh"}</button>}
+        actions={<button type="button" className="cfg-btn" onClick={() => void status.refetch()} disabled={status.isFetching}>{status.isFetching ? "Refreshing…" : "Refresh"}</button>}
       >
         {data && (
-          <div className="ad-metrics">
+          <div className="cfg-metrics">
             {metric("Database", data.database.status === "ok" ? "OK" : String(data.database.status).toUpperCase(), `${data.database.latencyMs} ms`)}
             {metric("Running for", formatDuration(data.server.uptimeSeconds), data.server.nodeVersion)}
             {metric("People online", data.realtime.connectedUsers, `${data.realtime.connectedSockets} connections`)}
@@ -908,14 +908,14 @@ function StatusSection() {
       </Card>
       {data && (
         <Card title="Pagers" meta={`${pagers.filter((p) => p.status === "online").length} of ${pagers.length} online`}>
-          <ul className="ad-list">
+          <ul className="cfg-list">
             {pagers.map((pager) => (
-              <li key={pager.id} className="ad-row">
-                <span className="ad-row-main"><strong>{pager.name}</strong><small>{pager.departmentName} · {pager.lastSeenAt ? `seen ${new Date(pager.lastSeenAt).toLocaleString()}` : "never seen"}</small></span>
-                <span className={`ad-badge ${pager.status === "online" ? "on" : pager.status === "recent" ? "warn" : "off"}`}>{pager.status}</span>
+              <li key={pager.id} className="cfg-row">
+                <span className="cfg-row-main"><strong>{pager.name}</strong><small>{pager.departmentName} · {pager.lastSeenAt ? `seen ${new Date(pager.lastSeenAt).toLocaleString()}` : "never seen"}</small></span>
+                <span className={`cfg-badge ${pager.status === "online" ? "on" : pager.status === "recent" ? "warn" : "off"}`}>{pager.status}</span>
               </li>
             ))}
-            {pagers.length === 0 && <li className="ad-empty">No pagers.</li>}
+            {pagers.length === 0 && <li className="cfg-empty">No pagers.</li>}
           </ul>
         </Card>
       )}
@@ -938,25 +938,25 @@ function ChannelsSection() {
   }, [channels]);
   const typeLabel: Record<string, string> = { DEPARTMENT: "Departments", MACHINE_GROUP: "Machine groups", MACHINE: "Machines", CUSTOM: "Other" };
   return (
-    <div className="ad-stack">
+    <div className="cfg-stack">
       <Card
         title="Message channels"
         meta="Conversations on the Communication page, one per department, machine group and machine. Sync adds any that are missing. Who can read each is set per user (People → Users → Message channels)."
-        actions={<button type="button" className="ad-btn" onClick={() => sync.mutate(undefined)} disabled={sync.isPending}>{sync.isPending ? "Syncing…" : "Sync channels"}</button>}
+        actions={<button type="button" className="cfg-btn" onClick={() => sync.mutate(undefined)} disabled={sync.isPending}>{sync.isPending ? "Syncing…" : "Sync channels"}</button>}
       >
         <Problem error={sync.error || setActive.error || archive.error} />
-        {channels.length === 0 && <p className="ad-empty">{channelsQuery.isLoading ? "Loading…" : "No channels yet. Sync channels to create them."}</p>}
+        {channels.length === 0 && <p className="cfg-empty">{channelsQuery.isLoading ? "Loading…" : "No channels yet. Sync channels to create them."}</p>}
       </Card>
       {groups.map((group) => (
         <Card key={group.type} title={typeLabel[group.type] ?? group.type} meta={`${group.items.length} channels`}>
-          <ul className="ad-list grid">
+          <ul className="cfg-list grid">
             {group.items.map((channel) => (
-              <li key={channel.id} className={`ad-row ${channel.active ? "" : "inactive"}`}>
-                <span className="ad-row-main"><strong>{channel.name}</strong><small>{channel.memberCount ?? 0} people</small></span>
-                {!channel.active && <span className="ad-badge off">Off</span>}
-                <span className="ad-row-actions">
-                  <button type="button" className="ad-link" onClick={() => setActive.mutate(channel)}>{channel.active ? "Turn off" : "Turn on"}</button>
-                  <button type="button" className="ad-link danger" onClick={() => window.confirm(`Archive ${channel.name}?`) && archive.mutate(channel)}>Archive</button>
+              <li key={channel.id} className={`cfg-row ${channel.active ? "" : "inactive"}`}>
+                <span className="cfg-row-main"><strong>{channel.name}</strong><small>{channel.memberCount ?? 0} people</small></span>
+                {!channel.active && <span className="cfg-badge off">Off</span>}
+                <span className="cfg-row-actions">
+                  <button type="button" className="cfg-link" onClick={() => setActive.mutate(channel)}>{channel.active ? "Turn off" : "Turn on"}</button>
+                  <button type="button" className="cfg-link danger" onClick={() => window.confirm(`Archive ${channel.name}?`) && archive.mutate(channel)}>Archive</button>
                 </span>
               </li>
             ))}
