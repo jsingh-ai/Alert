@@ -50,7 +50,24 @@ export async function alertRoutes(app: FastifyInstance) {
       orderBy: [{ status: "asc" }, { createdAt: "asc" }]
     });
 
-    return { success: true, data: alerts.map(serializeAlert) };
+    // Who tapped "Help out" on each call (a message with clientMessageId "help:<alertId>").
+    // Read separately: the alert's message list is capped, and a long call would push these out of it.
+    const helpNotes = alerts.length
+      ? await prisma.communicationMessage.findMany({
+          where: { companyId: ctx.companyId, alertId: { in: alerts.map((alert) => alert.id) }, clientMessageId: { startsWith: "help:" }, deletedAt: null },
+          select: { alertId: true, user: { select: { id: true, displayName: true, username: true } } },
+          orderBy: { createdAt: "asc" }
+        })
+      : [];
+    const helpers = new Map<string, Array<{ id: string; name: string }>>();
+    for (const note of helpNotes) {
+      if (!note.alertId || !note.user) continue;
+      const list = helpers.get(note.alertId) ?? [];
+      if (!list.some((helper) => helper.id === note.user!.id)) list.push({ id: note.user.id, name: note.user.displayName || note.user.username });
+      helpers.set(note.alertId, list);
+    }
+
+    return { success: true, data: alerts.map((alert) => ({ ...serializeAlert(alert), helpers: helpers.get(alert.id) ?? [] })) };
   });
 
   app.post("/api/alerts/:id/acknowledge", { preHandler: app.authenticate }, async (request, reply) => {
