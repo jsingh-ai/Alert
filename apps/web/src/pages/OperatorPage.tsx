@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postJson } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import type { Alert, CommandGroup } from "../lib/types";
-import { LATE_AFTER_SECONDS, clock, mergeByCall, summarizeCall } from "../lib/callStages";
+import { clock, mergeByCall, summarizeCall } from "../lib/callStages";
 import type { AlertTiming, CallStage, CallSummary } from "../lib/callStages";
 import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connectionState } from "../components/Suite";
 import type { Connection, Tone } from "../components/Suite";
-import { CheckCircleIcon, ChevronRightIcon, CloseIcon, LayersIcon, PlusIcon, SettingsIcon } from "../components/icons";
+import { CheckCircleIcon, ChevronRightIcon, CloseIcon, LayersIcon, MessageIcon, PlusIcon, SendIcon, SettingsIcon } from "../components/icons";
 import "../styles/station.css";
 
 const MACHINE_KEY = "pg_operator_locked_machine_id";
@@ -100,6 +101,9 @@ export function OperatorPage() {
   const [machineId, setMachineId] = useState(readMachineId);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
+  const [celebration, setCelebration] = useState<ClosedInfo | null>(null);
+  // With several calls open, a call's messages show in the side panel so the rows never change height
+  const [threadFor, setThreadFor] = useState<string | null>(null);
 
   const bootstrap = useQuery({ queryKey: ["operator-bootstrap"], queryFn: () => api<{ data?: Bootstrap }>("/api/operator/bootstrap") });
   const snapshot = useQuery({
@@ -137,6 +141,10 @@ export function OperatorPage() {
       .map((command) => summarizeCall(command, now))
       .sort((a, b) => new Date(a.command.createdAt).getTime() - new Date(b.command.createdAt).getTime());
   }, [snapshot.data, machineId, now]);
+
+  useEffect(() => {
+    if (threadFor && !calls.some((call) => call.command.id === threadFor)) setThreadFor(null);
+  }, [calls, threadFor]);
 
   const busyDepartments = new Set(calls.flatMap((call) => call.alerts.map(({ alert }) => alert.department.id)));
 
@@ -196,6 +204,7 @@ export function OperatorPage() {
     );
   }
 
+  const threadCall = calls.length > 1 ? calls.find((call) => call.command.id === threadFor) : undefined;
   const available = templates.filter((template) => !template.targets.some((t) => busyDepartments.has(t.departmentId)));
   const sendingId = createCall.isPending ? (createCall.variables?.templateId as string | undefined) : undefined;
   const callTemplate = (template: Template) => {
@@ -227,23 +236,42 @@ export function OperatorPage() {
       {calls.length > 0 ? (
         <div className="ms-body">
           <section className={`ms-calls ${calls.length > 1 ? "multi" : ""}`} aria-label="Open calls">
-            {calls.map((call) => <ActiveCall key={call.command.id} call={call} compact={calls.length > 1} machineId={machineId} stale={connection === "offline"} disabled={!canCall} onChange={refresh} />)}
+            {calls.map((call) => (
+              <ActiveCall
+                key={call.command.id}
+                call={call}
+                compact={calls.length > 1}
+                threadOpen={threadFor === call.command.id}
+                onToggleThread={() => setThreadFor((current) => (current === call.command.id ? null : call.command.id))}
+                machineId={machineId}
+                stale={connection === "offline"}
+                disabled={!canCall}
+                onChange={refresh}
+                onClosed={setCelebration}
+              />
+            ))}
           </section>
+          {threadCall ? (
+            <aside className="ms-rail thread" aria-label="Messages">
+              <CallThread key={threadCall.command.id} call={threadCall} disabled={!canCall} title={callTitle(threadCall)} onClose={() => setThreadFor(null)} />
+            </aside>
+          ) : (
           <aside className="ms-rail" aria-label="Call another team">
-            {createCall.isError && !otherOpen && <p className="ms-error" role="alert">{errorText(createCall.error, "The call didn't go through. Try again.")}</p>}
-            <div className="ms-list">
-              {/* The heading belongs to the card, not floating above it */}
-              <h2 className="ms-list-head">Call another team</h2>
-              {available.map((template) => (
-                <CallRow key={template.id} template={template} sending={sendingId === template.id} disabled={!canCall || createCall.isPending} onCall={() => callTemplate(template)} />
-              ))}
-              <button type="button" className="ms-row ms-row-other" onClick={openOther} disabled={!canCall || createCall.isPending}>
-                <span className="ms-glyph" aria-hidden="true"><PlusIcon /></span>
-                <span className="ms-row-text"><strong>Other request</strong><small>Pick teams and a reason</small></span>
-                <ChevronRightIcon className="ms-row-chevron" />
-              </button>
-            </div>
+              {createCall.isError && !otherOpen && <p className="ms-error" role="alert">{errorText(createCall.error, "The call didn't go through. Try again.")}</p>}
+              <div className="ms-list">
+                {/* The heading belongs to the card, not floating above it */}
+                <h2 className="ms-list-head">Call another team</h2>
+                {available.map((template) => (
+                  <CallRow key={template.id} template={template} sending={sendingId === template.id} disabled={!canCall || createCall.isPending} onCall={() => callTemplate(template)} />
+                ))}
+                <button type="button" className="ms-row ms-row-other" onClick={openOther} disabled={!canCall || createCall.isPending}>
+                  <span className="ms-glyph" aria-hidden="true"><PlusIcon /></span>
+                  <span className="ms-row-text"><strong>Other request</strong><small>Pick teams and a reason</small></span>
+                  <ChevronRightIcon className="ms-row-chevron" />
+                </button>
+              </div>
           </aside>
+          )}
         </div>
       ) : (
         <CallForHelp
@@ -258,6 +286,8 @@ export function OperatorPage() {
       )}
 
       <SuiteStatusBar connection={connection} lastGood={lastGood} />
+
+      {celebration && <ClosedCelebration info={celebration} machineName={machine.name} onDone={() => setCelebration(null)} />}
 
       {otherOpen && data && (
         <OtherRequest
@@ -304,6 +334,12 @@ function CallForHelp({ templates, issueTypes, sendingId, disabled, error, onCall
   const single = templates.filter((t) => t.targets.length === 1);
   const combined = templates.filter((t) => t.targets.length !== 1);
   // What each team handles, from its configured request reasons: "Breakdown · Jam · Tooling"
+  // A ripple that starts where the finger lands; keyed so every tap restarts it
+  const [ripple, setRipple] = useState<{ id: string; x: number; y: number; key: number } | null>(null);
+  const press = (id: string) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    setRipple({ id, x: event.clientX - box.left, y: event.clientY - box.top, key: Date.now() });
+  };
   const handles = (departmentId: string) => issueTypes.filter((issue) => issue.departmentId === departmentId).slice(0, 3).map((issue) => issue.name).join(" · ");
 
   return (
@@ -321,8 +357,10 @@ function CallForHelp({ templates, issueTypes, sendingId, disabled, error, onCall
               className={`ms-tile ${sending ? "sending" : ""}`}
               disabled={disabled}
               aria-busy={sending}
+              onPointerDown={press(template.id)}
               onClick={() => onCall(template)}
             >
+              {ripple?.id === template.id && <i key={ripple.key} className="ms-ripple" style={{ left: ripple.x, top: ripple.y }} aria-hidden="true" />}
               <span className="ms-tile-icon"><TeamIcon department={department} size="lg" /></span>
               <strong className="ms-tile-label">{plainLabel(template.buttonLabel)}</strong>
               {/* Always present, so "Sending…" swaps in without moving the label */}
@@ -524,7 +562,17 @@ function CheckIcon() {
   );
 }
 
-function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { call: CallSummary; compact: boolean; machineId: string; stale: boolean; disabled: boolean; onChange: () => void }) {
+function ActiveCall({ call, compact, threadOpen, onToggleThread, machineId, stale, disabled, onChange, onClosed }: {
+  call: CallSummary;
+  compact: boolean;
+  threadOpen: boolean;
+  onToggleThread: () => void;
+  machineId: string;
+  stale: boolean;
+  disabled: boolean;
+  onChange: () => void;
+  onClosed: (info: ClosedInfo) => void;
+}) {
   const [pending, setPending] = useState<Pending>(null);
 
   const act = useMutation({
@@ -540,6 +588,13 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
       const results = await Promise.allSettled(alertIds.map((id) => postJson(`/api/alerts/${id}/${kind === "close" ? "resolve" : "cancel"}`, {})));
       const failed = results.filter((result) => result.status === "rejected").length;
       if (failed) throw new Error(failed === alertIds.length ? "That didn't go through. Try again." : "Part of that didn't go through. Check the teams below.");
+    },
+    onSuccess: (_, { kind, alertIds }) => {
+      // The whole call is closed (not one team of several): celebrate the fix
+      if (kind === "close" && alertIds.length === call.alerts.length) {
+        const who = call.alerts.map(({ alert }) => responder(alert)).filter(Boolean);
+        onClosed({ teams: call.alerts.map(({ alert }) => alert.department.name), who, seconds: call.totalSeconds });
+      }
     },
     onSettled: () => {
       setPending(null);
@@ -585,7 +640,7 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
   // so every open call is visible at once without scrolling.
   if (compact && single) {
     return (
-      <article className={`ms-call ms-call-row ${stateClass}`}>
+      <article className={`ms-call ms-call-row ${stateClass} ${threadOpen ? "thread-open" : ""}`}>
         <div className="ms-row-main">
           <h2>
             {headline(call)}
@@ -595,11 +650,12 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
             <MiniTrack stage={single.timing.stage} />
             <span>{progressLine(single.alert, single.timing)}</span>
           </p>
+          <ThreadToggle call={call} open={threadOpen} onToggle={onToggleThread} />
         </div>
         <div className="ms-row-timer">
           <span>{timerLabel(call.stage)}</span>
           <strong>{clock(stageSeconds(call))}</strong>
-          <small>{call.stage === "waiting" ? `Target ${clock(LATE_AFTER_SECONDS)}` : `Open for ${clock(call.totalSeconds)}`}</small>
+          {call.stage !== "waiting" && <small>Open for {clock(call.totalSeconds)}</small>}
         </div>
         <div className="ms-row-actions">{confirm || action}</div>
         {error}
@@ -627,18 +683,13 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
         </div>
       </header>
 
+      <div className="ms-call-body">
       {/* The timer is the hero: the one number people read from across the floor */}
       <div className="ms-call-mid">
-        <div className="ms-timer-row">
-          <div className="ms-timer">
-            <span>{timerLabel(call.stage)}</span>
-            <strong>{clock(stageSeconds(call))}</strong>
-          </div>
-          {/* Target vs actual, as on any MES board: the response target while waiting, then total open time */}
-          <div className="ms-target">
-            <span>{call.stage === "waiting" ? "Response target" : "Open for"}</span>
-            <strong>{clock(call.stage === "waiting" ? LATE_AFTER_SECONDS : call.totalSeconds)}</strong>
-          </div>
+        <div className="ms-timer">
+          <span>{timerLabel(call.stage)}</span>
+          <strong>{clock(stageSeconds(call))}</strong>
+          {call.stage !== "waiting" && <small>Open for {clock(call.totalSeconds)}</small>}
         </div>
       {single ? (
         <Track alert={single.alert} timing={single.timing} />
@@ -665,6 +716,10 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
         </ul>
       )}
       </div>
+      {/* The conversation with the responding team(s): fills the card's spare width with something useful */}
+      {compact ? null : <CallThread call={call} disabled={disabled} />}
+      </div>
+      {compact && <ThreadToggle call={call} open={threadOpen} onToggle={onToggleThread} />}
 
       {confirm || (action && (
         <footer className="ms-call-foot">
@@ -674,6 +729,141 @@ function ActiveCall({ call, compact, machineId, stale, disabled, onChange }: { c
 
       {error}
     </article>
+  );
+}
+
+/* ---------- Messages on a call ---------- */
+
+type Note = { id: string; note: string; createdAt: string; actorNameText?: string | null; clientMessageId?: string | null; user?: { id: string } | null };
+const OPERATOR_REPLIES = ["Machine is down", "Please hurry", "Thank you"];
+
+/** Messages across every team on the call, oldest first. A message sent to several teams is stored once per team; show it once. */
+function callNotes(call: CallSummary): Note[] {
+  const seen = new Set<string>();
+  const notes: Note[] = [];
+  for (const { alert } of call.alerts) {
+    for (const event of (alert.events ?? []) as Note[]) {
+      if (!event?.note) continue;
+      const key = event.clientMessageId ? event.clientMessageId.split(":")[0] : event.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      notes.push(event);
+    }
+  }
+  return notes.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function ThreadToggle({ call, open, onToggle }: { call: CallSummary; open: boolean; onToggle: () => void }) {
+  const count = callNotes(call).length;
+  return (
+    <button type="button" className={`ms-thread-toggle ${open ? "open" : ""}`} aria-expanded={open} onClick={onToggle}>
+      <MessageIcon />
+      {count ? `Messages · ${count}` : "Message the team"}
+    </button>
+  );
+}
+
+/** Thread + one-tap replies + compose. Sends to every team still working the call. */
+function CallThread({ call, disabled, title, onClose }: { call: CallSummary; disabled: boolean; title?: string; onClose?: () => void }) {
+  const { session } = useAuth();
+  const queryClient = useQueryClient();
+  const me = session?.user.id;
+  const [text, setText] = useState("");
+  const list = useRef<HTMLOListElement>(null);
+  const notes = callNotes(call);
+  const targets = call.alerts.filter(({ alert }) => alert.status !== "RESOLVED" && alert.status !== "CANCELLED").map(({ alert }) => alert.id);
+  const teams = call.alerts.map(({ alert }) => alert.department.name).join(" and ");
+
+  const send = useMutation({
+    mutationFn: async ({ body }: { body: string; fromInput: boolean }) => {
+      // One base id per message, suffixed per team, so a resend never duplicates and the station can show it once
+      const base = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const results = await Promise.allSettled(targets.map((id) => postJson(`/api/alerts/${id}/notes`, { note: body, clientMessageId: `${base}:${id}` })));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      if (failed === results.length) throw new Error("Message not sent. Try again.");
+      if (failed) throw new Error("Sent, but not every team got it. Check with the team.");
+    },
+    onSettled: (_, error, { fromInput }) => {
+      // Only a typed message clears the box (a one-tap reply leaves a half-written draft alone)
+      if (fromInput && (!error || error.message.startsWith("Sent"))) setText("");
+      return queryClient.invalidateQueries({ queryKey: ["operator-snapshot"] });
+    }
+  });
+
+  // Keep the newest message in view
+  useEffect(() => {
+    if (list.current) list.current.scrollTop = list.current.scrollHeight;
+  }, [notes.length]);
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    const body = text.trim();
+    if (body) send.mutate({ body, fromInput: true });
+  }
+
+  return (
+    <section className={`ms-thread ${onClose ? "panel" : ""}`} aria-label="Messages">
+      <header className="ms-thread-top">
+        <h3 className="ms-thread-head">{title ? `Messages · ${title}` : "Messages"}</h3>
+        {onClose && <button type="button" className="ms-thread-close" onClick={onClose} aria-label="Close messages"><CloseIcon /></button>}
+      </header>
+      {notes.length ? (
+        <ol ref={list} className="ms-thread-list">
+          {notes.map((note) => {
+            const mine = Boolean(me && note.user?.id === me);
+            return (
+              <li key={note.id} className={mine ? "mine" : ""}>
+                <span className="ms-thread-meta"><strong>{mine ? "You" : note.actorNameText || "Team"}</strong><time>{timeOfDay(note.createdAt)}</time></span>
+                <p>{note.note}</p>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="ms-thread-empty">No messages yet. Anything you send goes to {teams}.</p>
+      )}
+      <div className="ms-thread-quick">
+        {OPERATOR_REPLIES.map((reply) => (
+          <button key={reply} type="button" onClick={() => { haptic(); send.mutate({ body: reply, fromInput: false }); }} disabled={send.isPending || disabled || !targets.length}>{reply}</button>
+        ))}
+      </div>
+      <form className="ms-thread-compose" onSubmit={onSubmit}>
+        <input value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message ${teams}`} aria-label="Message" disabled={disabled} />
+        <button type="submit" aria-label="Send" disabled={!text.trim() || send.isPending || disabled || !targets.length}><SendIcon /></button>
+      </form>
+      {send.isError && <p className="ms-error" role="alert">{errorText(send.error, "Message not sent. Try again.")}</p>}
+    </section>
+  );
+}
+
+/* ---------- Closed: a short, encouraging moment ---------- */
+
+type ClosedInfo = { teams: string[]; who: string[]; seconds: number };
+
+function ClosedCelebration({ info, machineName, onDone }: { info: ClosedInfo; machineName: string; onDone: () => void }) {
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    const timer = window.setTimeout(() => done.current(), 3600);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const thanks = info.who.length ? `Thanks, ${info.who.join(" and ")}.` : "Thanks, team.";
+  return (
+    <div className="ms-celebrate" role="status" onClick={onDone}>
+      <div className="ms-celebrate-card">
+        <div className="ms-celebrate-mark" aria-hidden="true">
+          <i className="ms-celebrate-ring" />
+          {Array.from({ length: 12 }, (_, i) => <i key={i} className="ms-celebrate-spark" style={{ "--a": `${i * 30}deg` } as CSSProperties} />)}
+          <svg viewBox="0 0 64 64" width="96" height="96">
+            <circle cx="32" cy="32" r="28" />
+            <path d="M20 33.5 28.5 42 45 24" />
+          </svg>
+        </div>
+        <strong>Nice work!</strong>
+        <span>{machineName} is back up · {info.teams.join(" + ")} fixed it in {clock(info.seconds)}</span>
+        <small>{thanks}</small>
+      </div>
+    </div>
   );
 }
 
