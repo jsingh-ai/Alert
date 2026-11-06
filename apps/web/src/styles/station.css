@@ -524,6 +524,8 @@
   .ms-page .su-head h1 { max-width: 100%; font-size: 2.25rem; letter-spacing: -0.035em; }
   .ms-page .su-status { display: none; }
   .ms-page .su-menu { grid-area: menu; justify-self: end; }
+  /* The live line at the bottom, centred under the centred name */
+  .ms-page .su-statusbar { justify-content: center; }
 
   /* Team calls: tinted in the team's colour with a solid icon, so each one is unmistakable */
   .ms-tiles { gap: 0.75rem; }
