@@ -515,15 +515,15 @@
 /* The machine is the hero; the team calls stand out in their colours; the other requests sit quietly
    in one list; an open call is a compact row with its messages behind "Send message". */
 @media (max-width: 640px) {
-  /* App bar: machine name large, with its area and code above; the state is a small line under it */
-  .ms-page .su-head { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title menu" "status status"; align-items: start; row-gap: 0.65rem; min-height: 0; padding-top: 0.9rem; padding-bottom: 1rem; }
+  /* App bar: just the machine, centred and large, with its area and code above. No status pill:
+     the screen below already says it (the team buttons, or the open call), and offline has its own banner. */
+  .ms-page .su-head { grid-template-columns: minmax(44px, auto) minmax(0, 1fr) minmax(44px, auto); grid-template-areas: ". title menu"; align-items: center; min-height: 0; padding-top: 0.85rem; padding-bottom: 0.95rem; }
   .ms-page .su-head-side { display: contents; }
-  .ms-page .su-title { grid-area: title; gap: 0.3rem; }
+  .ms-page .su-title { grid-area: title; justify-items: center; gap: 0.3rem; text-align: center; }
   .ms-page .su-eyebrow { display: block; font-size: 0.6875rem; letter-spacing: 0.16em; }
   .ms-page .su-head h1 { max-width: 100%; font-size: 2.25rem; letter-spacing: -0.035em; }
-  .ms-page .su-status { grid-area: status; justify-self: start; height: 30px; gap: 0.5rem; padding: 0 0.75rem 0 0.65rem; font-size: 0.8125rem; }
-  .ms-page .su-status i { width: 8px; height: 8px; }
-  .ms-page .su-menu { grid-area: menu; }
+  .ms-page .su-status { display: none; }
+  .ms-page .su-menu { grid-area: menu; justify-self: end; }
 
   /* Team calls: tinted in the team's colour with a solid icon, so each one is unmistakable */
   .ms-tiles { gap: 0.75rem; }
