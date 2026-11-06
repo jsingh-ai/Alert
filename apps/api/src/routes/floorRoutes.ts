@@ -34,12 +34,20 @@ function groupCommands(alerts: any[]) {
 export async function floorRoutes(app: FastifyInstance) {
   app.get("/api/floor/active", { preHandler: app.authenticate }, async (request) => {
     const ctx = request.membershipContext!;
-    const machines = await prisma.machine.findMany({
+    const fetched = await prisma.machine.findMany({
       where: machineWhereForContext(ctx),
       include: { machineGroup: true },
       // Ties (sortOrder defaults to 0) fall back to names, so the floor's order never shuffles
       orderBy: [{ machineGroup: { sortOrder: "asc" } }, { machineGroup: { name: "asc" } }, { sortOrder: "asc" }, { name: "asc" }]
     });
+    // Same order, except names compare as people read them: "Press 3" before "Press 10" (the database sorts them as text)
+    const areaRank = new Map<string, number>();
+    for (const machine of fetched) if (!areaRank.has(machine.machineGroupId)) areaRank.set(machine.machineGroupId, areaRank.size);
+    const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+    const machines = [...fetched].sort((a, b) =>
+      (areaRank.get(a.machineGroupId) ?? 0) - (areaRank.get(b.machineGroupId) ?? 0)
+      || a.sortOrder - b.sortOrder
+      || byName.compare(a.name, b.name));
     const machineIds = machines.map((machine) => machine.id);
     const todayStart = startOfDayInTimeZone(new Date(), config.reportTimeZone);
     if (machineIds.length === 0) {

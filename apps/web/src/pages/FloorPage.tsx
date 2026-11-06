@@ -14,8 +14,9 @@ import "../styles/floor.css";
 
 /*
  * Floor Status, for managers and supervisors:
- *   Overview   machines running / waiting for a team / being handled, longest wait, calls today; area filter
- *   The floor  one card per area, every machine a tile in a fixed order (green = running, red = waiting, amber = handled)
+ *   Overview   a donut of machine states with its legend, the longest wait, and calls today with the busiest machines; area filter
+ *   The floor  one card per area, every machine a tile in a fixed order (green = running, red = waiting, amber = handled).
+ *              A machine with a call gets a double-width tile: one line per team, so nothing is cut off.
  *   Teams      one card per department with only its own calls, so departments never mix
  * Tapping any call opens its details (progress per team, activity, and a message box).
  */
@@ -115,7 +116,10 @@ export function FloorPage() {
   const runningCount = visibleMachines.length - waitingMachines.length - handledMachines;
   const lateMachines = waitingMachines.filter((m) => callsByMachine.get(m.id)?.[0]?.late).length;
   const longest = waitingLanes.reduce<Lane | null>((best, lane) => (!best || lane.timing.waitSeconds > best.timing.waitSeconds ? lane : best), null);
-  const callsToday = visibleMachines.reduce((sum, m) => sum + (machineStats[m.id]?.callsToday ?? machineStats[m.id]?.alertsToday ?? 0), 0);
+  const todayOf = (m: FloorMachine) => machineStats[m.id]?.callsToday ?? machineStats[m.id]?.alertsToday ?? 0;
+  const callsToday = visibleMachines.reduce((sum, m) => sum + todayOf(m), 0);
+  // The machines calling most today, for the small bar chart (ties keep floor order)
+  const busiest = visibleMachines.map((m) => ({ machine: m, count: todayOf(m) })).filter((row) => row.count > 0).sort((a, b) => b.count - a.count).slice(0, 3);
 
   // Departments: the ones this person covers, plus any team that has a call right now.
   // Teams with calls come first, so on a narrow screen the busy ones sit above the floor.
@@ -156,40 +160,65 @@ export function FloorPage() {
 
       {stale && <OfflineNotice lastGood={lastGood} />}
 
-      {/* Overview: machines by state, the longest wait, today's calls, and the one filter (area) */}
+      {/* Overview: machine states as a donut with its legend, the longest wait, and today's calls */}
       <section className="fs-overview" aria-label="Summary">
-        <dl className="fs-kpis">
-          <div className={`fs-kpi ${loaded && visibleMachines.length ? "" : "zero"}`}>
-            <dt><StatusDot stage="running" />Running</dt>
-            <dd>{kpi(runningCount)}{loaded && <span className="fs-kpi-total">/ {visibleMachines.length}</span>}</dd>
+        <div className="fs-ov">
+          <div className="fs-ov-block fs-ov-states">
+            <Donut running={runningCount} accepted={handledMachines} waiting={waitingMachines.length} total={visibleMachines.length} loaded={loaded} />
+            {/* Counts machines (a machine with a waiting team counts as waiting), not calls: the team cards count calls */}
+            <div className="fs-legend">
+              <h2 className="fs-ov-label">Machines</h2>
+              <ul>
+                <li className={loaded && runningCount ? "" : "zero"}><StatusDot stage="running" /><span>Running</span><strong>{kpi(runningCount)}</strong></li>
+                <li className={waitingMachines.length ? "" : "zero"}>
+                  <StatusDot stage="waiting" /><span>Waiting for a team{lateMachines > 0 && <em className="fs-late-text"> · {lateMachines} late</em>}</span><strong>{kpi(waitingMachines.length)}</strong>
+                </li>
+                <li className={handledMachines ? "" : "zero"}><StatusDot stage="accepted" /><span>Being handled</span><strong>{kpi(handledMachines)}</strong></li>
+              </ul>
+            </div>
           </div>
-          <div className={`fs-kpi ${waitingMachines.length ? "" : "zero"}`}>
-            <dt><StatusDot stage="waiting" />Waiting for a team</dt>
-            <dd>
-              {kpi(waitingMachines.length)}
-              {lateMachines > 0 && <small className="fs-late-text">{lateMachines} late</small>}
-            </dd>
+
+          <div className="fs-ov-block fs-ov-wait">
+            <h2 className="fs-ov-label">Longest wait</h2>
+            {longest ? (
+              <>
+                <strong className={`fs-ov-big ${longest.timing.late ? "fs-late-text" : ""}`}>{clock(longest.timing.waitSeconds)}</strong>
+                <span className="fs-ov-sub">
+                  <TeamIcon department={longest.alert.department} size="sm" />
+                  <span>{longest.call.command.machine.name} · {longest.alert.department.name}</span>
+                </span>
+              </>
+            ) : (
+              <>
+                <strong className="fs-ov-big zero">–</strong>
+                <span className="fs-ov-sub">{loaded ? "No one is waiting" : "Loading…"}</span>
+              </>
+            )}
           </div>
-          <div className={`fs-kpi ${handledMachines ? "" : "zero"}`}>
-            <dt><StatusDot stage="accepted" />Being handled</dt>
-            <dd>{kpi(handledMachines)}</dd>
+
+          <div className="fs-ov-block fs-ov-today">
+            <div className="fs-ov-today-head">
+              <h2 className="fs-ov-label">Calls today</h2>
+              <strong className={`fs-ov-big ${loaded && callsToday ? "" : "zero"}`}>{kpi(callsToday)}</strong>
+            </div>
+            {busiest.length > 0 ? (
+              <div className="fs-bars">
+                <h3 className="fs-ov-label">Most calls</h3>
+                <ol aria-label="Machines with the most calls today">
+                  {busiest.map(({ machine, count }) => (
+                    <li key={machine.id}>
+                      <span className="fs-bar-name">{machine.name}</span>
+                      <span className="fs-bar-track" aria-hidden="true"><i style={{ width: `${(count / busiest[0].count) * 100}%` }} /></span>
+                      <strong>{count}</strong>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : (
+              <p className="fs-ov-sub">{loaded ? "No calls yet today" : ""}</p>
+            )}
           </div>
-          <div className={`fs-kpi ${longest ? "" : "zero"}`}>
-            <dt>Longest wait</dt>
-            <dd>
-              {longest ? (
-                <>
-                  <span className={longest.timing.late ? "fs-late-text" : ""}>{clock(longest.timing.waitSeconds)}</span>
-                  <small>{longest.call.command.machine.name}</small>
-                </>
-              ) : "–"}
-            </dd>
-          </div>
-          <div className={`fs-kpi ${loaded ? "" : "zero"}`}>
-            <dt>Calls today</dt>
-            <dd>{kpi(callsToday)}</dd>
-          </div>
-        </dl>
+        </div>
         {groups.length > 1 && (
           <div className="fs-filters">
             <span id="fs-area-label">Area</span>
@@ -215,7 +244,7 @@ export function FloorPage() {
             <section className="fs-card"><p className="fs-empty">No machines in this view.</p></section>
           ) : (
             areas.map((area) => (
-              <Area key={area.name} name={area.name} machines={area.machines} stageOf={stageOf} callsByMachine={callsByMachine} stats={machineStats} selectedId={selectedId} onSelect={setSelectedId} />
+              <Area key={area.name} name={area.name} machines={area.machines} stageOf={stageOf} callsByMachine={callsByMachine} selectedId={selectedId} onSelect={setSelectedId} />
             ))
           )}
         </div>
@@ -248,12 +277,11 @@ export function FloorPage() {
 
 /* ---------- The floor ---------- */
 
-function Area({ name, machines, stageOf, callsByMachine, stats, selectedId, onSelect }: {
+function Area({ name, machines, stageOf, callsByMachine, selectedId, onSelect }: {
   name: string;
   machines: FloorMachine[];
   stageOf: (machine: FloorMachine) => MachineStage;
   callsByMachine: Map<string, CallSummary[]>;
-  stats: MachineStats;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -280,8 +308,8 @@ function Area({ name, machines, stageOf, callsByMachine, stats, selectedId, onSe
       </header>
       <ul className="fs-tiles">
         {machines.map((machine) => (
-          <li key={machine.id}>
-            <MachineTile machine={machine} calls={callsByMachine.get(machine.id) ?? []} stats={stats[machine.id]} selectedId={selectedId} onSelect={onSelect} />
+          <li key={machine.id} className={callsByMachine.has(machine.id) ? "wide" : ""}>
+            <MachineTile machine={machine} calls={callsByMachine.get(machine.id) ?? []} selectedId={selectedId} onSelect={onSelect} />
           </li>
         ))}
       </ul>
@@ -289,47 +317,93 @@ function Area({ name, machines, stageOf, callsByMachine, stats, selectedId, onSe
   );
 }
 
-function MachineTile({ machine, calls, stats, selectedId, onSelect }: {
+/** How many team lines a machine tile lists before "+N more". */
+const TILE_LANES = 3;
+
+function MachineTile({ machine, calls, selectedId, onSelect }: {
   machine: FloorMachine;
   calls: CallSummary[];
-  stats?: MachineStats[string];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
   if (calls.length === 0) {
-    const today = stats?.callsToday ?? stats?.alertsToday ?? 0;
     return (
       <div className="fs-tile running">
         <strong className="fs-tile-name">{machine.name}</strong>
-        <span className="fs-tile-state">Running</span>
-        {today > 0 && <span className="fs-tile-today" title={`${plural(today, "call")} today`}>{today} today</span>}
+        <span className="fs-tile-ok"><StatusDot stage="running" />Running</span>
       </div>
     );
   }
-  // The most urgent call leads; the tile shows how long the machine has had a call open
+  // The most urgent call leads (colour, clock, tap target); every team on the machine gets its own line, waiting first
   const worst = calls[0];
-  const teams = Array.from(new Map(calls.flatMap((call) => call.alerts.map(({ alert }) => [alert.department.id, alert.department] as const))).values());
-  const waitingTeams = worst.alerts.filter(({ timing }) => timing.stage === "waiting").map(({ alert }) => alert.department.name);
-  const who = worst.alerts.map(({ alert }) => responder(alert)).filter(Boolean);
-  // The tint already says waiting or handled, so the words say who: the team still waited for, or the responder
-  const state = worst.stage === "waiting" ? waitingTeams.join(", ") : who.length ? who.join(", ") : "Accepted";
-  const full = worst.stage === "waiting" ? `waiting for ${waitingTeams.join(" and ")}` : `${state}, ${teams.map((t) => t.name).join(" and ")}`;
-  const more = calls.length > 1 ? ` · +${calls.length - 1} more` : "";
+  // One line per team: if a team has several calls on this machine, its most urgent one (waiting first) speaks for it
+  const sorted = calls.flatMap((call) => call.alerts).sort((a, b) => (a.timing.stage === b.timing.stage ? 0 : a.timing.stage === "waiting" ? -1 : 1));
+  const seen = new Set<string>();
+  const lanes = sorted.filter(({ alert }) => !seen.has(alert.department.id) && Boolean(seen.add(alert.department.id)));
+  const shown = lanes.slice(0, TILE_LANES);
+  const label = lanes
+    .map(({ alert, timing }) => `${alert.department.name} ${timing.stage === "waiting" ? "waiting" : `accepted${responder(alert) ? ` by ${responder(alert)}` : ""}`}`)
+    .join(", ");
   return (
     <button
       type="button"
       className={`fs-tile ${worst.stage} ${worst.late ? "late" : ""} ${calls.some((call) => call.command.id === selectedId) ? "selected" : ""}`}
       onClick={() => onSelect(worst.command.id)}
-      aria-label={`${machine.name}: ${full}, open ${clock(worst.totalSeconds)}${worst.late ? ", late" : ""}${calls.length > 1 ? `, ${calls.length - 1} more ${calls.length === 2 ? "call" : "calls"}` : ""}`}
+      aria-label={`${machine.name}: ${label}. Open ${clock(worst.totalSeconds)}${worst.late ? ", late" : ""}`}
     >
-      <strong className="fs-tile-name">{machine.name}</strong>
-      <span className="fs-tile-state">
-        <span className="fs-tile-teams">{teams.map((department) => <TeamIcon key={department.id} department={department} size="sm" />)}</span>
+      <span className="fs-tile-top">
+        <strong className="fs-tile-name">{machine.name}</strong>
         {worst.late && <em className="fs-late">Late</em>}
-        <span className="fs-tile-who">{state}{more}</span>
+        {/* How long the machine has been down (the team cards time each team's part) */}
+        <span className="fs-tile-clock"><small>down</small>{clock(worst.totalSeconds)}</span>
       </span>
-      <span className="fs-tile-clock">{clock(worst.totalSeconds)}</span>
+      <span className="fs-tile-lanes">
+        {shown.map(({ alert, timing }) => (
+          <span key={alert.id} className={`fs-lane ${timing.stage}`}>
+            <TeamIcon department={alert.department} size="sm" />
+            <span className="fs-lane-team">{alert.department.name}</span>
+            <span className="fs-lane-who">{timing.stage === "accepted" ? responder(alert) : ""}</span>
+            <span className="fs-lane-state">{timing.stage === "waiting" ? "Waiting" : "On call"}</span>
+          </span>
+        ))}
+        {lanes.length > shown.length && <span className="fs-lane-more">+{lanes.length - shown.length} more</span>}
+      </span>
     </button>
+  );
+}
+
+/** Machines by state, as a ring: running green, being handled amber, waiting red. The legend beside it gives the numbers. */
+function Donut({ running, accepted, waiting, total, loaded }: { running: number; accepted: number; waiting: number; total: number; loaded: boolean }) {
+  const r = 40;
+  const length = 2 * Math.PI * r;
+  const parts = [
+    { key: "running", n: running },
+    { key: "accepted", n: accepted },
+    { key: "waiting", n: waiting }
+  ].filter((part) => part.n > 0);
+  // A small gap between segments, only when there is more than one
+  const gap = parts.length > 1 ? 3 : 0;
+  let offset = 0;
+  const arcs = parts.map((part) => {
+    const size = (part.n / Math.max(1, total)) * length;
+    // Every slice stays visible, even one machine out of a hundred
+    const arc = { key: part.key, dash: Math.max(1.5, size - gap), offset };
+    offset += size;
+    return arc;
+  });
+  return (
+    <div className="fs-donut" role="img" aria-label={loaded ? `${running} of ${total} machines running, ${accepted} being handled, ${waiting} waiting` : "Loading"}>
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle className="fs-donut-track" cx="50" cy="50" r={r} />
+        {loaded && arcs.map((arc) => (
+          <circle key={arc.key} className={`fs-donut-part ${arc.key}`} cx="50" cy="50" r={r} strokeDasharray={`${arc.dash} ${length - arc.dash}`} strokeDashoffset={-arc.offset} />
+        ))}
+      </svg>
+      <span className="fs-donut-center">
+        <strong>{loaded ? running : "–"}</strong>
+        <small>{loaded ? `of ${total}` : ""}</small>
+      </span>
+    </div>
   );
 }
 
