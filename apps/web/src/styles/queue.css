@@ -1,8 +1,9 @@
 /*
- * Response Queue (responders, on phones and on a department screen).
- * Same suite chrome as Machine Station (suite.css): app bar with the department centred, status bar at the foot.
- * Desktop: two panels (Needs a response / Responding), each with its title inside. Phone: tabs.
- * One row per call with a stage rail, the big timer, and one thumb-sized next step. Responders never close calls.
+ * Response Queue: the department hub and each responder's own page (same suite chrome as Machine Station).
+ * Main area: Needs a response (tiles, the main job: accept one), always at the top.
+ * Side panel: Your calls (only when you have some), then Team on calls, a small preview with "Help out".
+ * Phones stack them: Your calls, Needs a response, Team on calls. There are no tabs.
+ * The operator closes every call at the machine, so nothing here closes a call.
  */
 
 .rq-error { color: var(--pg-wait-text); font-size: 0.875rem; font-weight: 500; }
@@ -20,62 +21,72 @@
 .rq-page .rq-toolbar select { width: auto; min-width: 200px; height: 44px; padding: 0 2rem 0 0.85rem; border: 1px solid var(--pg-line-2); border-radius: 10px; background-color: var(--pg-card); color: var(--pg-text); font-size: 0.9375rem; cursor: pointer; }
 .rq-page .rq-toolbar select:focus { outline: none; border-color: var(--pg-accent); box-shadow: 0 0 0 3px var(--pg-ring); }
 
-/* ---------- Tabs (phones/tablets only) ---------- */
-.rq-tabs { display: none; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 12px; background: var(--pg-track); }
-.rq-page .rq-tabs button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; border: 0; border-radius: 9px; background: transparent; color: var(--pg-muted); font-size: 0.9375rem; font-weight: 600; cursor: pointer; }
-.rq-page .rq-tabs button.on { background: var(--pg-card); color: var(--pg-text); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
-.rq-tabs em { min-width: 22px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 99px; background: var(--pg-line-2); color: var(--pg-text); font-size: 0.75rem; font-style: normal; font-weight: 700; }
-.rq-tabs em.late { background: var(--pg-wait); color: #fff; }
-
-/* ---------- Board: two panels that fill the screen ---------- */
-.rq-board { flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; align-items: stretch; }
-.rq-column { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: var(--pg-shadow); }
-.rq-column-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--pg-line); }
-.rq-column-head h2 { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pg-muted); }
-.rq-count { min-width: 28px; height: 26px; padding: 0 0.6rem; display: inline-grid; place-items: center; border-radius: 999px; background: var(--pg-track); color: var(--pg-text); font-size: 0.875rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.rq-list { list-style: none; margin: 0; padding: 0; display: grid; }
-.rq-list > li + li { border-top: 1px solid var(--pg-line); }
+/* ---------- Hub: main area + team panel ---------- */
+.rq-hub { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); grid-template-rows: auto 1fr; grid-template-areas: "wait mine" "wait team"; gap: 1.5rem; align-items: start; min-height: 0; }
+.rq-hub.no-mine { grid-template-rows: 1fr; grid-template-areas: "wait team"; }
+.rq-waiting { grid-area: wait; align-self: stretch; }
+.rq-mine { grid-area: mine; }
+.rq-team { grid-area: team; }
+.rq-panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: var(--pg-shadow); }
+/* Needs a response runs the full height, so an empty queue is one calm card, not a short box */
+.rq-panel-head { display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--pg-line); }
+.rq-panel-head h2 { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pg-muted); white-space: nowrap; }
+.rq-panel-foot { padding: 0.75rem 1.25rem; border-top: 1px solid var(--pg-line); color: var(--pg-muted); font-size: 0.875rem; }
+.rq-panel-head .rq-count { margin-left: auto; }
+.rq-count { min-width: 28px; height: 26px; padding: 0 0.6rem; display: inline-grid; place-items: center; border-radius: 999px; background: var(--pg-track); color: var(--pg-text); font-size: 0.875rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rq-count.late { background: var(--pg-wait-soft); color: var(--pg-wait-text); }
 /* Empty panel: one quiet line, centred in the space */
 .rq-empty { flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 2.5rem 1.25rem; color: var(--pg-muted); font-size: 1rem; text-align: center; }
-.rq-empty svg { width: 20px; height: 20px; color: var(--pg-done); }
+.rq-empty.small { padding: 1.5rem 1.25rem; font-size: 0.9375rem; }
+
+/* Waiting calls: tiles that fill the width, oldest first */
+.rq-grid { list-style: none; margin: 0; padding: 1.25rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 1rem; align-content: start; }
+.rq-grid > li { display: grid; min-width: 0; }
 
 .rq-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pg-faint); }
 .rq-dot.waiting { background: var(--pg-wait); }
 .rq-dot.accepted { background: var(--pg-way); }
 
 /* Nothing open */
-.rq-clear { display: grid; justify-items: center; align-content: center; gap: 0.5rem; padding: 3.5rem 1.5rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); text-align: center; }
+.rq-clear { flex: 1; display: grid; justify-items: center; align-content: center; gap: 0.5rem; padding: 3.5rem 1.5rem; text-align: center; }
 .rq-clear svg { width: 40px; height: 40px; color: var(--pg-done); }
 .rq-clear strong { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.015em; }
 .rq-clear span { color: var(--pg-muted); font-size: 1rem; }
 
 /* Offline: the data may be stale, so status colour steps back */
-.rq-page.stale .rq-card { --rail: var(--pg-faint); }
+.rq-page.stale .rq-card, .rq-page.stale .rq-my { --rail: var(--pg-faint); }
+.rq-page.stale .rq-dot { background: var(--pg-faint); }
 .rq-page.stale .rq-late, .rq-page.stale .rq-card.late .rq-card-clock strong { color: var(--pg-faint); }
-:root[data-theme="dark"] .rq-late, :root[data-theme="dark"] .rq-card.late .rq-card-clock strong { color: #f87171; }
+:root[data-theme="dark"] .rq-page:not(.stale) .rq-late, :root[data-theme="dark"] .rq-page:not(.stale) .rq-card.late .rq-card-clock strong { color: #f87171; }
+/* Dark: tiles sit a step lighter than their panel, so they read as separate cards */
+:root[data-theme="dark"] .rq-card { background: var(--pg-hover); }
 
 /* ---------- Call row ---------- */
 .rq-card {
   --rail: var(--pg-faint);
   position: relative;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.9rem;
-  padding: 1.15rem 1.35rem 0.35rem 1.6rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 1.15rem 1.25rem 1.25rem 1.5rem;
+  border: 1px solid var(--pg-line);
+  border-radius: 12px;
+  background: var(--pg-card);
 }
-.rq-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); }
+.rq-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); transform-origin: top; }
 .rq-card.waiting { --rail: var(--pg-wait); }
-.rq-card.accepted { --rail: var(--pg-way); }
-/* A new call drops in from the top; a call that just changed stage slides into its new column */
+/* A new call drops in; a call I just accepted slides into Your calls */
 .rq-card.is-new { animation: rqDrop 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.6s 0.2s ease-out; }
-.rq-card.is-moved { animation: rqSlide 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.4s 0.15s ease-out; }
+.rq-my.is-moved { animation: rqSlide 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), rqGlow 1.4s 0.15s ease-out; }
 @keyframes rqDrop { from { opacity: 0; transform: translateY(-14px); } }
-@keyframes rqSlide { from { opacity: 0; transform: translateX(-24px); } }
+@keyframes rqSlide { from { opacity: 0; transform: translateY(-10px); } }
 /* Just accepted: the amber dot pops with a ring, so the responder sees it took */
-.rq-card.is-moved .rq-status .rq-dot { animation: rqAccept 0.9s 0.25s cubic-bezier(0.3, 1.5, 0.5, 1) backwards; }
+.rq-my.is-moved .rq-my-status .rq-dot { animation: rqAccept 0.9s 0.25s cubic-bezier(0.3, 1.5, 0.5, 1) backwards; }
 @keyframes rqAccept { 0% { transform: scale(0); box-shadow: 0 0 0 0 var(--pg-way-soft); } 50% { transform: scale(1.6); box-shadow: 0 0 0 6px var(--pg-way-soft); } 100% { transform: scale(1); box-shadow: 0 0 0 10px transparent; } }
 @keyframes rqGlow { 0% { background: color-mix(in srgb, var(--rail) 12%, var(--pg-card)); } 100% { background: transparent; } }
-.rq-card::before { transform-origin: top; }
-.rq-card.is-new::before, .rq-card.is-moved::before { animation: rqRail 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.rq-card.is-new::before, .rq-my.is-moved::before { animation: rqRail 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes rqRail { from { transform: scaleY(0); } }
 .rq-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.9rem; }
 .rq-card-head .dept-icon { width: 40px; height: 40px; border-radius: 11px; }
@@ -87,17 +98,31 @@
 .rq-card-clock strong { font-size: 1.875rem; font-weight: 600; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; }
 .rq-card.late .rq-card-clock strong { color: var(--pg-wait-text); }
 .rq-late { padding: 0.25rem 0.45rem; border-radius: 6px; box-shadow: inset 0 0 0 1.5px currentColor; color: var(--pg-wait-text); font-style: normal; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.07em; line-height: 1; text-transform: uppercase; }
-.rq-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 500; }
-.rq-status span { color: var(--pg-muted); font-size: 0.9375rem; font-weight: 400; }
 .rq-operator-note { padding: 0.6rem 0.8rem; border-radius: 10px; background: var(--pg-track); color: var(--pg-text-2); font-size: 0.9375rem; }
-.rq-closes { color: var(--pg-muted); font-size: 0.9375rem; }
+/* The operator's latest message on a waiting call, one line */
+.rq-latest { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--pg-text-2); font-size: 0.9375rem; }
+.rq-latest svg { flex: none; width: 16px; height: 16px; color: var(--pg-muted); }
+.rq-latest strong { flex: none; font-weight: 600; }
+.rq-latest span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* One next step per call: dark primary (same as Machine Station), outlined secondary */
+/* A call someone else took (or that was cancelled): says so, then folds away */
+.rq-card.leaving { --rail: var(--pg-way); animation: rqLeave 1.8s ease forwards; }
+.rq-card.leaving.cancelled { --rail: var(--pg-faint); }
+.rq-card.leaving.mine .rq-leaving-note { background: var(--pg-done-soft); color: var(--pg-text); }
+.rq-card.leaving.mine .rq-leaving-note svg { color: var(--pg-done); }
+.rq-card.leaving .rq-card-head { opacity: 0.7; }
+.rq-leaving-note { display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 54px; border-radius: 12px; background: var(--pg-way-soft); color: var(--pg-way-text); font-size: 1.0625rem; font-weight: 600; animation: rqUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.rq-card.leaving.cancelled .rq-leaving-note { background: var(--pg-track); color: var(--pg-muted); }
+.rq-leaving-note svg { width: 20px; height: 20px; }
+@keyframes rqUp { from { opacity: 0; transform: translateY(6px); } }
+@keyframes rqLeave { 0%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; transform: scale(0.97); } }
+
+/* One next step per call: dark primary, the same as Machine Station */
 .rq-page .rq-btn { position: relative; overflow: hidden; width: 100%; min-height: 54px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 12px; font-size: 1.0625rem; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+/* Tiles in a row share a height: the button sits at the bottom of each */
+.rq-card > .rq-btn { margin-top: auto; }
 .rq-page .rq-btn.primary { background: var(--pg-text); color: var(--pg-card); }
 .rq-page .rq-btn.primary:hover:not(:disabled) { background: var(--pg-text-2); }
-.rq-page .rq-btn.secondary { border-color: var(--pg-line-2); background: var(--pg-card); color: var(--pg-text); }
-.rq-page .rq-btn.secondary:hover:not(:disabled) { background: var(--pg-hover); }
 .rq-page .rq-btn:active:not(:disabled) { transform: scale(0.985); }
 .rq-page .rq-btn:disabled { opacity: 0.55; cursor: progress; }
 /* Sending: the button stays solid and a light bar runs along it until the call has moved */
@@ -105,22 +130,46 @@
 .rq-sweep { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: currentColor; opacity: 0.55; transform: scaleX(0); transform-origin: left; pointer-events: none; }
 .rq-btn.sending .rq-sweep { animation: rqSweep 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
 @keyframes rqSweep { to { transform: scaleX(0.92); } }
-.rq-page .rq-btn:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
+.rq-page .rq-btn:focus-visible, .rq-page .rq-pill:focus-visible, .rq-page .rq-help:focus-visible, .rq-page .rq-compose button:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
 
-/* Messages */
-.rq-messages { border-top: 1px solid var(--pg-line); margin: 0 -1.35rem 0 -1.6rem; }
-.rq-page .rq-messages-toggle { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 1.35rem 0 1.6rem; border: 0; background: transparent; color: var(--pg-muted); font-size: 0.9375rem; font-weight: 500; cursor: pointer; }
-.rq-page .rq-messages-toggle:hover { color: var(--pg-text); }
-.rq-messages-toggle span { font-size: 1.1rem; }
-.rq-messages-body { display: grid; gap: 0.6rem; padding: 0 1.35rem 1rem 1.6rem; }
+/* ---------- Your calls: slim rows ---------- */
+.rq-mine-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.rq-mine-list > li + li { border-top: 1px solid var(--pg-line); }
+.rq-my { --rail: var(--pg-way); position: relative; }
+.rq-my::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rail); transform-origin: top; }
+.rq-my-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.6rem 0.85rem; padding: 0.9rem 1.1rem 0.9rem 1.35rem; }
+.rq-my-foot { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; min-width: 0; }
+.rq-my-row .dept-icon { width: 40px; height: 40px; border-radius: 11px; }
+.rq-my-row .dept-icon svg { width: 22px; height: 22px; }
+.rq-my-status { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--pg-text-2); font-size: 0.9375rem; font-weight: 500; }
+.rq-my-clock { min-width: 4.5ch; text-align: right; font-size: 1.625rem; font-weight: 600; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; }
+.rq-page .rq-pill { display: inline-flex; align-items: center; gap: 0.45rem; min-height: 40px; padding: 0 0.9rem; border: 1px solid var(--pg-line-2); border-radius: 999px; background: var(--pg-card); color: var(--pg-text-2); font-size: 0.9375rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.rq-page .rq-pill:hover, .rq-page .rq-pill.open { background: var(--pg-hover); color: var(--pg-text); }
+.rq-pill svg { width: 17px; height: 17px; }
+.rq-page .rq-pill.unread { border-color: var(--pg-text-2); color: var(--pg-text); }
+.rq-unread { width: 8px; height: 8px; border-radius: 50%; background: var(--pg-accent); }
+.rq-my .rq-messages-body { padding: 0 1.1rem 1.1rem 1.35rem; }
+
+/* ---------- Team on calls: a small preview ---------- */
+.rq-team-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.rq-team-list > li + li { border-top: 1px solid var(--pg-line); }
+.rq-teamcall { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.35rem 0.75rem; padding: 0.8rem 1.1rem; }
+.rq-teamcall-main { display: grid; gap: 0.1rem; min-width: 0; }
+.rq-teamcall-main strong { font-size: 1rem; font-weight: 650; }
+.rq-teamcall-main small { color: var(--pg-muted); font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rq-teamcall-clock { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rq-page .rq-help { grid-column: 1 / -1; justify-self: start; min-height: 36px; padding: 0 0.9rem; border: 1px solid var(--pg-line-2); border-radius: 999px; background: var(--pg-card); color: var(--pg-text); font-size: 0.875rem; font-weight: 600; cursor: pointer; }
+.rq-page .rq-help:hover:not(:disabled) { background: var(--pg-hover); }
+.rq-page .rq-help:disabled { opacity: 0.6; cursor: progress; }
+.rq-teamcall .rq-error { grid-column: 1 / -1; }
+
+/* ---------- Messages ---------- */
+.rq-messages-body { display: grid; gap: 0.6rem; }
 .rq-thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
 .rq-thread li { display: grid; grid-template-columns: auto auto; justify-content: start; column-gap: 0.5rem; padding: 0.55rem 0.75rem; border-radius: 10px; background: var(--pg-track); }
 .rq-thread strong { font-size: 0.875rem; font-weight: 600; }
 .rq-thread time { font-size: 0.8125rem; color: var(--pg-muted); }
 .rq-thread p { grid-column: 1 / -1; font-size: 0.9375rem; color: var(--pg-text-2); overflow-wrap: anywhere; }
-.rq-quick { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.rq-page .rq-quick button { min-height: 44px; padding: 0 1rem; border: 0; border-radius: 99px; background: var(--pg-track); color: var(--pg-text); font-size: 0.9375rem; font-weight: 600; cursor: pointer; }
-.rq-page .rq-quick button:hover:not(:disabled) { background: var(--pg-line); }
 .rq-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; }
 .rq-page .rq-compose input { width: 100%; height: 48px; padding: 0 0.9rem; border: 1px solid var(--pg-line-2); border-radius: 10px; background: var(--pg-input); color: var(--pg-text); font-size: 16px; }
 .rq-page .rq-compose input:focus { outline: none; border-color: var(--pg-accent); box-shadow: 0 0 0 3px var(--pg-ring); }
@@ -128,22 +177,27 @@
 .rq-page .rq-compose button:disabled { opacity: 0.3; cursor: not-allowed; }
 .rq-compose button svg { width: 18px; height: 18px; }
 
-/* ---------- Phones & tablets: tabs instead of two panels ---------- */
+/* ---------- Narrower screens: one column (Your calls, Needs a response, Team on calls) ---------- */
+@media (max-width: 1100px) {
+  .rq-hub, .rq-hub.no-mine { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "mine" "wait" "team"; align-content: start; }
+  .rq-hub.no-mine { grid-template-areas: "wait" "team"; }
+}
 @media (max-width: 900px) {
-  .rq-tabs { display: grid; }
-  .rq-board { grid-template-columns: minmax(0, 1fr); }
-  .rq-column-head { display: none; }
-  .rq-board[data-tab="waiting"] .rq-column.accepted,
-  .rq-board[data-tab="accepted"] .rq-column.waiting { display: none; }
   .rq-toolbar label { flex: 1; }
   .rq-page .rq-toolbar select { flex: 1; min-width: 0; }
 }
 @media (max-width: 640px) {
   .rq-head-team .dept-icon { display: none; }
   .rq-card-clock strong { font-size: 1.5rem; }
+  .rq-grid { padding: 0.75rem; }
+  .rq-my-row { padding: 0.85rem 1rem 0.85rem 1.25rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rq-card.is-new, .rq-card.is-moved, .rq-card.is-new::before, .rq-card.is-moved::before, .rq-card.is-moved .rq-status .rq-dot { animation: none; }
+  .rq-card.is-new, .rq-my.is-moved, .rq-card.is-new::before, .rq-my.is-moved::before, .rq-my.is-moved .rq-my-status .rq-dot, .rq-leaving-note { animation: none; }
+  /* still leaves, just without moving */
+  .rq-card.leaving { animation: rqFadeOnly 1.8s ease forwards; }
+  @keyframes rqFadeOnly { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
   .rq-btn.sending .rq-sweep { animation: none; transform: scaleX(0.6); }
+  .rq-page .rq-btn:active:not(:disabled) { transform: none; }
 }

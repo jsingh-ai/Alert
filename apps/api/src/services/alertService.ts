@@ -158,6 +158,8 @@ export function serializeAlert(alert: IncludedAlert) {
     displayMessage: alert.displayMessage,
     operatorNote: alert.operatorNote,
     responderNameText: alert.responderNameText,
+    // Who accepted it, so a responder's own calls can be told apart from a teammate's with the same name
+    acknowledgedByUserId: alert.acknowledgedByUserId ?? null,
     actionAvailable: actionAvailable(alert),
     elapsedSeconds: elapsedSeconds(activeTimerStartedAt(alert)),
     acknowledgeSeconds: secondsBetween(alert.createdAt, alert.acknowledgedAt),
