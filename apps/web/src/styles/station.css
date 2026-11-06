@@ -106,9 +106,9 @@
 
 /* ---------- Open calls ---------- */
 .ms-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 1.5rem; align-items: stretch; }
-.ms-calls { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.ms-calls { display: flex; flex-direction: column; gap: 1rem; min-width: 0; align-self: start; }
 /* Several calls: equal shares of the height, so every open call is on screen at once */
-.ms-calls.multi { display: grid; grid-auto-rows: minmax(min-content, 1fr); }
+.ms-calls.multi { display: grid; grid-auto-rows: auto; align-content: start; }
 
 /* Compact row (one-team call when several are open): headline + progress | timer | action */
 /* fixed timer and action columns so every row lines up, whatever its button says */
@@ -147,7 +147,6 @@
   .ms-row-main { grid-column: 1 / -1; }
   .ms-row-timer { justify-items: start; text-align: left; }
 }
-.ms-call:not(.compact) { flex: 1; }
 .ms-call.compact { gap: 1rem; padding-top: 1.4rem; padding-bottom: 1.25rem; }
 .ms-call.compact .ms-call-main h2 { font-size: 1.75rem; }
 .ms-call.compact .ms-call-mid { justify-content: flex-start; gap: 1rem; }
@@ -184,12 +183,12 @@
 .ms-call .ms-timer strong, .ms-call .ms-row-timer strong { animation: msUp 0.4s 0.15s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
 
 /* The middle (track or teams) takes the spare height and centres itself */
-.ms-call-mid { flex: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 2rem; }
+.ms-call-mid { display: flex; flex-direction: column; justify-content: space-between; gap: 1.5rem; }
 /* Body: timer + progress on the left, the conversation on the right */
-.ms-call-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 30%); gap: 2.5rem; }
+.ms-call-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 44%); gap: 2.5rem; }
 .ms-call.compact .ms-call-body { grid-template-columns: minmax(0, 1fr); }
 /* in the card the thread scrolls inside a fixed height, so a long conversation never stretches the card */
-.ms-call-body .ms-thread-list { max-height: 42vh; }
+.ms-call-body .ms-thread-list { max-height: 300px; }
 .ms-call-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; }
 .ms-call-main { display: grid; gap: 0.55rem; min-width: 0; }
 .ms-call-kicker { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; font-weight: 600; color: var(--pg-text-2); }
@@ -202,7 +201,7 @@
 .ms-timer { display: grid; justify-items: start; gap: 0.35rem; }
 .ms-timer span { font-size: 0.875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pg-muted); }
 .ms-timer small { font-size: 1rem; color: var(--pg-muted); font-variant-numeric: tabular-nums; }
-.ms-timer strong { font-size: clamp(4.5rem, min(17vh, 8vw), 11rem); font-weight: 600; letter-spacing: -0.04em; line-height: 0.95; font-variant-numeric: tabular-nums; color: var(--pg-text); }
+.ms-timer strong { font-size: clamp(4rem, min(11vh, 6vw), 7.5rem); font-weight: 600; letter-spacing: -0.04em; line-height: 0.95; font-variant-numeric: tabular-nums; color: var(--pg-text); }
 .ms-call.late .ms-timer strong, .ms-call.stale .ms-timer strong { color: var(--tone); }
 :root[data-theme="dark"] .ms-call.late:not(.stale) .ms-timer strong { color: #f87171; }
 
@@ -348,7 +347,7 @@
 /* Short screens (e.g. 1366×768): tighter rhythm so the status bar stays on screen */
 @media (max-height: 800px) {
   .ms-call { gap: 1rem; padding-top: 1.4rem; padding-bottom: 1.25rem; }
-  .ms-timer strong { font-size: clamp(4.5rem, 14vh, 7rem); }
+  .ms-timer strong { font-size: clamp(4rem, 10vh, 6rem); }
   .ms-call-main h2 { font-size: 2.25rem; }
 }
 @media (max-width: 900px) {
@@ -494,7 +493,7 @@
 
 /* Laptop widths: a narrower message column, and track labels that shrink and cut off instead of colliding */
 @media (max-width: 1440px) {
-  .ms-call-body { grid-template-columns: minmax(0, 1fr) minmax(290px, 34%); gap: 1.75rem; }
+  .ms-call-body { grid-template-columns: minmax(0, 1fr) minmax(300px, 46%); gap: 1.75rem; }
   .ms-thread { padding-left: 1.5rem; }
   .ms-track-label { font-size: 0.875rem; }
   .ms-track-label, .ms-track-detail { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
