@@ -16,7 +16,7 @@ import "../styles/floor.css";
  * Floor Status, for managers and supervisors:
  *   Overview   a donut of machine states with its legend, the longest wait, and calls today with the busiest machines; area filter
  *   The floor  one card per area, every machine a tile in a fixed order (green = running, red = waiting, amber = handled).
- *              A machine with a call gets a double-width tile: one line per team, so nothing is cut off.
+ *              A machine with a call is the same size, tinted, with its teams' icons and how long it's been down.
  *   Teams      one card per department with only its own calls, so departments never mix
  * Tapping any call opens its details (progress per team, activity, and a message box).
  */
@@ -308,7 +308,7 @@ function Area({ name, machines, stageOf, callsByMachine, selectedId, onSelect }:
       </header>
       <ul className="fs-tiles">
         {machines.map((machine) => (
-          <li key={machine.id} className={callsByMachine.has(machine.id) ? "wide" : ""}>
+          <li key={machine.id}>
             <MachineTile machine={machine} calls={callsByMachine.get(machine.id) ?? []} selectedId={selectedId} onSelect={onSelect} />
           </li>
         ))}
@@ -316,9 +316,6 @@ function Area({ name, machines, stageOf, callsByMachine, selectedId, onSelect }:
     </section>
   );
 }
-
-/** How many team lines a machine tile lists before "+N more". */
-const TILE_LANES = 3;
 
 function MachineTile({ machine, calls, selectedId, onSelect }: {
   machine: FloorMachine;
@@ -334,13 +331,13 @@ function MachineTile({ machine, calls, selectedId, onSelect }: {
       </div>
     );
   }
-  // The most urgent call leads (colour, clock, tap target); every team on the machine gets its own line, waiting first
+  // Same size as a running tile: the tint says waiting or handled, the icons say which teams, the clock how long.
+  // Who and what is in the department cards beside the floor (and read out in full to screen readers).
   const worst = calls[0];
-  // One line per team: if a team has several calls on this machine, its most urgent one (waiting first) speaks for it
+  // One icon per team, waiting teams first
   const sorted = calls.flatMap((call) => call.alerts).sort((a, b) => (a.timing.stage === b.timing.stage ? 0 : a.timing.stage === "waiting" ? -1 : 1));
   const seen = new Set<string>();
   const lanes = sorted.filter(({ alert }) => !seen.has(alert.department.id) && Boolean(seen.add(alert.department.id)));
-  const shown = lanes.slice(0, TILE_LANES);
   const label = lanes
     .map(({ alert, timing }) => `${alert.department.name} ${timing.stage === "waiting" ? "waiting" : `accepted${responder(alert) ? ` by ${responder(alert)}` : ""}`}`)
     .join(", ");
@@ -349,24 +346,16 @@ function MachineTile({ machine, calls, selectedId, onSelect }: {
       type="button"
       className={`fs-tile ${worst.stage} ${worst.late ? "late" : ""} ${calls.some((call) => call.command.id === selectedId) ? "selected" : ""}`}
       onClick={() => onSelect(worst.command.id)}
-      aria-label={`${machine.name}: ${label}. Open ${clock(worst.totalSeconds)}${worst.late ? ", late" : ""}`}
+      aria-label={`${machine.name}: ${label}. Down for ${clock(worst.totalSeconds)}${worst.late ? ", late" : ""}`}
+      title={label}
     >
       <span className="fs-tile-top">
         <strong className="fs-tile-name">{machine.name}</strong>
         {worst.late && <em className="fs-late">Late</em>}
-        {/* How long the machine has been down (the team cards time each team's part) */}
-        <span className="fs-tile-clock"><small>down</small>{clock(worst.totalSeconds)}</span>
       </span>
-      <span className="fs-tile-lanes">
-        {shown.map(({ alert, timing }) => (
-          <span key={alert.id} className={`fs-lane ${timing.stage}`}>
-            <TeamIcon department={alert.department} size="sm" />
-            <span className="fs-lane-team">{alert.department.name}</span>
-            <span className="fs-lane-who">{timing.stage === "accepted" ? responder(alert) : ""}</span>
-            <span className="fs-lane-state">{timing.stage === "waiting" ? "Waiting" : "On call"}</span>
-          </span>
-        ))}
-        {lanes.length > shown.length && <span className="fs-lane-more">+{lanes.length - shown.length} more</span>}
+      <span className="fs-tile-bottom">
+        <span className="fs-tile-teams">{lanes.map(({ alert }) => <TeamIcon key={alert.department.id} department={alert.department} size="sm" />)}</span>
+        <span className="fs-tile-clock">{clock(worst.totalSeconds)}</span>
       </span>
     </button>
   );
