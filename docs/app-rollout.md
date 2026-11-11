@@ -187,7 +187,7 @@ Open `https://andon.fivestar.local` in Edge.
 - [ ] Padlock shows, with no certificate warning.
 - [ ] Sign-in works and live updates arrive (raise and clear a test call from another device).
 - [ ] An **Install** icon appears in the address bar.
-- [ ] `F12` -> **Application** -> **Manifest** shows "ProcessGuard Andon" with no errors.
+- [ ] `F12` -> **Application** -> **Manifest** shows "ProcessGuard Workflow" with no errors.
 - [ ] `F12` -> **Application** -> **Service workers** shows `sw.js` as *activated and running*.
 - [ ] Install it, then stop the app service (`Stop-Service ProcessGuardAndon`) and reopen the
       window: it should still open and show its offline state. Start the service again.

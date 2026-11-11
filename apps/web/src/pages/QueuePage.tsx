@@ -173,7 +173,7 @@ export function QueuePage() {
   useEffect(() => {
     const base = "ProcessGuard";
     document.title = waiting.length ? `(${waiting.length}) Team Calls · ${base}` : `Team Calls · ${base}`;
-    return () => { document.title = base; };
+    return () => { document.title = "ProcessGuard Workflow"; }; // the app title from index.html
   }, [waiting.length]);
 
   const department = departments.find((d) => d.id === departmentId);

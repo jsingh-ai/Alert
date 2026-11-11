@@ -1,6 +1,6 @@
 {
   "id": "/",
-  "name": "ProcessGuard Andon",
+  "name": "ProcessGuard Workflow",
   "short_name": "ProcessGuard",
   "description": "Live andon calls, team calls and floor status for Five Star manufacturing.",
   "start_url": "/",
