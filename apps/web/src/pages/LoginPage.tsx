@@ -151,9 +151,11 @@ export function LoginPage() {
             <img className="login-topbar-logo" src={fiveStarLogoWhite} alt="Five Star Family of Companies" />
           </header>
 
+          {/* Desktop: the app name is the headline (the top bar above is phone/tablet only) */}
           <div className="login-hero">
-            <p className="login-eyebrow">Live floor visibility</p>
-            <h1>From call to close{"‑"}out, in real time.</h1>
+            <div className="login-mark login-hero-mark" aria-hidden="true">PG</div>
+            <h1 className="login-app-name">ProcessGuard <span>Workflow</span></h1>
+            <p className="login-tagline">From call to close{"‑"}out, in real time.</p>
           </div>
 
           <ol className="login-workflow">
@@ -197,7 +199,7 @@ export function LoginPage() {
             <header className="login-card-header">
               <img className="login-card-logo" src={fiveStarLogo} alt="Five Star Family of Companies" />
               <h2>{choosingWorkspace ? "Choose a workspace" : "Sign in"}</h2>
-              <p>{choosingWorkspace ? "Your account has access to several companies." : "Welcome back to ProcessGuard."}</p>
+              <p>{choosingWorkspace ? "Your account has access to several companies." : "Welcome back to ProcessGuard Workflow."}</p>
             </header>
 
             {error && <div className="login-error" role="alert">{error}</div>}
