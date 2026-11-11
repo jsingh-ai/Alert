@@ -709,6 +709,9 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
           {/* One-team calls show the called time in the progress track instead */}
           {multi && <small>Called {timeOfDay(call.command.createdAt)}</small>}
         </div>
+        {/* The call's one action sits beside the headline, so it is on screen even when the
+            card is taller than the screen (tablets, 1366×768 kiosks) */}
+        {confirm || (action && <div className="ms-call-actions">{action}</div>)}
       </header>
 
       <div className="ms-call-body">
@@ -749,12 +752,6 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
       </div>
       {compact && <ThreadToggle call={call} open={threadOpen} onToggle={onToggleThread} />}
       {compact && inlineThread && threadOpen && <CallThread call={call} disabled={disabled} onClose={onToggleThread} inline />}
-
-      {confirm || (action && (
-        <footer className="ms-call-foot">
-          <div className="ms-call-actions">{action}</div>
-        </footer>
-      ))}
 
       {error}
     </article>

@@ -21,7 +21,9 @@
 
 /* ---------- Idle: call for help ---------- */
 .ms-idle { flex: 1; display: flex; flex-direction: column; gap: 1rem; }
-.ms-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); grid-auto-rows: clamp(260px, 40vh, 400px); gap: 1rem; }
+/* The team tiles take all the height the more-requests row leaves, so a station screen has no dead
+   space and the main buttons are as big as they can be */
+.ms-tiles { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); grid-auto-rows: minmax(220px, 1fr); gap: 1rem; }
 
 /* Call tiles: one centred composition per team, a solid icon block, the name, and what the team handles */
 .ms-page .ms-tile {
@@ -44,10 +46,11 @@
   touch-action: manipulation;
 }
 .ms-tile-icon { margin-bottom: 0.9rem; }
-.ms-tile .dept-icon { width: 88px; height: 88px; border-radius: 22px; transition: background 0.15s ease, color 0.15s ease; }
-.ms-tile .dept-icon svg { width: 44px; height: 44px; stroke-width: 1.7; }
-.ms-tile-label { font-size: 1.75rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; }
-.ms-tile-sub { max-width: 100%; font-size: 1rem; color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Icon and type grow a little with the screen height, in step with the taller tiles */
+.ms-tile .dept-icon { width: clamp(88px, 12vh, 124px); height: clamp(88px, 12vh, 124px); border-radius: 24px; transition: background 0.15s ease, color 0.15s ease; }
+.ms-tile .dept-icon svg { width: 50%; height: 50%; stroke-width: 1.7; }
+.ms-tile-label { font-size: clamp(1.75rem, 3.3vh, 2.375rem); font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; }
+.ms-tile-sub { max-width: 100%; font-size: clamp(1rem, 1.7vh, 1.1875rem); color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ms-tile.sending .ms-tile-sub { color: var(--pg-text); font-weight: 600; }
 /* Pressed / sending: the icon block fills with the team colour. Hover only where a real pointer exists (it sticks on touch). */
 .ms-page .ms-tile:active:not(:disabled) .dept-icon, .ms-tile.sending .dept-icon { background: var(--hue); color: #fff; box-shadow: none; }
@@ -189,7 +192,7 @@
 .ms-call.compact .ms-call-body { grid-template-columns: minmax(0, 1fr); }
 /* in the card the thread scrolls inside a fixed height, so a long conversation never stretches the card */
 .ms-call-body .ms-thread-list { max-height: 300px; }
-.ms-call-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; }
+.ms-call-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 2rem; }
 .ms-call-main { display: grid; gap: 0.55rem; min-width: 0; }
 .ms-call-kicker { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; font-weight: 600; color: var(--pg-text-2); }
 .ms-call-kicker-sub { font-weight: 400; color: var(--pg-muted); }
@@ -245,9 +248,9 @@
 .ms-mini.waiting i.current { border-color: var(--pg-wait); }
 .ms-mini.accepted i.current { border-color: var(--pg-way); }
 
-/* Footer: the call's one action, bottom right, nearest the operator's hand */
-.ms-call-foot { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--pg-line); }
+/* The call's one action (or its confirm step), top right beside the headline: always on screen */
 .ms-call-actions { display: flex; gap: 0.5rem; margin-left: auto; }
+.ms-call-head > .ms-confirm { margin-left: auto; }
 
 /* Buttons */
 .ms-page .ms-btn, .ms-sheet .ms-btn {
@@ -337,7 +340,9 @@
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
-  .ms-body { grid-template-columns: minmax(0, 1fr); }
+  /* Stacked: calls, then "Call another team" right under them. Without align-content the
+     grid's rows share the page's spare height and the list drifts down the screen. */
+  .ms-body { grid-template-columns: minmax(0, 1fr); align-content: start; }
   /* Grid of rows; hairlines drawn per row so empty grid cells stay card-coloured */
   .ms-rail .ms-list { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0; background: var(--pg-card); }
   .ms-rail .ms-list .ms-row + .ms-row { border-top: 0; }
@@ -358,11 +363,12 @@
   .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr); padding: 1.25rem 1.1rem 1.25rem 1.5rem; }
   .ms-row-timer strong { font-size: 3rem; }
   .ms-call { padding: 1.25rem 1.1rem 1.1rem 1.5rem; }
-  .ms-call-head { flex-direction: column; }
+  .ms-call-head { flex-direction: column; align-items: stretch; }
+  .ms-call-head > .ms-call-actions, .ms-call-head > .ms-confirm { margin-left: 0; }
+  .ms-call-head > .ms-call-actions > .ms-btn { flex: 1; }
   .ms-timer strong { font-size: 3.25rem; }
   .ms-call-main h2 { font-size: 1.75rem; }
-  .ms-tiles { grid-template-columns: minmax(0, 1fr); }
-  .ms-tiles { grid-auto-rows: auto; }
+  .ms-tiles { flex: none; grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
   .ms-page .ms-tile { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 1rem; row-gap: 0.15rem; justify-items: start; text-align: left; padding: 1rem 1.1rem; }
   .ms-tile-icon { grid-row: 1 / 3; margin: 0; }
   .ms-tile .dept-icon { width: 56px; height: 56px; border-radius: 14px; }
@@ -498,6 +504,8 @@
   .ms-call-body { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
   .ms-thread { padding: 1.25rem 0 0; border-left: 0; border-top: 1px solid var(--pg-line); }
   .ms-thread-list { max-height: 240px; }
+  /* Stacked under the call: no messages is one short line, not a tall empty box */
+  .ms-thread-empty { flex: none; min-height: 0; place-items: center start; padding: 0.85rem 1rem; text-align: left; }
   .ms-thread.panel { padding: 1rem 1.1rem 1.1rem; border-top: 1px solid var(--pg-line); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -547,11 +555,16 @@
   .ms-list .ms-row-text strong { font-size: 1rem; }
   .ms-list .ms-row-text small { font-size: 0.8125rem; }
 
-  /* An open call: headline and timer side by side, the progress line across, one action, then messages on request */
-  .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head timer" "progress progress" "actions actions" "toggle toggle" "thread thread"; align-items: start; gap: 0.8rem 1rem; padding: 1.1rem 1.1rem 1.15rem 1.4rem; }
+  /* An open call: the headline across the top, then the progress line beside the timer, one action,
+     then messages on request. The headline gets the full width so it doesn't break mid-phrase, and the
+     progress line wraps instead of cutting off the time. */
+  .ms-call.ms-call-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head head" "progress timer" "actions actions" "toggle toggle" "thread thread"; align-items: center; gap: 0.75rem 1rem; padding: 1.1rem 1.1rem 1.15rem 1.4rem; }
   .ms-row-main { display: contents; }
-  .ms-row-main h2 { grid-area: head; align-self: center; font-size: 1.375rem; }
-  .ms-row-progress { grid-area: progress; gap: 0.6rem; font-size: 0.9375rem; }
+  .ms-row-main h2 { grid-area: head; font-size: 1.5rem; }
+  .ms-row-progress { grid-area: progress; font-size: 0.9375rem; line-height: 1.35; }
+  /* the headline and the coloured edge already give the stage; the line's width goes to the words */
+  .ms-row-progress .ms-mini { display: none; }
+  .ms-row-progress span { white-space: normal; overflow: visible; text-wrap: balance; }
   .ms-call-row .ms-thread-toggle { grid-area: toggle; }
   .ms-row-timer { grid-area: timer; justify-items: end; text-align: right; }
   .ms-row-timer span { font-size: 0.6875rem; }
