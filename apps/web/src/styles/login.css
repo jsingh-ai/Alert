@@ -518,15 +518,20 @@
 }
 
 /* ---------- Big monitors ----------
- * The brand panel scales with the viewport but the card has a fixed size, so
- * on wide screens it looked lost. Give the dark side a little more width and
- * scale the card (and the line under it) up as a whole. */
+ * Most sizes on this page are fixed or capped, so on a big monitor everything
+ * looked small with large empty gaps between. Scale the whole page instead,
+ * like browser zoom: a 2560px screen shows the ~1700px laptop layout, bigger.
+ * zoom also scales viewport units, so min-height is divided by it and the
+ * vw-based logo tile size is replaced with a fixed one. */
 @media (min-width: 1800px) {
-  .login-shell { grid-template-columns: minmax(0, 1.3fr) minmax(560px, 1fr); }
-  .login-card, .login-legal { zoom: 1.2; }
+  .login-page { zoom: 1.2; }
+  .login-page, .login-shell { min-height: calc(100vh / 1.2); min-height: calc(100dvh / 1.2); }
+  .login-page .login-family-tile { --lp-tile: 100px; }
 }
 @media (min-width: 2200px) and (min-height: 1200px) {
-  .login-card, .login-legal { zoom: 1.5; }
+  .login-page { zoom: 1.5; }
+  .login-page, .login-shell { min-height: calc(100vh / 1.5); min-height: calc(100dvh / 1.5); }
+  .login-page .login-family-tile { --lp-tile: 108px; }
 }
 
 /* ---------- Tablet & phone: one dark canvas ----------
