@@ -170,7 +170,7 @@ export function OperatorPage() {
     if (threadFor && !calls.some((call) => call.command.id === threadFor)) setThreadFor(null);
   }, [calls, threadFor]);
 
-  const busyDepartments = new Set(calls.flatMap((call) => call.alerts.map(({ alert }) => alert.department.id)));
+  const busyDepartments = new Set(calls.flatMap((call) => call.alerts.filter(({ timing }) => !timing.closed).map(({ alert }) => alert.department.id)));
 
   // Offline is judged by how old the data is, not by a single failed request: one dropped
   // poll is retried and replaced 5s later. Never claim "Running normally" without fresh data.
@@ -500,7 +500,10 @@ function headline(call: CallSummary) {
     const blocking = call.alerts.filter(({ timing }) => timing.stage === "waiting").map(({ alert }) => alert.department.name);
     return `Waiting for ${team || listNames(blocking)}`;
   }
-  return team ? `${team} is on it` : "Every team is on it";
+  if (team) return `${team} is on it`;
+  // Teams already closed on a still-open job aren't named: only who is still working on it
+  const working = call.alerts.filter(({ timing }) => !timing.closed).map(({ alert }) => alert.department.name);
+  return working.length === call.alerts.length ? "Every team is on it" : `${listNames(working)} ${working.length > 1 ? "are" : "is"} on it`;
 }
 
 /** "Quality", "Quality and Supervisor", "Quality, Safety and Supervisor" */
@@ -510,8 +513,8 @@ function listNames(names: string[]) {
 }
 
 /** Compact Called / Accepted / Closed dots for one team on a multi-team call; same steps as Track. */
-function MiniTrack({ stage }: { stage: CallStage }) {
-  const current = stage === "waiting" ? 1 : 2;
+function MiniTrack({ stage, closed }: { stage: CallStage; closed?: boolean }) {
+  const current = closed ? 3 : stage === "waiting" ? 1 : 2;
   return (
     <span className={`ms-mini ${stage}`} aria-hidden="true">
       {[0, 1, 2].map((step) => (
@@ -527,11 +530,12 @@ function timerLabel(stage: CallStage) {
 
 /** Seconds in the call's current stage: the longest wait, or the longest time since a team accepted. */
 function stageSeconds(call: CallSummary) {
-  const inStage = call.alerts.filter(({ timing }) => timing.stage === call.stage);
+  const inStage = call.alerts.filter(({ timing }) => timing.stage === call.stage && !timing.closed);
   return Math.max(0, ...inStage.map(({ timing }) => timing.stageSeconds));
 }
 
 function teamStatus(alert: Alert, timing: AlertTiming) {
+  if (timing.closed) return `Arrived at ${timeOfDay(alert.arrivedAt ?? alert.resolvedAt ?? alert.createdAt)}`;
   if (timing.stage === "waiting") return "Waiting for a response";
   const who = responder(alert) || "Responder";
   return `${who} is on it · ${clock(timing.stageSeconds)}`;
@@ -544,6 +548,7 @@ function acceptedAt(alert: Alert) {
 
 /** Grey traceability line: "Accepted at 11:43 AM, 1:10 after the call". The called time is in the card header. */
 function teamTimes(alert: Alert, timing: AlertTiming) {
+  if (timing.closed) return `${responder(alert) || "Responder"} · took ${clock(timing.arriveSeconds ?? timing.waitSeconds)} to arrive`;
   return timing.stage === "waiting" ? "" : `Accepted at ${timeOfDay(acceptedAt(alert))}, ${clock(timing.waitSeconds)} after the call`;
 }
 
@@ -618,7 +623,7 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
     },
     onSuccess: (_, { kind, alertIds }) => {
       // The whole call is closed (not one team of several): celebrate the fix
-      if (kind === "close" && alertIds.length === call.alerts.length) {
+      if (kind === "close" && alertIds.length === call.alerts.filter(({ timing }) => !timing.closed).length) {
         const who = Array.from(new Set(call.alerts.map(({ alert }) => responder(alert)).filter(Boolean)));
         onClosed({ id: Date.now(), teams: call.alerts.map(({ alert }) => alert.department), who, seconds: call.totalSeconds });
       }
@@ -728,12 +733,12 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
               <TeamIcon department={alert.department} />
               <div className="ms-team-main">
                 <strong>{alert.department.name}</strong>
-                <span className="ms-team-status"><i className={`ms-dot ${timing.stage}`} aria-hidden="true" />{teamStatus(alert, timing)}</span>
+                <span className="ms-team-status"><i className={`ms-dot ${timing.closed ? "closed" : timing.stage}`} aria-hidden="true" />{teamStatus(alert, timing)}</span>
                 {teamTimes(alert, timing) && <span className="ms-team-times">{teamTimes(alert, timing)}</span>}
               </div>
               <div className="ms-team-side">
-                <MiniTrack stage={timing.stage} />
-                {!pending && (timing.stage === "waiting" ? (
+                <MiniTrack stage={timing.stage} closed={timing.closed} />
+                {!pending && !timing.closed && (timing.stage === "waiting" ? (
                   <button type="button" className="ms-btn cancel" disabled={disabled} onClick={() => setPending({ kind: "cancel", alertIds: [alert.id], label: `Cancel the ${alert.department.name} call?` })}>Cancel</button>
                 ) : (
                   <button type="button" className="ms-btn secondary" disabled={disabled} onClick={() => setPending({ kind: "close", alertIds: [alert.id], label: `Close ${alert.department.name}? Only if their part is fixed.` })}>Close</button>

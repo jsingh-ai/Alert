@@ -91,6 +91,39 @@ export async function reportRoutes(app: FastifyInstance) {
       return reply.code(413).send({ success: false, error: `Report result is too large. Narrow the filters or date range below ${MAX_REPORT_ALERTS_LOADED} alerts.` });
     }
 
+    // Multi-team jobs: how long the whole job took, and how long each team took to arrive
+    // (arrival = when the operator closed that team's part at the machine, from the moment of the call).
+    const jobIds = Array.from(new Set(alerts.map((alert) => alert.commandId).filter((id): id is string => Boolean(id)))).slice(0, 5000);
+    const commands = jobIds.length
+      ? await prisma.andonCommand.findMany({
+          where: { companyId: ctx.companyId, id: { in: jobIds } },
+          include: {
+            machine: { include: { machineGroup: true } },
+            alerts: { include: { department: true, acknowledgedByUser: { select: { displayName: true, username: true } } }, orderBy: { createdAt: "asc" } }
+          },
+          orderBy: { createdAt: "desc" }
+        })
+      : [];
+    const jobs = commands
+      .filter((command) => command.alerts.length > 1)
+      .map((command) => ({
+        id: command.id,
+        label: command.commandLabel,
+        machine: { id: command.machine.id, name: command.machine.name, groupName: command.machine.machineGroup.name },
+        status: command.status,
+        createdAt: command.createdAt,
+        closedAt: command.closedAt,
+        totalSeconds: command.status === "CLOSED" ? secondsBetween(command.createdAt, command.closedAt) : null,
+        teams: command.alerts.map((alert) => ({
+          alertId: alert.id,
+          department: { id: alert.department.id, name: alert.department.name },
+          status: alert.status,
+          responder: alert.acknowledgedByUser ? alert.acknowledgedByUser.displayName || alert.acknowledgedByUser.username : alert.responderNameText,
+          acknowledgeSeconds: secondsBetween(command.createdAt, alert.acknowledgedAt),
+          arriveSeconds: secondsBetween(command.createdAt, alert.arrivedAt ?? alert.resolvedAt)
+        }))
+      }));
+
     const byDepartment = new Map<string, { id: string; name: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
     const byMachine = new Map<string, { id: string; name: string; code: string; groupId: string; groupName: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
     const byMachineGroup = new Map<string, { id: string; name: string; count: number; acknowledgeSeconds: Array<number | null>; clearSeconds: Array<number | null> }>();
@@ -169,6 +202,7 @@ export async function reportRoutes(app: FastifyInstance) {
       success: true,
       data: {
         range: { start, end },
+        jobs,
         totalAlerts: alerts.length,
         openAlerts: open,
         closedAlerts: closed,

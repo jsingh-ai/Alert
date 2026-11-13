@@ -29,6 +29,10 @@ export type AlertTiming = {
   totalSeconds: number;
   late: boolean;
   createdAt: number;
+  /** this team's part is finished (closed) while another team on the same job is still active */
+  closed: boolean;
+  /** seconds from the call to this team arriving (closing their part); null until then */
+  arriveSeconds: number | null;
 };
 
 export function alertTiming(alert: Alert, now: number): AlertTiming {
@@ -36,11 +40,16 @@ export function alertTiming(alert: Alert, now: number): AlertTiming {
   const stage: CallStage = alert.status === "OPEN" ? "waiting" : "accepted";
   const acceptedAt = stage === "waiting" ? null : ms(alert.acknowledgedAt) ?? ms(alert.arrivedAt) ?? created;
   const seconds = (from: number, to: number) => Math.max(0, Math.floor((to - from) / 1000));
+  const closedAt = alert.status === "RESOLVED" ? ms(alert.resolvedAt) ?? now : null;
+  // Arrival: when the team's part was closed at the machine (older calls may carry an "arrived" time)
+  const arrivedAt = ms(alert.arrivedAt) ?? closedAt;
   const waitSeconds = seconds(created, acceptedAt ?? now);
   return {
     stage,
     waitSeconds,
-    stageSeconds: seconds(acceptedAt ?? created, now),
+    closed: closedAt !== null,
+    arriveSeconds: closedAt !== null && arrivedAt !== null ? seconds(created, arrivedAt) : null,
+    stageSeconds: seconds(acceptedAt ?? created, closedAt ?? now),
     totalSeconds: seconds(created, now),
     late: stage === "waiting" && waitSeconds >= LATE_AFTER_SECONDS,
     createdAt: created

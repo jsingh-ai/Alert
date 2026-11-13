@@ -30,7 +30,17 @@ type ReportRow = {
   clearSeconds?: number | null;
   resolveSeconds?: number | null;
 };
-type Summary = { alerts?: ReportRow[] };
+type Job = {
+  id: string;
+  label: string;
+  machine: { id: string; name: string; groupName: string };
+  status: string;
+  createdAt: string;
+  closedAt?: string | null;
+  totalSeconds: number | null;
+  teams: Array<{ alertId: string; department: { id: string; name: string }; status: string; responder?: string | null; acknowledgeSeconds: number | null; arriveSeconds: number | null }>;
+};
+type Summary = { alerts?: ReportRow[]; jobs?: Job[] };
 type Preset = "today" | "7d" | "30d" | "custom";
 type Dimension = "department" | "machine" | "responder" | "reason";
 type Dept = { id: string; name: string; color?: string | null };
@@ -170,6 +180,7 @@ export function ReportsPage() {
   const [dimension, setDimension] = useState<Dimension>("department");
   const [reason, setReason] = useState("");
   const [showCalls, setShowCalls] = useState(false);
+  const [showJobs, setShowJobs] = useState(true);
 
   const range = useMemo(() => {
     if (preset === "custom") {
@@ -206,6 +217,7 @@ export function ReportsPage() {
     const list = prior.data?.data?.alerts ?? [];
     return reason ? list.filter((r) => (r.issueType?.id ?? "general") === reason) : list;
   }, [prior.data, reason]);
+  const jobs = useMemo(() => (current.data?.data?.jobs ?? []).filter((job) => !reason || job.teams.some((team) => rows.some((r) => r.id === team.alertId))), [current.data, reason, rows]);
   const stats = summarize(rows, now);
   const before = prior.data ? summarize(priorRows, now) : null;
   const heat = useMemo(() => heatOf(rows), [rows]);
@@ -355,6 +367,15 @@ export function ReportsPage() {
         flush
       >
         <Breakdown rows={rows} dimension={dimension} now={now} deptById={deptById} onPick={drill} />
+      </Card>
+
+      <Card
+        title="Multi-team calls"
+        meta={`${jobs.length.toLocaleString()} in this view`}
+        action={<button type="button" className="rp-btn" onClick={() => setShowJobs((v) => !v)} aria-expanded={showJobs}>{showJobs ? "Hide" : "Show"}</button>}
+        flush
+      >
+        {showJobs && <JobsTable jobs={jobs} />}
       </Card>
 
       <Card
@@ -710,6 +731,39 @@ function Breakdown({ rows, dimension, now, deptById, onPick }: { rows: ReportRow
               <td className="num">{dur(item.fix)}</td>
               <td className={`num ${item.late > 0.2 ? "rp-warn" : ""}`}>{pct(item.late)}</td>
               <td className="go">{item.id && <ChevronRightIcon />}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ---------- Multi-team calls ---------- */
+
+function JobsTable({ jobs }: { jobs: Job[] }) {
+  if (!jobs.length) return <p className="rp-more">No calls to more than one team in this view.</p>;
+  return (
+    <div className="rp-table-wrap tall">
+      <table className="rp-table">
+        <thead>
+          <tr><th>When</th><th>Call</th><th>Machine</th><th className="num">Whole job</th><th>Time to arrive, by team</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {jobs.slice(0, 200).map((job) => (
+            <tr key={job.id}>
+              <td className="nowrap">{new Date(job.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+              <td><strong>{job.label}</strong></td>
+              <td><strong>{job.machine.name}</strong><small>{job.machine.groupName}</small></td>
+              <td className="num">{job.status === "CLOSED" ? dur(job.totalSeconds) : "–"}</td>
+              <td>
+                {job.teams.map((team) => (
+                  <div key={team.alertId} className="rp-team-line">
+                    <strong>{team.department.name}</strong> – {team.status === "CANCELLED" ? "cancelled" : team.arriveSeconds !== null ? dur(team.arriveSeconds) : "not yet"}
+                  </div>
+                ))}
+              </td>
+              <td><span className={`rp-status ${job.status.toLowerCase()}`}>{job.status === "CLOSED" ? "Closed" : job.status === "CANCELLED" ? "Cancelled" : "Open"}</span></td>
             </tr>
           ))}
         </tbody>
