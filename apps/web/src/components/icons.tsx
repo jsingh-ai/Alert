@@ -88,6 +88,16 @@ export function AlertTriangleIcon(props: IconProps) {
   );
 }
 
+export function SpeakerIcon(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true" focusable="false">
+      <path d="M11 5 6 9H3v6h3l5 4Z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+    </svg>
+  );
+}
+
 export function BellRingIcon(props: IconProps) {
   return (
     <svg {...base(props)} aria-hidden="true" focusable="false">

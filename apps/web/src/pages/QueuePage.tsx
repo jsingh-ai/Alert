@@ -10,8 +10,9 @@ import { OfflineNotice, SuiteHeader, SuiteMenu, SuiteStatusBar, TeamIcon, connec
 import type { Tone } from "../components/Suite";
 import { useKiosk } from "../lib/kiosk";
 import { usePush } from "../lib/push";
+import { useCallAlarm } from "../lib/callAlarm";
 import type { PushState } from "../lib/push";
-import { BellRingIcon, CheckCircleIcon, CloseIcon, MessageIcon, SendIcon } from "../components/icons";
+import { BellRingIcon, SpeakerIcon, CheckCircleIcon, CloseIcon, MessageIcon, SendIcon } from "../components/icons";
 import "../styles/queue.css";
 
 /*
@@ -108,6 +109,9 @@ export function QueuePage() {
     refetchIntervalInBackground: true
   });
 
+  // Rings while this page is open on an awake phone (works without https; push covers locked phones)
+  const alarm = useCallAlarm(active.data?.data ? active.data.data.filter((alert) => alert.status === "OPEN").map((alert) => alert.id) : null);
+
   const groups = useMemo(() => {
     const names = (session?.machines ?? []).map((m: any) => m.machineGroup?.name).filter((n: any): n is string => Boolean(n));
     return Array.from(new Set(names)).sort(naturalSort.compare);
@@ -196,6 +200,19 @@ export function QueuePage() {
         title={department ? <span className="rq-head-team"><TeamIcon department={department} /><span>{department.name}</span></span> : "All departments"}
         status={status}
       >
+        {alarm.supported && (
+          <button
+            type="button"
+            className={`rq-bell ${alarm.enabled ? "on" : "off"}`}
+            aria-pressed={alarm.enabled}
+            aria-label={alarm.enabled ? "Alarm is on while this page is open. Turn off" : "Turn on the alarm for new calls while this page is open"}
+            title={alarm.enabled ? "Alarm on: new calls ring while this page is open" : "Turn on the alarm for new calls"}
+            onClick={alarm.toggle}
+          >
+            <SpeakerIcon />
+            {!alarm.enabled && <i aria-hidden="true" />}
+          </button>
+        )}
         {!pushPrompt && <PushBell state={push.state} busy={push.busy} onEnable={push.enable} onDisable={push.disable} />}
         {kiosk && <SuiteMenu label="Menu" />}
       </SuiteHeader>
@@ -222,6 +239,17 @@ export function QueuePage() {
             </label>
           )}
         </div>
+      )}
+
+      {alarm.ringing && (
+        <>
+          <div className="rq-flash" aria-hidden="true" />
+          <div className="rq-ring" role="alert">
+            <SpeakerIcon />
+            <strong>New call{department ? ` for ${department.name}` : ""}{alarm.locked && <small> · tap anywhere to turn the sound on</small>}</strong>
+            <button type="button" className="rq-push-on" onClick={alarm.silence}>Silence</button>
+          </div>
+        </>
       )}
 
       {offline && <OfflineNotice lastGood={active.dataUpdatedAt} />}

@@ -234,6 +234,7 @@
 .ms-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.5rem; }
 .ms-dot.waiting { background: var(--pg-wait); }
 .ms-dot.accepted { background: var(--pg-way); }
+.ms-dot.closed { background: var(--pg-text-2); }
 .ms-team-side { display: flex; align-items: center; gap: 1.25rem; }
 .ms-team:first-child { border-top: 0; }
 .ms-mini { display: inline-flex; align-items: center; }

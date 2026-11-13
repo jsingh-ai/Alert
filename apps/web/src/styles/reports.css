@@ -152,6 +152,7 @@
 .rp-table td { height: 52px; padding: 0.5rem 1.25rem; border-bottom: 1px solid var(--pg-line); color: var(--pg-text-2); vertical-align: middle; }
 .rp-table tr:last-child td { border-bottom: 0; }
 .rp-table td strong { display: block; color: var(--pg-text); font-weight: 600; }
+.rp-table td .rp-team-line strong { display: inline; }
 .rp-table td small { display: block; color: var(--pg-muted); font-size: 0.75rem; }
 .rp-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rp-table td.num { color: var(--pg-text); }

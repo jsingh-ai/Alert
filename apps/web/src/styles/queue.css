@@ -23,6 +23,14 @@
 .rq-bell svg { width: 20px; height: 20px; }
 .rq-bell i { position: absolute; top: 9px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--pg-faint); box-shadow: 0 0 0 2px var(--pg-card); }
 .rq-page .rq-bell:focus-visible { outline: 3px solid var(--pg-ring); outline-offset: 2px; }
+/* New-call alarm: the screen flashes (a web page can't use the camera light) and a bar offers Silence */
+.rq-flash { position: fixed; inset: 0; z-index: 50; pointer-events: none; background: var(--pg-wait-text, #d97706); opacity: 0; animation: rq-flash 0.8s steps(1, end) infinite; }
+@keyframes rq-flash { 0%, 100% { opacity: 0; } 50% { opacity: 0.55; } }
+.rq-ring { position: sticky; top: 0.5rem; z-index: 51; display: flex; align-items: center; gap: 0.9rem; padding: 0.7rem 0.85rem 0.7rem 1.1rem; border: 2px solid var(--pg-wait-text, #d97706); border-radius: 14px; background: var(--pg-card); box-shadow: var(--pg-shadow); }
+.rq-ring > svg { flex: none; width: 22px; height: 22px; }
+.rq-ring > strong { flex: 1; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .rq-flash { animation: none; opacity: 0.25; } }
+
 /* First-time prompt: a card with one button */
 .rq-push { display: flex; align-items: center; gap: 0.9rem; padding: 0.85rem 0.85rem 0.85rem 1.1rem; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); box-shadow: var(--pg-shadow); }
 .rq-push > svg { flex: none; width: 22px; height: 22px; color: var(--pg-text-2); }

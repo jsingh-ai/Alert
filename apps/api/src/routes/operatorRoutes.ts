@@ -83,6 +83,16 @@ export async function operatorRoutes(app: FastifyInstance) {
       include: includeAlert(),
       orderBy: { createdAt: "desc" }
     });
-    return { success: true, data: { commands: groupCommands(alerts), alerts: alerts.map(serializeAlert) } };
+    // A multi-team job stays open until every team is closed: keep the teams already closed on screen
+    // (their rows say when they arrived) for as long as another team on the same job is still active.
+    const commandIds = Array.from(new Set(alerts.map((alert) => alert.commandId).filter((id): id is string => Boolean(id))));
+    const finished = commandIds.length
+      ? await prisma.andonAlert.findMany({
+          where: { companyId: ctx.companyId, commandId: { in: commandIds }, status: "RESOLVED" },
+          include: includeAlert(),
+          orderBy: { createdAt: "desc" }
+        })
+      : [];
+    return { success: true, data: { commands: groupCommands([...alerts, ...finished]), alerts: alerts.map(serializeAlert) } };
   });
 }
