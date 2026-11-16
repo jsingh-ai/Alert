@@ -132,14 +132,7 @@ self.addEventListener("push", (event) => {
   }
   const silent = Boolean(data.silent);
   event.waitUntil(
-    (async () => {
-      // A repeat of a call that is still waiting: close the one on screen first, so this is a NEW notification.
-      // Android can treat a replacement as a quiet update and skip the sound and vibration; a new one always alerts.
-      if (data.tag && !silent) {
-        const shown = await self.registration.getNotifications({ tag: data.tag });
-        shown.forEach((notification) => notification.close());
-      }
-      await self.registration.showNotification(data.title || "ProcessGuard", {
+    self.registration.showNotification(data.title || "ProcessGuard", {
       body: data.body || "",
       // One notification per call: a later update (accepted) replaces it instead of stacking
       tag: data.tag || undefined,
@@ -151,8 +144,7 @@ self.addEventListener("push", (event) => {
       icon: "/icons/icon-192.png",
       timestamp: Date.now(),
       data: { url: data.url || "/" }
-      });
-    })()
+    })
   );
 });
 

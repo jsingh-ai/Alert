@@ -177,7 +177,6 @@ const REMIND_FOR_MS = 30 * 60_000;
 export function startCallReminders() {
   if (!loadVapid()) return;
   let running = false;
-  const reminded = new Set<string>();
   const timer = setInterval(() => {
     if (running) return;
     running = true;
@@ -187,15 +186,7 @@ export function startCallReminders() {
         where: { status: "OPEN", createdAt: { gt: new Date(now - REMIND_FOR_MS), lt: new Date(now - REMIND_EVERY_MS + 5_000) } },
         include: { machine: true, department: true, issueType: true }
       });
-      for (const alert of waiting) {
-        // One log line per call (the first reminder), so the log shows reminders are going out without filling up
-        if (!reminded.has(alert.id)) {
-          if (reminded.size > 500) reminded.clear();
-          reminded.add(alert.id);
-          console.log(`ProcessGuard: reminding ${alert.department.name} about ${alert.machine.name} every ${REMIND_EVERY_MS / 1000}s until it is accepted`);
-        }
-        notifyNewCall(alert);
-      }
+      for (const alert of waiting) notifyNewCall(alert);
     })()
       .catch((error) => console.warn("ProcessGuard: call reminders failed:", error?.message ?? error))
       .finally(() => { running = false; });
