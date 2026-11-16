@@ -21,6 +21,7 @@ import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { adminRoutes } from "./routes/adminRoutes.js";
 import { pushRoutes } from "./routes/pushRoutes.js";
 import { externalRoutes } from "./routes/externalRoutes.js";
+import { startCallReminders } from "./services/push.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, bodyLimit: 1_000_000, trustProxy: config.trustProxy });
@@ -145,3 +146,4 @@ process.on("SIGTERM", close);
 
 await app.listen({ host: config.host, port: config.port });
 app.log.info(`ProcessGuard Andon listening at ${config.publicUrl}`);
+startCallReminders();
