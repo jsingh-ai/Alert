@@ -245,6 +245,8 @@ export async function externalRoutes(app: FastifyInstance) {
     }
     if (machine && byMachine.size === 0) return reply.code(404).send({ success: false, error: "No machine with that code or id." });
     const machines = Array.from(byMachine.values()).sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name, undefined, { numeric: true }));
-    return { success: true, data: { from: start, to: end, total, returned: alerts.length, offset, machines } };
+    // Only said when the limit cut the list short, so a missing call is never silent
+    const truncated = total > offset + alerts.length;
+    return { success: true, data: { from: start, to: end, ...(truncated ? { truncated: true } : {}), machines } };
   });
 }
