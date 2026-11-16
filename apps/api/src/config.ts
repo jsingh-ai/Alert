@@ -190,6 +190,13 @@ export const config = {
       5 * 60 * 1000
     ),
 
+  // Read-only API for other systems, protected by one key (`npm run api:key`). Blank = off.
+  // EXTERNAL_API_COMPANY (a company slug) is only needed when the server holds more than one company.
+  externalApi: {
+    key: (process.env.EXTERNAL_API_KEY ?? "").trim(),
+    companySlug: (process.env.EXTERNAL_API_COMPANY ?? "").trim()
+  },
+
   // Call notifications on phones (Web Push). Make the pair once with `npm run push:keys`;
   // leave blank to keep push off. Changing the keys signs every device out of notifications.
   push: {
