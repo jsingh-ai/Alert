@@ -18,6 +18,8 @@ import { sha256 } from "../utils/crypto.js";
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
 const MAX_RANGE_DAYS = 92;
+const HISTORY_DEFAULT = 1000;
+const HISTORY_MAX = 5000;
 const STATUSES = ["OPEN", "ACKNOWLEDGED", "ARRIVED", "RESOLVED", "CANCELLED"] as const;
 
 const keyHash = config.externalApi.key ? Buffer.from(sha256(config.externalApi.key)) : null;
@@ -111,36 +113,47 @@ const NO_COMPANY = "Set EXTERNAL_API_COMPANY to a company slug: this server has 
 export async function externalRoutes(app: FastifyInstance) {
   const limits = { config: { rateLimit: { max: config.rateLimit.pagerMax, timeWindow: config.rateLimit.timeWindow } } };
 
+  /*
+   * Every machine, and for the ones with a call open right now: the team called, its status
+   * (OPEN, or ACKNOWLEDGED once accepted), when it started, and when it was accepted (only then).
+   * Optional: ?machine=<code or id>, ?team=<name>.
+   */
   app.get("/api/external/active", { ...limits, preHandler: authorize }, async (request, reply) => {
     const company = await companyId();
     if (!company) return reply.code(503).send({ success: false, error: NO_COMPANY });
-    // ?machine=<code or id> narrows everything to one machine
-    const machineFilter = cleanString((request.query as Record<string, unknown>).machine);
+    const query = request.query as Record<string, unknown>;
+    const machineFilter = cleanString(query.machine);
     const byMachine = machineFilter ? { OR: [{ id: machineFilter }, { code: machineFilter }] } : {};
-    // ?team=<name> narrows the calls to one team
-    const teamFilter = cleanString((request.query as Record<string, unknown>).team);
+    const teamFilter = cleanString(query.team);
     const teamId = teamFilter ? await teamIdByName(company, teamFilter) : null;
     if (teamFilter && !teamId) return reply.code(404).send({ success: false, error: "No team with that name." });
 
-    const [machines, departments, alerts] = await Promise.all([
+    const [machines, alerts] = await Promise.all([
       prisma.machine.findMany({ where: { companyId: company, active: true, ...byMachine }, include: { machineGroup: true }, orderBy: [{ machineGroup: { name: "asc" } }, { name: "asc" }] }),
-      prisma.department.findMany({ where: { companyId: company, active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
-      loadCalls({ where: { companyId: company, status: { in: [...ACTIVE_ALERT_STATUSES] }, ...(machineFilter ? { machine: byMachine } : {}), ...(teamId ? { departmentId: teamId } : {}) }, orderBy: { createdAt: "asc" }, take: MAX_LIMIT })
+      prisma.andonAlert.findMany({
+        where: { companyId: company, status: { in: [...ACTIVE_ALERT_STATUSES] }, ...(machineFilter ? { machine: byMachine } : {}), ...(teamId ? { departmentId: teamId } : {}) },
+        select: { machineId: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, department: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+        take: MAX_LIMIT
+      })
     ]);
-    const calls = alerts.map(serializeCall);
-    const count = (key: "machine" | "team", id: string) => calls.filter((call) => call[key].id === id).length;
     if (machineFilter && machines.length === 0) return reply.code(404).send({ success: false, error: "No machine with that code or id." });
     return {
       success: true,
       data: {
-        generatedAt: new Date(),
-        machines: machines.map((machine) => ({ id: machine.id, name: machine.name, code: machine.code, group: machine.machineGroup.name,
-          activeCalls: count("machine", machine.id),
-          // Calls come oldest first, so the first one is when this machine's current call started
-          activeSince: calls.find((call) => call.machine.id === machine.id)?.calledAt ?? null
-        })),
-        teams: departments.map((team) => ({ id: team.id, name: team.name, activeCalls: count("team", team.id) })),
-        calls
+        machines: machines.map((machine) => {
+          const calls = alerts.filter((alert) => alert.machineId === machine.id).map((alert) => {
+            const acceptedAt = alert.status === "OPEN" ? null : alert.acknowledgedAt ?? alert.arrivedAt;
+            return {
+              department: alert.department.name,
+              status: alert.status === "OPEN" ? "OPEN" : "ACKNOWLEDGED",
+              activeSince: alert.createdAt,
+              // Left out until someone accepts it
+              ...(acceptedAt ? { acceptedAt } : {})
+            };
+          });
+          return { id: machine.id, name: machine.name, code: machine.code, group: machine.machineGroup.name, activeCalls: calls.length, calls };
+        })
       }
     };
   });
@@ -155,6 +168,13 @@ export async function externalRoutes(app: FastifyInstance) {
     return { success: true, data: serializeCall(alert) };
   });
 
+  /*
+   * Calls made between two times (?from=&to=, default the last 7 days), grouped by machine.
+   * Every machine is listed; one with no calls in the window has callCount 0 and an empty list.
+   * Same fields as /active, with calledAt for when it started, and for closed calls the closedAt time
+   * and secondsToClose (called to closed). Optional: ?machine=<code or id>, ?team=<name>,
+   * ?status=OPEN|ACKNOWLEDGED|CLOSED|CANCELLED, ?limit= (default 1000, up to 5000), ?offset=.
+   */
   app.get("/api/external/calls", { ...limits, preHandler: authorize }, async (request, reply) => {
     const company = await companyId();
     if (!company) return reply.code(503).send({ success: false, error: NO_COMPANY });
@@ -168,27 +188,65 @@ export async function externalRoutes(app: FastifyInstance) {
     if (start > end) return reply.code(400).send({ success: false, error: "from must be before to." });
     if ((end.getTime() - start.getTime()) / 86_400_000 > MAX_RANGE_DAYS) return reply.code(400).send({ success: false, error: `The range can't be longer than ${MAX_RANGE_DAYS} days.` });
 
+    const statusFilter: Record<string, Array<(typeof STATUSES)[number]>> = { OPEN: ["OPEN"], ACKNOWLEDGED: ["ACKNOWLEDGED", "ARRIVED"], CLOSED: ["RESOLVED"], CANCELLED: ["CANCELLED"] };
     const status = cleanString(query.status).toUpperCase();
-    if (status && !(STATUSES as readonly string[]).includes(status)) return reply.code(400).send({ success: false, error: `status must be one of ${STATUSES.join(", ")}.` });
-    const limit = Math.min(MAX_LIMIT, Math.max(1, Number.parseInt(cleanString(query.limit), 10) || DEFAULT_LIMIT));
+    if (status && !statusFilter[status]) return reply.code(400).send({ success: false, error: "status must be one of OPEN, ACKNOWLEDGED, CLOSED, CANCELLED." });
+    const limit = Math.min(HISTORY_MAX, Math.max(1, Number.parseInt(cleanString(query.limit), 10) || HISTORY_DEFAULT));
     const offset = Math.max(0, Number.parseInt(cleanString(query.offset), 10) || 0);
     const teamName = cleanString(query.team);
     const teamId = teamName ? await teamIdByName(company, teamName) : null;
     if (teamName && !teamId) return reply.code(404).send({ success: false, error: "No team with that name." });
-    const departmentId = teamId ?? cleanString(query.departmentId);
-    const machine = cleanString(query.machine) || cleanString(query.machineId);
+    const machine = cleanString(query.machine);
 
     const where = {
       companyId: company,
       createdAt: { gte: start, lte: end },
-      ...(status ? { status: status as (typeof STATUSES)[number] } : {}),
-      ...(departmentId ? { departmentId } : {}),
+      ...(status ? { status: { in: statusFilter[status] } } : {}),
+      ...(teamId ? { departmentId: teamId } : {}),
       ...(machine ? { machine: { OR: [{ id: machine }, { code: machine }] } } : {})
     };
     const [total, alerts] = await Promise.all([
       prisma.andonAlert.count({ where }),
-      loadCalls({ where, orderBy: { createdAt: "desc" }, take: limit, skip: offset })
+      prisma.andonAlert.findMany({
+        where,
+        select: {
+          status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, resolvedAt: true,
+          department: { select: { name: true } },
+          machine: { select: { id: true, name: true, code: true, machineGroup: { select: { name: true } } } }
+        },
+        orderBy: { createdAt: "asc" },
+        take: limit,
+        skip: offset
+      })
     ]);
-    return { success: true, data: { from: start, to: end, total, limit, offset, calls: alerts.map(serializeCall) } };
+
+    const byMachine = new Map<string, { id: string; name: string; code: string; group: string; callCount: number; calls: Array<Record<string, unknown>> }>();
+    for (const alert of alerts) {
+      const entry = byMachine.get(alert.machine.id) ?? { id: alert.machine.id, name: alert.machine.name, code: alert.machine.code, group: alert.machine.machineGroup.name, callCount: 0, calls: [] };
+      const acceptedAt = alert.status === "OPEN" || alert.status === "CANCELLED" ? null : alert.acknowledgedAt ?? alert.arrivedAt;
+      const closed = alert.status === "RESOLVED" && alert.resolvedAt;
+      entry.calls.push({
+        department: alert.department.name,
+        status: alert.status === "RESOLVED" ? "CLOSED" : alert.status === "ARRIVED" ? "ACKNOWLEDGED" : alert.status,
+        calledAt: alert.createdAt,
+        ...(acceptedAt ? { acceptedAt } : {}),
+        ...(closed ? { closedAt: alert.resolvedAt, secondsToClose: seconds(alert.createdAt, alert.resolvedAt) } : {})
+      });
+      entry.callCount += 1;
+      byMachine.set(alert.machine.id, entry);
+    }
+    // Every machine is listed, as in /active: the ones with no calls in this window show callCount 0
+    const everyMachine = await prisma.machine.findMany({
+      where: { companyId: company, active: true, ...(machine ? { OR: [{ id: machine }, { code: machine }] } : {}) },
+      select: { id: true, name: true, code: true, machineGroup: { select: { name: true } } }
+    });
+    for (const m of everyMachine) {
+      if (!byMachine.has(m.id)) byMachine.set(m.id, { id: m.id, name: m.name, code: m.code, group: m.machineGroup.name, callCount: 0, calls: [] });
+    }
+    if (machine && byMachine.size === 0) return reply.code(404).send({ success: false, error: "No machine with that code or id." });
+    const machines = Array.from(byMachine.values()).sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    // Only said when the limit cut the list short, so a missing call is never silent
+    const truncated = total > offset + alerts.length;
+    return { success: true, data: { from: start, to: end, ...(truncated ? { truncated: true } : {}), machines } };
   });
 }
