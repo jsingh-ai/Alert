@@ -170,6 +170,7 @@ export async function externalRoutes(app: FastifyInstance) {
 
   /*
    * Calls made between two times (?from=&to=, default the last 7 days), grouped by machine.
+   * Every machine is listed; one with no calls in the window has callCount 0 and an empty list.
    * Same fields as /active, with calledAt for when it started, and for closed calls the closedAt time
    * and secondsToClose (called to closed). Optional: ?machine=<code or id>, ?team=<name>,
    * ?status=OPEN|ACKNOWLEDGED|CLOSED|CANCELLED, ?limit= (default 1000, up to 5000), ?offset=.
@@ -234,6 +235,15 @@ export async function externalRoutes(app: FastifyInstance) {
       entry.callCount += 1;
       byMachine.set(alert.machine.id, entry);
     }
+    // Every machine is listed, as in /active: the ones with no calls in this window show callCount 0
+    const everyMachine = await prisma.machine.findMany({
+      where: { companyId: company, active: true, ...(machine ? { OR: [{ id: machine }, { code: machine }] } : {}) },
+      select: { id: true, name: true, code: true, machineGroup: { select: { name: true } } }
+    });
+    for (const m of everyMachine) {
+      if (!byMachine.has(m.id)) byMachine.set(m.id, { id: m.id, name: m.name, code: m.code, group: m.machineGroup.name, callCount: 0, calls: [] });
+    }
+    if (machine && byMachine.size === 0) return reply.code(404).send({ success: false, error: "No machine with that code or id." });
     const machines = Array.from(byMachine.values()).sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name, undefined, { numeric: true }));
     return { success: true, data: { from: start, to: end, total, returned: alerts.length, offset, machines } };
   });
