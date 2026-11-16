@@ -43,10 +43,29 @@ function audioCtor(): AudioCtor | undefined {
 function newAudio(): AudioContext | null {
   const Ctor = audioCtor();
   try {
+    // iPhone: play as media, so the ringer / silent switch doesn't mute the alarm (Safari 16.4+)
+    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+    if (session) session.type = "playback";
     return Ctor ? new Ctor() : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * iPhone only unlocks audio if a sound starts inside the tap itself, so play an inaudible one
+ * straight away (before anything is awaited), then resume.
+ */
+function unlock(audio: AudioContext) {
+  try {
+    const source = audio.createBufferSource();
+    source.buffer = audio.createBuffer(1, 1, 22050);
+    source.connect(audio.destination);
+    source.start(0);
+  } catch {
+    // already unlocked, or not allowed yet
+  }
+  return audio.resume();
 }
 
 /** Two short high-low pairs: hard to mistake for a message tone. */
@@ -86,15 +105,16 @@ export function useCallAlarm(waitingIds: string[] | null) {
     if (!enabled) return;
     const arm = () => {
       audio.current ??= newAudio();
-      void audio.current?.resume().then(() => setLocked(audio.current?.state !== "running"));
+      if (!audio.current) return;
+      void unlock(audio.current).then(() => setLocked(audio.current?.state !== "running"), () => setLocked(true));
     };
     // Works straight away if the person has already interacted with the page (e.g. just signed in)
     arm();
-    window.addEventListener("pointerdown", arm);
-    window.addEventListener("keydown", arm);
+    // iPhone counts click / touchend as the tap that unlocks sound (not pointerdown)
+    const taps = ["pointerdown", "touchend", "click", "keydown"] as const;
+    taps.forEach((name) => window.addEventListener(name, arm));
     return () => {
-      window.removeEventListener("pointerdown", arm);
-      window.removeEventListener("keydown", arm);
+      taps.forEach((name) => window.removeEventListener(name, arm));
     };
   }, [enabled]);
 
@@ -121,7 +141,12 @@ export function useCallAlarm(waitingIds: string[] | null) {
     const startedAt = Date.now();
     const ring = () => {
       if (Date.now() - startedAt > MAX_RING_MS) return window.clearInterval(timer);
-      if (audio.current && audio.current.state === "running") beep(audio.current);
+      const sound = audio.current;
+      // iPhone can leave audio "interrupted" (a call, another app): wake it, then play
+      if (sound && sound.state !== "closed") {
+        if (sound.state === "running") beep(sound);
+        else void sound.resume().then(() => sound.state === "running" && beep(sound), () => undefined);
+      }
       try {
         navigator.vibrate?.([300, 120, 300, 120, 300]);
       } catch {
@@ -175,7 +200,11 @@ export function useCallAlarm(waitingIds: string[] | null) {
     }
     // Created inside the tap, which is what lets the browser play sound later
     audio.current ??= newAudio();
-    void audio.current?.resume().then(() => audio.current && beep(audio.current));
+    const sound = audio.current;
+    if (sound) {
+      void unlock(sound).catch(() => undefined);
+      beep(sound); // right inside the tap: what iPhone needs to allow sound afterwards
+    }
     setEnabled(true);
     remember(true);
   }, [enabled]);

@@ -20,6 +20,7 @@ import { reportRoutes } from "./routes/reportRoutes.js";
 import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { adminRoutes } from "./routes/adminRoutes.js";
 import { pushRoutes } from "./routes/pushRoutes.js";
+import { externalRoutes } from "./routes/externalRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, bodyLimit: 1_000_000, trustProxy: config.trustProxy });
@@ -107,6 +108,7 @@ await app.register(reportRoutes);
 await app.register(communicationRoutes);
 await app.register(adminRoutes);
 await app.register(pushRoutes);
+await app.register(externalRoutes);
 
 if (config.serveWeb) {
   const webDist = path.resolve(__dirname, "../../web/dist");

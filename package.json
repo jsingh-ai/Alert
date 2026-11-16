@@ -26,7 +26,8 @@
     "db:seed:sqlite": "node scripts/run-sqlite.mjs tsx prisma/sqlite/seed.ts",
     "setup:sqlite": "npm run db:generate:sqlite && npm run db:push:sqlite && npm run db:seed:sqlite",
     "check": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
-    "push:keys": "node scripts/generate-vapid-keys.mjs"
+    "push:keys": "node scripts/generate-vapid-keys.mjs",
+    "api:key": "node scripts/generate-api-key.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
