@@ -8,8 +8,8 @@ import { sha256 } from "../utils/crypto.js";
 
 /*
  * Read-only data for other systems (dashboards, Power Automate, scripts), protected by one API key.
- *   GET /api/external/active   machines, teams and the calls active right now (?machine=<code or id> for one machine)
- *   GET /api/external/calls    call history (from, to, departmentId, machine, status, limit, offset)
+ *   GET /api/external/active   machines, teams and the calls active right now (?machine=<code or id>, ?team=<name>)
+ *   GET /api/external/calls    call history (from, to, team, machine, status, limit, offset), and /api/external/calls/<id> for one call
  * Send the key as "Authorization: Bearer <key>" or "X-API-Key: <key>". The key lives in .env
  * (EXTERNAL_API_KEY, made with `npm run api:key`); without it these routes answer 503.
  * Nothing here can change data.
@@ -100,6 +100,12 @@ function parseDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+/** A team by name ("Maintenance", any capitalisation): the id, null when there is no such team. Done here so it works on every database. */
+async function teamIdByName(company: string, name: string) {
+  const teams = await prisma.department.findMany({ where: { companyId: company }, select: { id: true, name: true } });
+  return teams.find((team) => team.name.toLowerCase() === name.toLowerCase())?.id ?? null;
+}
+
 const NO_COMPANY = "Set EXTERNAL_API_COMPANY to a company slug: this server has more than one company.";
 
 export async function externalRoutes(app: FastifyInstance) {
@@ -111,11 +117,15 @@ export async function externalRoutes(app: FastifyInstance) {
     // ?machine=<code or id> narrows everything to one machine
     const machineFilter = cleanString((request.query as Record<string, unknown>).machine);
     const byMachine = machineFilter ? { OR: [{ id: machineFilter }, { code: machineFilter }] } : {};
+    // ?team=<name> narrows the calls to one team
+    const teamFilter = cleanString((request.query as Record<string, unknown>).team);
+    const teamId = teamFilter ? await teamIdByName(company, teamFilter) : null;
+    if (teamFilter && !teamId) return reply.code(404).send({ success: false, error: "No team with that name." });
 
     const [machines, departments, alerts] = await Promise.all([
       prisma.machine.findMany({ where: { companyId: company, active: true, ...byMachine }, include: { machineGroup: true }, orderBy: [{ machineGroup: { name: "asc" } }, { name: "asc" }] }),
       prisma.department.findMany({ where: { companyId: company, active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
-      loadCalls({ where: { companyId: company, status: { in: [...ACTIVE_ALERT_STATUSES] }, ...(machineFilter ? { machine: byMachine } : {}) }, orderBy: { createdAt: "asc" }, take: MAX_LIMIT })
+      loadCalls({ where: { companyId: company, status: { in: [...ACTIVE_ALERT_STATUSES] }, ...(machineFilter ? { machine: byMachine } : {}), ...(teamId ? { departmentId: teamId } : {}) }, orderBy: { createdAt: "asc" }, take: MAX_LIMIT })
     ]);
     const calls = alerts.map(serializeCall);
     const count = (key: "machine" | "team", id: string) => calls.filter((call) => call[key].id === id).length;
@@ -135,6 +145,16 @@ export async function externalRoutes(app: FastifyInstance) {
     };
   });
 
+  // One call by its id (the alertId in the Teams message): start time, who accepted it, when it was resolved
+  app.get("/api/external/calls/:id", { ...limits, preHandler: authorize }, async (request, reply) => {
+    const company = await companyId();
+    if (!company) return reply.code(503).send({ success: false, error: NO_COMPANY });
+    const id = cleanString((request.params as { id?: string }).id);
+    const [alert] = id ? await loadCalls({ where: { id, companyId: company }, orderBy: { createdAt: "desc" }, take: 1 }) : [];
+    if (!alert) return reply.code(404).send({ success: false, error: "No call with that id." });
+    return { success: true, data: serializeCall(alert) };
+  });
+
   app.get("/api/external/calls", { ...limits, preHandler: authorize }, async (request, reply) => {
     const company = await companyId();
     if (!company) return reply.code(503).send({ success: false, error: NO_COMPANY });
@@ -152,7 +172,10 @@ export async function externalRoutes(app: FastifyInstance) {
     if (status && !(STATUSES as readonly string[]).includes(status)) return reply.code(400).send({ success: false, error: `status must be one of ${STATUSES.join(", ")}.` });
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number.parseInt(cleanString(query.limit), 10) || DEFAULT_LIMIT));
     const offset = Math.max(0, Number.parseInt(cleanString(query.offset), 10) || 0);
-    const departmentId = cleanString(query.departmentId);
+    const teamName = cleanString(query.team);
+    const teamId = teamName ? await teamIdByName(company, teamName) : null;
+    if (teamName && !teamId) return reply.code(404).send({ success: false, error: "No team with that name." });
+    const departmentId = teamId ?? cleanString(query.departmentId);
     const machine = cleanString(query.machine) || cleanString(query.machineId);
 
     const where = {
