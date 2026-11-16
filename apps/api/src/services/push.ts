@@ -171,8 +171,8 @@ export function notifyNewCall(alert: AlertLike) {
  * is still waiting, the same notification is sent again every REMIND_EVERY_MS (it replaces the one on
  * screen and alerts again), until someone accepts it or REMIND_FOR_MS has passed.
  */
-const REMIND_EVERY_MS = 30_000;
-const REMIND_FOR_MS = 15 * 60_000;
+const REMIND_EVERY_MS = 15_000;
+const REMIND_FOR_MS = 30 * 60_000;
 
 export function startCallReminders() {
   if (!loadVapid()) return;
@@ -197,9 +197,21 @@ export function startCallReminders() {
 /** Someone took the call: tell the rest of the team quietly, replacing the call notification. */
 export function notifyAccepted(alert: AlertLike, responderName: string, acceptedByUserId: string | null) {
   later(async () => {
-    const userIds = (await responders(alert.companyId, alert.departmentId, alert.machine)).filter((id) => id !== acceptedByUserId);
-    await sendToUsers(alert.companyId, userIds, {
-      title: `${alert.machine.name}: ${responderName} accepted`,
+    const everyone = await responders(alert.companyId, alert.departmentId, alert.machine);
+    const body = `${alert.department.name}${alert.issueType?.name ? ` · ${alert.issueType.name}` : ""}`;
+    // The person who accepted gets one too: it replaces their own call notification, so it stops ringing there
+    const mine = everyone.filter((id) => id === acceptedByUserId);
+    const team = everyone.filter((id) => id !== acceptedByUserId);
+    await sendToUsers(alert.companyId, team, { title: `${alert.machine.name}: ${responderName} accepted`, body, tag: callTag(alert.id), url: QUEUE_URL, silent: true });
+    await sendToUsers(alert.companyId, mine, { title: `You accepted ${alert.machine.name}`, body, tag: callTag(alert.id), url: QUEUE_URL, silent: true });
+  });
+}
+
+/** The operator cancelled a call nobody had taken: replace the ringing notification so it stops. */
+export function notifyCancelled(alert: AlertLike) {
+  later(async () => {
+    await sendToUsers(alert.companyId, await responders(alert.companyId, alert.departmentId, alert.machine), {
+      title: `${alert.machine.name}: call cancelled`,
       body: `${alert.department.name}${alert.issueType?.name ? ` · ${alert.issueType.name}` : ""}`,
       tag: callTag(alert.id),
       url: QUEUE_URL,

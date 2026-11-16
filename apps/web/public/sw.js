@@ -138,6 +138,8 @@ self.addEventListener("push", (event) => {
       tag: data.tag || undefined,
       renotify: Boolean(data.tag) && !silent,
       silent,
+      // Stays on screen until it's tapped or replaced (desktop and some phones; Android keeps it in the shade anyway)
+      requireInteraction: !silent,
       vibrate: silent ? undefined : [600, 200, 600, 200, 600, 200, 600],
       icon: "/icons/icon-192.png",
       timestamp: Date.now(),
