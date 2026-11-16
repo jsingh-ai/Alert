@@ -166,6 +166,34 @@ export function notifyNewCall(alert: AlertLike) {
   });
 }
 
+/*
+ * A phone alerts once per push: the sound and vibration don't repeat by themselves. So while a call
+ * is still waiting, the same notification is sent again every REMIND_EVERY_MS (it replaces the one on
+ * screen and alerts again), until someone accepts it or REMIND_FOR_MS has passed.
+ */
+const REMIND_EVERY_MS = 30_000;
+const REMIND_FOR_MS = 15 * 60_000;
+
+export function startCallReminders() {
+  if (!loadVapid()) return;
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    (async () => {
+      const now = Date.now();
+      const waiting = await prisma.andonAlert.findMany({
+        where: { status: "OPEN", createdAt: { gt: new Date(now - REMIND_FOR_MS), lt: new Date(now - REMIND_EVERY_MS + 5_000) } },
+        include: { machine: true, department: true, issueType: true }
+      });
+      for (const alert of waiting) notifyNewCall(alert);
+    })()
+      .catch((error) => console.warn("ProcessGuard: call reminders failed:", error?.message ?? error))
+      .finally(() => { running = false; });
+  }, REMIND_EVERY_MS);
+  timer.unref();
+}
+
 /** Someone took the call: tell the rest of the team quietly, replacing the call notification. */
 export function notifyAccepted(alert: AlertLike, responderName: string, acceptedByUserId: string | null) {
   later(async () => {

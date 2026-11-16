@@ -138,7 +138,7 @@ self.addEventListener("push", (event) => {
       tag: data.tag || undefined,
       renotify: Boolean(data.tag) && !silent,
       silent,
-      vibrate: silent ? undefined : [200, 100, 200, 100, 200],
+      vibrate: silent ? undefined : [600, 200, 600, 200, 600, 200, 600],
       icon: "/icons/icon-192.png",
       timestamp: Date.now(),
       data: { url: data.url || "/" }
