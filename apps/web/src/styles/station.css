@@ -571,3 +571,27 @@
 @media (max-width: 640px) and (prefers-reduced-motion: reduce) {
   .ms-thread.inline { animation: none; }
 }
+
+/* Maintenance: which team is needed. A few seconds to choose; the bar is the clock, and nothing chosen asks for both */
+.ms-need { cursor: default; }
+.ms-need-card { position: relative; display: grid; gap: 0.85rem; width: min(520px, 100%); padding: 1.75rem 1.75rem 2.4rem; border-radius: 24px; background: var(--pg-card); color: var(--pg-text); text-align: center; box-shadow: 0 40px 90px -24px rgba(7, 11, 26, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06); animation: msPopIn 0.45s cubic-bezier(0.2, 1.25, 0.4, 1); }
+.ms-need.leaving .ms-need-card { animation: msPopOut 0.36s ease forwards; }
+.ms-need-card h2 { margin: 0; font-size: 1.75rem; font-weight: 750; letter-spacing: -0.02em; line-height: 1.1; }
+.ms-need-card > p { margin: 0; font-size: 1.0625rem; color: var(--pg-text-2); }
+.ms-need-card > small { font-size: 0.9375rem; font-weight: 600; color: var(--pg-muted); font-variant-numeric: tabular-nums; }
+.ms-need-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; margin-top: 0.4rem; }
+.ms-need-choices button { min-height: 68px; border: 1px solid var(--pg-line); border-radius: 14px; background: var(--pg-card); color: inherit; font: inherit; font-size: 1.125rem; font-weight: 700; cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+.ms-need-choices button:hover:not(:disabled) { border-color: var(--pg-text); }
+.ms-need-choices button.on { border-color: var(--pg-text); background: var(--pg-text); color: var(--pg-card); }
+.ms-need-choices button:disabled { cursor: default; }
+@media (max-width: 520px) { .ms-need-choices { grid-template-columns: 1fr; } .ms-need-card { padding: 1.5rem 1.25rem 2.25rem; } }
+@media (prefers-reduced-motion: reduce) { .ms-need-card { animation: none !important; } }
+
+/* Closing a call that needs a description of the issue */
+.ms-confirm.has-note { display: grid; justify-content: stretch; }
+.ms-confirm-note { display: grid; gap: 0.35rem; }
+.ms-confirm-note span { font-size: 0.875rem; font-weight: 650; }
+.ms-confirm-note em { font-style: normal; font-weight: 600; color: var(--pg-muted); }
+.ms-confirm-note textarea { width: 100%; resize: vertical; min-height: 4.5rem; padding: 0.6rem 0.75rem; border: 1px solid var(--pg-line); border-radius: 10px; background: var(--pg-card); color: inherit; font: inherit; }
+.ms-confirm-note textarea:focus-visible { outline: 2px solid var(--pg-text); outline-offset: 1px; }
+.ms-confirm.has-note > div { justify-content: flex-end; }

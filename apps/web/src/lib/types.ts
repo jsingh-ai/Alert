@@ -19,7 +19,7 @@ export type Alert = {
   commandId?: string | null;
   commandLabel: string;
   machine: { id: string; name: string; code: string; group?: string };
-  department: { id: string; name: string; color: string };
+  department: { id: string; name: string; color: string; requireResolveNote?: boolean };
   issueType?: { id: string; name: string } | null;
   issueText: string;
   status: AlertStatus;

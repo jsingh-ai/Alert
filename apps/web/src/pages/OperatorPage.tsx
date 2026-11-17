@@ -117,6 +117,8 @@ export function OperatorPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
   const [celebration, setCelebration] = useState<ClosedInfo | null>(null);
+  // Maintenance: just raised a call, and the operator can say which kind of tech is needed
+  const [techPrompt, setTechPrompt] = useState<{ alertId: string } | null>(null);
   // With several calls open, a call's messages show in the side panel so the rows never change height
   const [threadFor, setThreadFor] = useState<string | null>(null);
   const phone = usePhone();
@@ -189,7 +191,11 @@ export function OperatorPage() {
     mutationFn: (payload: Record<string, unknown>) => postJson("/api/commands", { machineId, ...payload }),
     // Returned so the mutation stays pending until the new call is on screen: no idle gap
     // where a second tap could create a duplicate call.
-    onSuccess: () => refresh()
+    onSuccess: (result: any) => {
+      const maintenance = (result?.data?.createdAlerts ?? []).find((created: any) => isMaintenance(created?.department?.name));
+      if (maintenance?.id) setTechPrompt({ alertId: maintenance.id });
+      return refresh();
+    }
   });
 
   function chooseMachine(id: string) {
@@ -315,6 +321,7 @@ export function OperatorPage() {
 
       <SuiteStatusBar connection={connection} lastGood={lastGood} />
 
+      {techPrompt && <TechNeededPrompt key={techPrompt.alertId} alertId={techPrompt.alertId} machineName={machine.name} onDone={() => setTechPrompt(null)} />}
       {celebration && <ClosedCelebration key={celebration.id} info={celebration} machineName={machine.name} onDone={() => setCelebration(null)} />}
 
       {otherOpen && data && (
@@ -606,9 +613,11 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
   onClosed: (info: ClosedInfo) => void;
 }) {
   const [pending, setPending] = useState<Pending>(null);
+  // Departments that need a description before a call can be closed (admin setting)
+  const [description, setDescription] = useState("");
 
   const act = useMutation({
-    mutationFn: async ({ kind, alertIds }: { kind: "close" | "cancel"; alertIds: string[] }) => {
+    mutationFn: async ({ kind, alertIds, note }: { kind: "close" | "cancel"; alertIds: string[]; note?: string }) => {
       if (kind === "cancel") {
         // The screen can be a few seconds behind: never cancel a team that has just responded.
         const fresh = await api<Snapshot>(snapshotPath(machineId));
@@ -617,7 +626,7 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
         if (current.some((alert) => !alert)) throw new Error("This call was already closed.");
         if (current.some((alert) => alert?.status !== "OPEN")) throw new Error("Someone just responded, so this can't be cancelled now.");
       }
-      const results = await Promise.allSettled(alertIds.map((id) => postJson(`/api/alerts/${id}/${kind === "close" ? "resolve" : "cancel"}`, {})));
+      const results = await Promise.allSettled(alertIds.map((id) => postJson(`/api/alerts/${id}/${kind === "close" ? "resolve" : "cancel"}`, kind === "close" && note ? { note } : {})));
       const failed = results.filter((result) => result.status === "rejected").length;
       if (failed) throw new Error(failed === alertIds.length ? "That didn't go through. Try again." : "Part of that didn't go through. Check the teams below.");
     },
@@ -628,8 +637,12 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
         onClosed({ id: Date.now(), teams: call.alerts.map(({ alert }) => alert.department), who, seconds: call.totalSeconds });
       }
     },
-    onSettled: () => {
-      setPending(null);
+    onSettled: (_data, error) => {
+      // A failed close keeps what was typed, so it isn't lost
+      if (!error) {
+        setPending(null);
+        setDescription("");
+      }
       onChange();
     }
   });
@@ -653,12 +666,20 @@ function ActiveCall({ call, compact, inlineThread, threadOpen, onToggleThread, m
     </button>
   ) : null;
 
+  // Closing a team that needs a description: ask what the issue was, and don't let it through empty
+  const needsDescription = Boolean(pending && pending.kind === "close" && call.alerts.some(({ alert }) => pending.alertIds.includes(alert.id) && alert.department.requireResolveNote));
   const confirm = pending && (
-    <div className="ms-confirm" role="alertdialog" aria-label={pending.label}>
+    <div className={`ms-confirm ${needsDescription ? "has-note" : ""}`} role="alertdialog" aria-label={pending.label}>
       <strong>{pending.label}</strong>
+      {needsDescription && (
+        <label className="ms-confirm-note">
+          <span>What was the issue? <em>Required</em></span>
+          <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={500} placeholder="A short description" autoFocus disabled={act.isPending} />
+        </label>
+      )}
       <div>
-        <button type="button" className="ms-btn ghost" autoFocus onClick={() => setPending(null)} disabled={act.isPending}>Back</button>
-        <button type="button" className={`ms-btn ${pending.kind === "close" ? "primary" : "danger"}`} onClick={() => act.mutate(pending)} disabled={act.isPending || disabled}>
+        <button type="button" className="ms-btn ghost" autoFocus={!needsDescription} onClick={() => { setPending(null); setDescription(""); }} disabled={act.isPending}>Back</button>
+        <button type="button" className={`ms-btn ${pending.kind === "close" ? "primary" : "danger"}`} onClick={() => act.mutate({ ...pending, note: needsDescription ? description.trim() : undefined })} disabled={act.isPending || disabled || (needsDescription && !description.trim())}>
           {act.isPending ? "Working…" : pending.kind === "close" ? "Yes, close it" : "Yes, cancel"}
         </button>
       </div>
@@ -861,6 +882,113 @@ function CallThread({ call, disabled, title, onClose, inline = false }: { call: 
       </form>
       {send.isError && <p className="ms-error" role="alert">{errorText(send.error, "Message not sent. Try again.")}</p>}
     </section>
+  );
+}
+
+/* ---------- Maintenance: which team is needed ---------- */
+
+/** Maintenance is the one team that asks this; matched by name so it follows however the department is spelled. */
+const isMaintenance = (name?: string | null) => /maint/i.test(name ?? "");
+
+/** How long the operator has to choose before "both" goes out. */
+const TECH_MS = 5000;
+
+const TECH_CHOICES = [
+  { id: "mechanical", label: "Mechanical", message: "Mechanical help needed" },
+  { id: "electrical", label: "Electrical", message: "Electrical help needed" }
+] as const;
+
+/** What goes out when nobody picks. */
+const TECH_BOTH = { id: "both", label: "Both", message: "Both mechanical and electrical help needed" } as const;
+
+/** The message is how Maintenance knows what to send, so a dismissed popup still sends it, retrying quietly. */
+async function postTechNeeded(alertId: string, message: string, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await postJson(`/api/alerts/${alertId}/notes`, { note: message, clientMessageId: `need:${alertId}` });
+      return true;
+    } catch {
+      if (attempt < attempts) await new Promise((resolve) => window.setTimeout(resolve, 400 * attempt));
+    }
+  }
+  return false;
+}
+
+/**
+ * A few seconds to say which team Maintenance should send. Choosing sends that as a message on
+ * the call (the responders see it with the call, and get a notification); doing nothing sends both.
+ * Tapping anywhere outside closes it and asks for both.
+ */
+function TechNeededPrompt({ alertId, machineName, onDone }: { alertId: string; machineName: string; onDone: () => void }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const [left, setLeft] = useState(Math.ceil(TECH_MS / 1000));
+  const [error, setError] = useState("");
+  const sending = useRef(false);
+  const done = useRef(onDone);
+  done.current = onDone;
+
+  const send = async (choice: (typeof TECH_CHOICES)[number] | typeof TECH_BOTH) => {
+    if (sending.current) return;
+    sending.current = true;
+    setPicked(choice.id);
+    setError("");
+    try {
+      // The same id every time, so a double send (a tap just as the clock runs out) is one message
+      await postJson(`/api/alerts/${alertId}/notes`, { note: choice.message, clientMessageId: `need:${alertId}` });
+      setLeaving(true);
+    } catch {
+      // Stay open so it can be tried again: this message is how Maintenance knows who to send
+      sending.current = false;
+      setPicked(null);
+      setError("Couldn't send that. Tap a choice to try again.");
+    }
+  };
+
+  // No choice in time: both
+  useEffect(() => {
+    if (picked) return;
+    const timer = window.setTimeout(() => void send(TECH_BOTH), TECH_MS);
+    const tick = window.setInterval(() => setLeft((n) => Math.max(0, n - 1)), 1000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(tick);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked]);
+
+  // A moment to see what was sent, then out
+  useEffect(() => {
+    const timer = leaving ? window.setTimeout(() => done.current(), 360) : picked ? window.setTimeout(() => setLeaving(true), 900) : undefined;
+    return () => window.clearTimeout(timer);
+  }, [leaving, picked]);
+
+  // Clicking anywhere else on the page closes the window at once. Nothing was chosen, so it asks for both.
+  const dismiss = () => {
+    if (sending.current) return;
+    sending.current = true;
+    setLeaving(true);
+    void postTechNeeded(alertId, TECH_BOTH.message);
+  };
+
+  const chosen = picked === TECH_BOTH.id ? TECH_BOTH : TECH_CHOICES.find((choice) => choice.id === picked);
+
+  return (
+    <div className={`ms-celebrate ms-need ${leaving ? "leaving" : ""}`} role="dialog" aria-modal="true" aria-label="Which team do you need" onClick={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
+      <div className="ms-need-card" style={{ "--life": `${TECH_MS}ms` } as CSSProperties}>
+        <h2>{chosen ? "Sent" : "Which team do you need?"}</h2>
+        <p>{chosen ? chosen.message : `${machineName} · Maintenance`}</p>
+        <div className="ms-need-choices">
+          {TECH_CHOICES.map((choice) => (
+            <button key={choice.id} type="button" className={choice.id === picked ? "on" : ""} onClick={() => void send(choice)} disabled={Boolean(picked)} aria-pressed={choice.id === picked}>
+              {choice.label}
+            </button>
+          ))}
+        </div>
+        {error ? <p className="ms-error" role="alert">{error}</p> : !picked && <small>No choice asks for both teams in {left}s</small>}
+        {!picked && <i className="ms-celebrate-life" aria-hidden="true" />}
+      </div>
+    </div>
   );
 }
 
