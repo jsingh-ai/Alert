@@ -96,6 +96,12 @@ function serializeCall(alert: CallRow) {
   };
 }
 
+/** Who accepted a call: the signed-in person's name, or the pager's name when it was accepted on a pager. */
+function accepter(alert: { acknowledgedByUser?: { displayName: string; username: string } | null; responderNameText?: string | null }) {
+  return alert.acknowledgedByUser ? alert.acknowledgedByUser.displayName || alert.acknowledgedByUser.username : alert.responderNameText || null;
+}
+const ACCEPTER_SELECT = { select: { displayName: true, username: true } } as const;
+
 /** Every time this API returns or accepts is in the company's time zone (REPORT_TIME_ZONE, Central by default). */
 const ZONE = config.reportTimeZone;
 const at = (date: Date | null | undefined) => (date ? formatInTimeZone(date, ZONE) : null);
@@ -117,7 +123,8 @@ export async function externalRoutes(app: FastifyInstance) {
 
   /*
    * Every machine, and for the ones with a call open right now: the team called, its status
-   * (OPEN, or ACKNOWLEDGED once accepted), when it started, and when it was accepted (only then).
+   * (OPEN, or ACKNOWLEDGED once accepted), when it started, and, only once accepted, when and by whom.
+   * Each call has its own id, so a poller can tell a new call from one it has already seen.
    * Optional: ?machine=<code or id>, ?team=<name>.
    */
   app.get("/api/external/active", { ...limits, preHandler: authorize }, async (request, reply) => {
@@ -134,7 +141,7 @@ export async function externalRoutes(app: FastifyInstance) {
       prisma.machine.findMany({ where: { companyId: company, active: true, ...byMachine }, include: { machineGroup: true }, orderBy: [{ machineGroup: { name: "asc" } }, { name: "asc" }] }),
       prisma.andonAlert.findMany({
         where: { companyId: company, status: { in: [...ACTIVE_ALERT_STATUSES] }, ...(machineFilter ? { machine: byMachine } : {}), ...(teamId ? { departmentId: teamId } : {}) },
-        select: { machineId: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, department: { select: { name: true } } },
+        select: { id: true, machineId: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, responderNameText: true, acknowledgedByUser: ACCEPTER_SELECT, department: { select: { name: true } } },
         orderBy: { createdAt: "asc" },
         take: MAX_LIMIT
       })
@@ -146,12 +153,16 @@ export async function externalRoutes(app: FastifyInstance) {
         machines: machines.map((machine) => {
           const calls = alerts.filter((alert) => alert.machineId === machine.id).map((alert) => {
             const acceptedAt = alert.status === "OPEN" ? null : alert.acknowledgedAt ?? alert.arrivedAt;
+            const responder = acceptedAt ? accepter(alert) : null;
             return {
+              // The call's own id: the same call keeps the same id on every poll
+              id: alert.id,
               department: alert.department.name,
               status: alert.status === "OPEN" ? "OPEN" : "ACKNOWLEDGED",
               activeSince: at(alert.createdAt),
               // Left out until someone accepts it
-              ...(acceptedAt ? { acceptedAt: at(acceptedAt) } : {})
+              ...(acceptedAt ? { acceptedAt: at(acceptedAt) } : {}),
+              ...(responder ? { responder } : {})
             };
           });
           return { id: machine.id, name: machine.name, code: machine.code, group: machine.machineGroup.name, activeCalls: calls.length, calls };
@@ -212,7 +223,8 @@ export async function externalRoutes(app: FastifyInstance) {
       prisma.andonAlert.findMany({
         where,
         select: {
-          status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, resolvedAt: true,
+          id: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, resolvedAt: true, responderNameText: true,
+          acknowledgedByUser: ACCEPTER_SELECT,
           department: { select: { name: true } },
           machine: { select: { id: true, name: true, code: true, machineGroup: { select: { name: true } } } }
         },
@@ -227,11 +239,14 @@ export async function externalRoutes(app: FastifyInstance) {
       const entry = byMachine.get(alert.machine.id) ?? { id: alert.machine.id, name: alert.machine.name, code: alert.machine.code, group: alert.machine.machineGroup.name, callCount: 0, calls: [] };
       const acceptedAt = alert.status === "OPEN" || alert.status === "CANCELLED" ? null : alert.acknowledgedAt ?? alert.arrivedAt;
       const closed = alert.status === "RESOLVED" && alert.resolvedAt;
+      const responder = acceptedAt ? accepter(alert) : null;
       entry.calls.push({
+        id: alert.id,
         department: alert.department.name,
         status: alert.status === "RESOLVED" ? "CLOSED" : alert.status === "ARRIVED" ? "ACKNOWLEDGED" : alert.status,
         calledAt: at(alert.createdAt),
         ...(acceptedAt ? { acceptedAt: at(acceptedAt) } : {}),
+        ...(responder ? { responder } : {}),
         ...(closed ? { closedAt: at(alert.resolvedAt), secondsToClose: seconds(alert.createdAt, alert.resolvedAt) } : {})
       });
       entry.callCount += 1;
