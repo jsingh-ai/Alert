@@ -290,7 +290,18 @@ type Draft = {
   departmentIds: Set<string>;
   machineGroupIds: Set<string>;
   machineIds: Set<string>;
+  /** Responder: seconds between reminder notifications while a call waits (0 = none). */
+  reminderSeconds: number;
 };
+
+/** What a responder can pick for how often a waiting call re-notifies them. */
+const REMINDER_CHOICES: Array<{ seconds: number; label: string }> = [
+  { seconds: 15, label: "Every 15 seconds" },
+  { seconds: 30, label: "Every 30 seconds" },
+  { seconds: 60, label: "Every minute" },
+  { seconds: 120, label: "Every 2 minutes" },
+  { seconds: 300, label: "Every 5 minutes" }
+];
 
 /** Access set up before these rules, which the editor can't show as it is (saving replaces it with what's shown). */
 function legacyAccess(user: any) {
@@ -319,7 +330,8 @@ function draftOf(user: any): Draft {
     machineId: access.machineIds.length === 1 ? access.machineIds[0] : "",
     departmentIds: new Set(access.departmentIds),
     machineGroupIds: new Set(access.machineGroupIds),
-    machineIds: new Set(access.machineIds)
+    machineIds: new Set(access.machineIds),
+    reminderSeconds: typeof user?.reminderSeconds === "number" ? user.reminderSeconds : 60
   };
 }
 
@@ -368,7 +380,11 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
   const blocker = basicsMissing || missing;
 
   const save = useSave(async () => {
-    const body = { displayName: draft.displayName.trim(), username: draft.username.trim(), role: draft.role, access, ...(draft.password ? { password: draft.password } : {}) };
+    const body = {
+      displayName: draft.displayName.trim(), username: draft.username.trim(), role: draft.role, access,
+      ...(draft.role === "RESPONDER" && !user?.reminderFixed ? { reminderSeconds: draft.reminderSeconds } : {}),
+      ...(draft.password ? { password: draft.password } : {})
+    };
     const result = isNew ? await postJson<any>("/api/admin/users", body) : await patchJson<any>(`/api/admin/users/${user.id}`, body);
     return result;
   }, [["admin-user-channel-memberships"]]);
@@ -422,6 +438,21 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
           </fieldset>
         )}
         {draft.role === "ADMIN" && <p className="cfg-note">Admins see and manage everything, so there's nothing to limit.</p>}
+
+        {draft.role === "RESPONDER" && (
+          <fieldset className="cfg-fieldset">
+            <legend>Call reminders</legend>
+            {user?.reminderFixed ? (
+              <p className="cfg-note">This is a shared quick-login account, so it always reminds every minute.</p>
+            ) : (
+              <Field label="Re-notify while a call is waiting" hint="Their phone alerts again at this pace until someone accepts the call, for up to 30 minutes.">
+                <select className="cfg-input" value={draft.reminderSeconds} onChange={(event) => set({ reminderSeconds: Number(event.target.value) })} aria-label="Reminder time">
+                  {REMINDER_CHOICES.map((choice) => <option key={choice.seconds} value={choice.seconds}>{choice.label}</option>)}
+                </select>
+              </Field>
+            )}
+          </fieldset>
+        )}
 
         <div className="cfg-form-foot">
           {blocker ? <span className="cfg-missing">{blocker}</span> : <Problem error={save.error} />}

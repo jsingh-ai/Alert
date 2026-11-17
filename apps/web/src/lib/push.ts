@@ -65,6 +65,14 @@ export function usePush(userId: string) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const publicKey = useRef<string | null>(null);
+  // Counts each time the app comes back to the front, so the device is re-checked with the server then:
+  // a phone idle for a long time may have had its notification registration rotated or dropped.
+  const [resumed, setResumed] = useState(0);
+  useEffect(() => {
+    const onResume = () => document.visibilityState === "visible" && setResumed((count) => count + 1);
+    document.addEventListener("visibilitychange", onResume);
+    return () => document.removeEventListener("visibilitychange", onResume);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -97,7 +105,7 @@ export function usePush(userId: string) {
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [userId, resumed]);
 
   const enable = useCallback(async () => {
     setError("");
@@ -122,26 +130,7 @@ export function usePush(userId: string) {
     }
   }, [userId]);
 
-  const disable = useCallback(async () => {
-    setError("");
-    setBusy(true);
-    try {
-      const registration = await worker();
-      const subscription = await registration?.pushManager.getSubscription();
-      if (subscription) {
-        await postJson("/api/push/unsubscribe", { endpoint: subscription.endpoint }).catch(() => undefined);
-        await subscription.unsubscribe();
-      }
-      setOwner(null);
-      setState("off");
-    } catch {
-      setError("Couldn't turn off notifications. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  return { state, busy, error, enable, disable };
+  return { state, busy, error, enable };
 }
 
 /**
