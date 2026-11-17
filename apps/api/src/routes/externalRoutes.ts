@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { alertCommandLabel } from "../services/alertService.js";
 import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
 import { sha256 } from "../utils/crypto.js";
+import { formatInTimeZone, parseZonedInput } from "../utils/time.js";
 
 /*
  * Read-only data for other systems (dashboards, Power Automate, scripts), protected by one API key.
@@ -81,25 +82,32 @@ function serializeCall(alert: CallRow) {
     issue: alert.issueType?.name ?? null,
     message: alert.displayMessage ?? alert.operatorNote ?? null,
     responder: alert.acknowledgedByUser ? alert.acknowledgedByUser.displayName || alert.acknowledgedByUser.username : alert.responderNameText ?? null,
-    calledAt: alert.createdAt,
-    acceptedAt: alert.acknowledgedAt,
-    arrivedAt: alert.arrivedAt ?? alert.resolvedAt,
-    closedAt: alert.resolvedAt,
-    cancelledAt: alert.cancelledAt,
+    calledAt: at(alert.createdAt),
+    acceptedAt: at(alert.acknowledgedAt),
+    arrivedAt: at(alert.arrivedAt ?? alert.resolvedAt),
+    closedAt: at(alert.resolvedAt),
+    cancelledAt: at(alert.cancelledAt),
     secondsToAccept: seconds(alert.createdAt, alert.acknowledgedAt),
     secondsToArrive: seconds(alert.createdAt, alert.arrivedAt ?? alert.resolvedAt),
     // A call sent to several teams is one job: the same job id on each team's row
     job: command
-      ? { id: command.id, status: command.status, calledAt: command.createdAt, closedAt: command.closedAt, totalSeconds: command.status === "CLOSED" ? seconds(command.createdAt, command.closedAt) : null }
+      ? { id: command.id, status: command.status, calledAt: at(command.createdAt), closedAt: at(command.closedAt), totalSeconds: command.status === "CLOSED" ? seconds(command.createdAt, command.closedAt) : null }
       : null
   };
 }
 
-function parseDate(value: unknown) {
-  const text = cleanString(value);
-  if (!text) return null;
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+/** Who accepted a call: the signed-in person's name, or the pager's name when it was accepted on a pager. */
+function accepter(alert: { acknowledgedByUser?: { displayName: string; username: string } | null; responderNameText?: string | null }) {
+  return alert.acknowledgedByUser ? alert.acknowledgedByUser.displayName || alert.acknowledgedByUser.username : alert.responderNameText || null;
+}
+const ACCEPTER_SELECT = { select: { displayName: true, username: true } } as const;
+
+/** Every time this API returns or accepts is in the company's time zone (REPORT_TIME_ZONE, Central by default). */
+const ZONE = config.reportTimeZone;
+const at = (date: Date | null | undefined) => (date ? formatInTimeZone(date, ZONE) : null);
+
+function parseDate(value: unknown, boundary: "start" | "end") {
+  return parseZonedInput(cleanString(value), ZONE, boundary);
 }
 
 /** A team by name ("Maintenance", any capitalisation): the id, null when there is no such team. Done here so it works on every database. */
@@ -115,7 +123,8 @@ export async function externalRoutes(app: FastifyInstance) {
 
   /*
    * Every machine, and for the ones with a call open right now: the team called, its status
-   * (OPEN, or ACKNOWLEDGED once accepted), when it started, and when it was accepted (only then).
+   * (OPEN, or ACKNOWLEDGED once accepted), when it started, and, only once accepted, when and by whom.
+   * Each call has its own id, so a poller can tell a new call from one it has already seen.
    * Optional: ?machine=<code or id>, ?team=<name>.
    */
   app.get("/api/external/active", { ...limits, preHandler: authorize }, async (request, reply) => {
@@ -132,7 +141,7 @@ export async function externalRoutes(app: FastifyInstance) {
       prisma.machine.findMany({ where: { companyId: company, active: true, ...byMachine }, include: { machineGroup: true }, orderBy: [{ machineGroup: { name: "asc" } }, { name: "asc" }] }),
       prisma.andonAlert.findMany({
         where: { companyId: company, status: { in: [...ACTIVE_ALERT_STATUSES] }, ...(machineFilter ? { machine: byMachine } : {}), ...(teamId ? { departmentId: teamId } : {}) },
-        select: { machineId: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, department: { select: { name: true } } },
+        select: { id: true, machineId: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, responderNameText: true, acknowledgedByUser: ACCEPTER_SELECT, department: { select: { name: true } } },
         orderBy: { createdAt: "asc" },
         take: MAX_LIMIT
       })
@@ -144,12 +153,16 @@ export async function externalRoutes(app: FastifyInstance) {
         machines: machines.map((machine) => {
           const calls = alerts.filter((alert) => alert.machineId === machine.id).map((alert) => {
             const acceptedAt = alert.status === "OPEN" ? null : alert.acknowledgedAt ?? alert.arrivedAt;
+            const responder = acceptedAt ? accepter(alert) : null;
             return {
+              // The call's own id: the same call keeps the same id on every poll
+              id: alert.id,
               department: alert.department.name,
               status: alert.status === "OPEN" ? "OPEN" : "ACKNOWLEDGED",
-              activeSince: alert.createdAt,
+              activeSince: at(alert.createdAt),
               // Left out until someone accepts it
-              ...(acceptedAt ? { acceptedAt } : {})
+              ...(acceptedAt ? { acceptedAt: at(acceptedAt) } : {}),
+              ...(responder ? { responder } : {})
             };
           });
           return { id: machine.id, name: machine.name, code: machine.code, group: machine.machineGroup.name, activeCalls: calls.length, calls };
@@ -180,8 +193,8 @@ export async function externalRoutes(app: FastifyInstance) {
     if (!company) return reply.code(503).send({ success: false, error: NO_COMPANY });
 
     const query = request.query as Record<string, unknown>;
-    const to = parseDate(query.to);
-    const from = parseDate(query.from);
+    const to = parseDate(query.to, "end");
+    const from = parseDate(query.from, "start");
     if (to === undefined || from === undefined) return reply.code(400).send({ success: false, error: "from and to must be dates, e.g. 2026-11-01 or 2026-11-01T08:00:00Z." });
     const end = to ?? new Date();
     const start = from ?? new Date(end.getTime() - 7 * 86_400_000);
@@ -210,7 +223,8 @@ export async function externalRoutes(app: FastifyInstance) {
       prisma.andonAlert.findMany({
         where,
         select: {
-          status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, resolvedAt: true,
+          id: true, status: true, createdAt: true, acknowledgedAt: true, arrivedAt: true, resolvedAt: true, responderNameText: true,
+          acknowledgedByUser: ACCEPTER_SELECT,
           department: { select: { name: true } },
           machine: { select: { id: true, name: true, code: true, machineGroup: { select: { name: true } } } }
         },
@@ -225,12 +239,15 @@ export async function externalRoutes(app: FastifyInstance) {
       const entry = byMachine.get(alert.machine.id) ?? { id: alert.machine.id, name: alert.machine.name, code: alert.machine.code, group: alert.machine.machineGroup.name, callCount: 0, calls: [] };
       const acceptedAt = alert.status === "OPEN" || alert.status === "CANCELLED" ? null : alert.acknowledgedAt ?? alert.arrivedAt;
       const closed = alert.status === "RESOLVED" && alert.resolvedAt;
+      const responder = acceptedAt ? accepter(alert) : null;
       entry.calls.push({
+        id: alert.id,
         department: alert.department.name,
         status: alert.status === "RESOLVED" ? "CLOSED" : alert.status === "ARRIVED" ? "ACKNOWLEDGED" : alert.status,
-        calledAt: alert.createdAt,
-        ...(acceptedAt ? { acceptedAt } : {}),
-        ...(closed ? { closedAt: alert.resolvedAt, secondsToClose: seconds(alert.createdAt, alert.resolvedAt) } : {})
+        calledAt: at(alert.createdAt),
+        ...(acceptedAt ? { acceptedAt: at(acceptedAt) } : {}),
+        ...(responder ? { responder } : {}),
+        ...(closed ? { closedAt: at(alert.resolvedAt), secondsToClose: seconds(alert.createdAt, alert.resolvedAt) } : {})
       });
       entry.callCount += 1;
       byMachine.set(alert.machine.id, entry);
@@ -247,6 +264,6 @@ export async function externalRoutes(app: FastifyInstance) {
     const machines = Array.from(byMachine.values()).sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name, undefined, { numeric: true }));
     // Only said when the limit cut the list short, so a missing call is never silent
     const truncated = total > offset + alerts.length;
-    return { success: true, data: { from: start, to: end, ...(truncated ? { truncated: true } : {}), machines } };
+    return { success: true, data: { from: at(start), to: at(end), ...(truncated ? { truncated: true } : {}), machines } };
   });
 }
