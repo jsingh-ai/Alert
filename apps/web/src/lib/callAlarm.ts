@@ -1,37 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /*
- * In-app call alarm: while the Team Calls page is open on an awake phone, a NEW waiting call
- * rings (two-tone beep), vibrates and flashes the screen, repeating until someone accepts it,
- * it's cancelled, or this person taps Silence. Works on plain http, because it needs no service worker.
+ * In-app call alarm: while the Team Calls page is open on an awake phone, a waiting call
+ * rings (two-tone beep), vibrates and flashes the screen, repeating until someone accepts it
+ * or it's cancelled. It can't be switched off or silenced from the app: calls must be answered.
+ * Works on plain http, because it needs no service worker.
  *
  * It can't wake a locked phone or a closed browser: that is what push notifications (public/sw.js,
  * https only) are for. While this is on, the screen is kept awake so the phone stays "awake".
  *
  * Limits of the web: no camera-LED flash (the screen flashes instead), and iPhone Safari has no vibration.
- * Browsers only allow sound after a tap, so the person turns it on once with the speaker button.
+ * Browsers only allow sound after a tap, so the first tap anywhere on the page arms it.
  */
-const STORE_KEY = "pg_alarm";
 const REPEAT_MS = 3000;
-/** Stop repeating after this long, so a phone left on a desk doesn't ring forever. */
-const MAX_RING_MS = 5 * 60_000;
-
-function stored() {
-  try {
-    return localStorage.getItem(STORE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function remember(on: boolean) {
-  try {
-    if (on) localStorage.setItem(STORE_KEY, "1");
-    else localStorage.removeItem(STORE_KEY);
-  } catch {
-    // private mode: it just won't be remembered
-  }
-}
 
 type AudioCtor = typeof AudioContext;
 
@@ -90,14 +71,14 @@ type WakeLock = { release: () => Promise<void> };
 
 /**
  * @param waitingIds ids of calls nobody has taken yet, or null until the list has loaded
- *                   (calls already waiting when the page opens ring too, until accepted or silenced).
+ *                   (calls already waiting when the page opens ring too, until accepted or cancelled).
  */
 export function useCallAlarm(waitingIds: string[] | null) {
-  const [enabled, setEnabled] = useState(stored);
   const [pending, setPending] = useState<string[]>([]);
   const audio = useRef<AudioContext | null>(null);
   const known = useRef<Set<string> | null>(null);
   const supported = Boolean(audioCtor());
+  const enabled = supported;
 
   // Browsers keep audio locked until a tap; after a reload, the next tap anywhere re-arms it.
   const [locked, setLocked] = useState(false);
@@ -135,12 +116,10 @@ export function useCallAlarm(waitingIds: string[] | null) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const ringing = enabled && pending.length > 0;
+  const ringing = pending.length > 0;
   useEffect(() => {
     if (!ringing) return;
-    const startedAt = Date.now();
     const ring = () => {
-      if (Date.now() - startedAt > MAX_RING_MS) return window.clearInterval(timer);
       const sound = audio.current;
       // iPhone can leave audio "interrupted" (a call, another app): wake it, then play
       if (sound && sound.state !== "closed") {
@@ -191,25 +170,5 @@ export function useCallAlarm(waitingIds: string[] | null) {
     };
   }, [enabled]);
 
-  const toggle = useCallback(() => {
-    if (enabled) {
-      setEnabled(false);
-      setPending([]);
-      remember(false);
-      return;
-    }
-    // Created inside the tap, which is what lets the browser play sound later
-    audio.current ??= newAudio();
-    const sound = audio.current;
-    if (sound) {
-      void unlock(sound).catch(() => undefined);
-      beep(sound); // right inside the tap: what iPhone needs to allow sound afterwards
-    }
-    setEnabled(true);
-    remember(true);
-  }, [enabled]);
-
-  const silence = useCallback(() => setPending([]), []);
-
-  return { supported, enabled, ringing, toggle, silence, locked: ringing && locked };
+  return { supported, ringing, locked: ringing && locked };
 }

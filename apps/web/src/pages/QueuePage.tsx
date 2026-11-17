@@ -129,7 +129,32 @@ export function QueuePage() {
   // Longest first: the call that's taking a while is the one someone may want to go and help on
   const team = accepted.filter(({ alert }) => !isMine(alert)).sort((a, b) => b.timing.stageSeconds - a.timing.stageSeconds);
   const late = waiting.filter(({ timing }) => timing.late).length;
-  const connection = connectionState(active, now, OFFLINE_AFTER_MS);
+  // A phone that was asleep hasn't been polling, so its last update is old through no fault of the network.
+  // Coming back counts as a fresh start: refresh now, and only call it offline if that goes unanswered too.
+  const resumedAt = useRef(0);
+  const refreshNow = active.refetch;
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState === "hidden") return;
+      resumedAt.current = Date.now();
+      void refreshNow();
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
+    window.addEventListener("pageshow", resume);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("pageshow", resume);
+    };
+  }, [refreshNow]);
+  const connection = connectionState(
+    { dataUpdatedAt: active.dataUpdatedAt ? Math.max(active.dataUpdatedAt, resumedAt.current) : 0, errorUpdatedAt: active.errorUpdatedAt },
+    now,
+    OFFLINE_AFTER_MS
+  );
   const offline = connection === "offline";
 
   // What changed since the last poll, worked out while rendering so animations start on the same frame:
@@ -200,20 +225,7 @@ export function QueuePage() {
         title={department ? <span className="rq-head-team"><TeamIcon department={department} /><span>{department.name}</span></span> : "All departments"}
         status={status}
       >
-        {alarm.supported && (
-          <button
-            type="button"
-            className={`rq-bell ${alarm.enabled ? "on" : "off"}`}
-            aria-pressed={alarm.enabled}
-            aria-label={alarm.enabled ? "Alarm is on while this page is open. Turn off" : "Turn on the alarm for new calls while this page is open"}
-            title={alarm.enabled ? "Alarm on: new calls ring while this page is open" : "Turn on the alarm for new calls"}
-            onClick={alarm.toggle}
-          >
-            <SpeakerIcon />
-            {!alarm.enabled && <i aria-hidden="true" />}
-          </button>
-        )}
-        {!pushPrompt && <PushBell state={push.state} busy={push.busy} onEnable={push.enable} onDisable={push.disable} />}
+        {!pushPrompt && <PushBell state={push.state} busy={push.busy} onEnable={push.enable} />}
         {kiosk && <SuiteMenu label="Menu" />}
       </SuiteHeader>
 
@@ -247,7 +259,6 @@ export function QueuePage() {
           <div className="rq-ring" role="alert">
             <SpeakerIcon />
             <strong>New call{department ? ` for ${department.name}` : ""}{alarm.locked && <small> · tap anywhere to turn the sound on</small>}</strong>
-            <button type="button" className="rq-push-on" onClick={alarm.silence}>Silence</button>
           </div>
         </>
       )}
@@ -332,10 +343,10 @@ export function QueuePage() {
 
 const PUSH_DISMISSED = "pg_push_prompt_dismissed";
 
-/** The bell in the header: on, off, or blocked. Hidden where notifications can't work at all. */
-function PushBell({ state, busy, onEnable, onDisable }: { state: PushState; busy: boolean; onEnable: () => void; onDisable: () => void }) {
+/** The bell in the header: on, off, or blocked. Once on it can't be turned off from the app. Hidden where notifications can't work at all. */
+function PushBell({ state, busy, onEnable }: { state: PushState; busy: boolean; onEnable: () => void }) {
   if (state !== "on" && state !== "off" && state !== "denied") return null;
-  const label = state === "on" ? "Call notifications are on. Turn off" : state === "denied" ? "Notifications are blocked in this browser's settings" : "Turn on call notifications";
+  const label = state === "on" ? "Call notifications are on" : state === "denied" ? "Notifications are blocked in this browser's settings" : "Turn on call notifications";
   return (
     <button
       type="button"
@@ -343,8 +354,8 @@ function PushBell({ state, busy, onEnable, onDisable }: { state: PushState; busy
       aria-pressed={state === "on"}
       aria-label={label}
       title={label}
-      disabled={busy || state === "denied"}
-      onClick={() => (state === "on" ? onDisable() : onEnable())}
+      disabled={busy || state === "denied" || state === "on"}
+      onClick={onEnable}
     >
       <BellRingIcon />
       {state !== "on" && <i aria-hidden="true" />}

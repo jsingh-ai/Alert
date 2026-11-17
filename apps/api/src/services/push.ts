@@ -14,10 +14,12 @@
  * Sending never holds up the request that caused it; failures are logged, and a device the push
  * service says is gone (404/410) is removed.
  */
+import { createHash } from "node:crypto";
 import type crypto from "node:crypto";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { canActAsResponder } from "./permissions.js";
+import { DEFAULT_REMINDER_SECONDS, reminderSecondsFor } from "./reminderSettings.js";
 import { encryptPush, isPushServiceUrl, vapidJwt, vapidPrivateKey } from "./webPushCrypto.js";
 
 export type PushMessage = {
@@ -76,6 +78,11 @@ function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+/** Push "Topic": up to 32 URL-safe characters, the same for every message about one call. */
+function topicOf(tag: string) {
+  return createHash("sha256").update(tag).digest("base64url").slice(0, 32);
+}
+
 async function sendOne(keys: Vapid, subscription: Subscription, message: PushMessage) {
   // Checked again here, not only when saved: the server never calls anything but a push service
   if (!isPushServiceUrl(subscription.endpoint)) {
@@ -89,8 +96,11 @@ async function sendOne(keys: Vapid, subscription: Subscription, message: PushMes
       Authorization: `vapid t=${vapidToken(keys, subscription.endpoint)}, k=${keys.publicKey}`,
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
-      // A call is only useful for a short while; a phone that's off for an hour doesn't need it later
-      TTL: "1800",
+      // The push service holds it for a phone that is off or out of range, up to a sign-in's length.
+      // Topic makes held messages for one call collapse into the newest, so a phone that comes back
+      // gets one notification (or the "accepted" one), never a pile of old reminders.
+      TTL: String(12 * 3600),
+      Topic: topicOf(message.tag),
       Urgency: message.silent ? "normal" : "high"
     },
     body: encryptPush(subscription, payload),
@@ -100,6 +110,7 @@ async function sendOne(keys: Vapid, subscription: Subscription, message: PushMes
   // 404/410: the device unsubscribed or the browser was reset. 403: it was made with keys this server
   // no longer has (the keys changed). Either way it will never receive anything again: forget it.
   if (response.status === 404 || response.status === 410 || response.status === 403) {
+    console.warn(`ProcessGuard: push device removed (${response.status} from ${new URL(subscription.endpoint).host}), it will need notifications turned on again.`);
     await prisma.pushSubscription.deleteMany({ where: { id: subscription.id } });
     return;
   }
@@ -107,13 +118,14 @@ async function sendOne(keys: Vapid, subscription: Subscription, message: PushMes
 }
 
 /** Send to every device of these users in this company. Never throws. */
-async function sendToUsers(companyId: string, userIds: string[], message: PushMessage) {
+async function sendToUsers(companyId: string, userIds: string[], message: PushMessage, logSend = false) {
   const keys = loadVapid();
   if (!keys || userIds.length === 0) return;
   const subscriptions = await prisma.pushSubscription.findMany({
     where: { companyId, userId: { in: Array.from(new Set(userIds)) } },
     select: { id: true, endpoint: true, p256dh: true, auth: true }
   });
+  if (logSend) console.log(`ProcessGuard: push "${message.title}" -> ${subscriptions.length} device(s) for ${new Set(userIds).size} responder(s)`);
   const results = await Promise.allSettled(subscriptions.map((subscription) => sendOne(keys, subscription, message)));
   results.forEach((result, index) => {
     if (result.status === "rejected") console.warn(`ProcessGuard: push to ${new URL(subscriptions[index].endpoint).host} failed:`, result.reason?.message ?? result.reason);
@@ -153,26 +165,38 @@ type AlertLike = {
 const callTag = (alertId: string) => `call:${alertId}`;
 const QUEUE_URL = "/queue";
 
+/** When each person was last sent each waiting call (alert id, then user id), to pace the reminders. */
+const lastSent = new Map<string, Map<string, number>>();
+
+/** Send the call notification to these people and note when, so the reminder timer counts from now. */
+async function sendCall(alert: AlertLike, userIds: string[], reminder = false) {
+  const sentAt = lastSent.get(alert.id) ?? new Map<string, number>();
+  lastSent.set(alert.id, sentAt);
+  for (const id of userIds) sentAt.set(id, Date.now());
+  const note = alert.displayMessage || alert.operatorNote;
+  await sendToUsers(alert.companyId, userIds, {
+    title: `${alert.machine.name} needs ${alert.department.name}`,
+    body: [alert.issueType?.name, note ? `“${note}”` : ""].filter(Boolean).join(" · ") || "Tap to respond",
+    tag: callTag(alert.id),
+    url: QUEUE_URL
+  }, !reminder);
+}
+
 /** A machine called a department. */
 export function notifyNewCall(alert: AlertLike) {
   later(async () => {
-    const note = alert.displayMessage || alert.operatorNote;
-    await sendToUsers(alert.companyId, await responders(alert.companyId, alert.departmentId, alert.machine), {
-      title: `${alert.machine.name} needs ${alert.department.name}`,
-      body: [alert.issueType?.name, note ? `“${note}”` : ""].filter(Boolean).join(" · ") || "Tap to respond",
-      tag: callTag(alert.id),
-      url: QUEUE_URL
-    });
+    await sendCall(alert, await responders(alert.companyId, alert.departmentId, alert.machine));
   });
 }
 
 /*
  * A phone alerts once per push: the sound and vibration don't repeat by themselves. So while a call
- * is still waiting, the same notification is sent again every REMIND_EVERY_MS (it replaces the one on
- * screen and alerts again), until someone accepts it or REMIND_FOR_MS has passed.
+ * is still waiting, the same notification is sent again (it replaces the one on screen and alerts
+ * again) at each person's own interval (admin Users page, default 60 seconds), until someone accepts
+ * it (or 12 hours pass, the length of a sign-in). The timer below only checks who is due; it doesn't set the pace.
  */
-const REMIND_EVERY_MS = 15_000;
-const REMIND_FOR_MS = 30 * 60_000;
+const REMIND_CHECK_MS = 15_000;
+const REMIND_FOR_MS = 12 * 3600_000;
 
 export function startCallReminders() {
   if (!loadVapid()) return;
@@ -183,14 +207,27 @@ export function startCallReminders() {
     (async () => {
       const now = Date.now();
       const waiting = await prisma.andonAlert.findMany({
-        where: { status: "OPEN", createdAt: { gt: new Date(now - REMIND_FOR_MS), lt: new Date(now - REMIND_EVERY_MS + 5_000) } },
+        where: { status: "OPEN", createdAt: { gt: new Date(now - REMIND_FOR_MS) } },
         include: { machine: true, department: true, issueType: true }
       });
-      for (const alert of waiting) notifyNewCall(alert);
+      // Forget calls that were accepted, cancelled or have run out of time
+      const stillWaiting = new Set(waiting.map((alert) => alert.id));
+      for (const id of Array.from(lastSent.keys())) if (!stillWaiting.has(id)) lastSent.delete(id);
+      for (const alert of waiting) {
+        const everyone = await responders(alert.companyId, alert.departmentId, alert.machine);
+        const seconds = await reminderSecondsFor(alert.companyId, everyone);
+        const sentAt = lastSent.get(alert.id);
+        // A second of slack, so a person set to 60s isn't pushed to the next check by timer drift
+        const due = everyone.filter((id) => {
+          const every = seconds.get(id) ?? DEFAULT_REMINDER_SECONDS;
+          return now - (sentAt?.get(id) ?? 0) >= every * 1000 - 1000;
+        });
+        if (due.length) await sendCall(alert, due, true);
+      }
     })()
       .catch((error) => console.warn("ProcessGuard: call reminders failed:", error?.message ?? error))
       .finally(() => { running = false; });
-  }, REMIND_EVERY_MS);
+  }, REMIND_CHECK_MS);
   timer.unref();
 }
 
