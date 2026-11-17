@@ -112,8 +112,12 @@ export async function alertRoutes(app: FastifyInstance) {
     const actionNote = typeof body.note === "string" ? body.note.trim() : null;
     if (actionNote && actionNote.length > 4000) return reply.code(400).send({ success: false, error: "Note is too long." });
 
-    const alert = await prisma.andonAlert.findFirst({ where: { id: alertId, companyId: ctx.companyId }, include: { machine: { select: { id: true, machineGroupId: true } } } });
+    const alert = await prisma.andonAlert.findFirst({ where: { id: alertId, companyId: ctx.companyId }, include: { machine: { select: { id: true, machineGroupId: true } }, department: { select: { requireResolveNote: true } } } });
     if (!alert) return reply.code(404).send({ success: false, error: "Alert not found." });
+    // Some departments need a short description of the issue before a call can be closed (admin setting)
+    if (action === "resolve" && alert.department.requireResolveNote && !actionNote) {
+      return reply.code(400).send({ success: false, error: "Describe the issue before closing this call." });
+    }
 
     if (action === "note") {
       const note = typeof body.note === "string" ? body.note.trim() : "";
@@ -160,7 +164,7 @@ export async function alertRoutes(app: FastifyInstance) {
           };
         });
         // A resend of the same message (same clientMessageId) doesn't buzz anyone twice
-        if ("created" in result) notifyMessage(result.alert, ctx.userId, ctx.user.displayName, note);
+        if ("created" in result) notifyMessage(result.alert, ctx.userId, ctx.user.displayName, note, clientMessageId);
         emitChannel(result.channelId, "communication.message.created", serializeMessage(result.message as any));
         emitCompany(ctx.companyId, "alert.changed", { alertId: alert.id, commandId: alert.commandId, action: "note" });
         return { success: true, data: serializeAlert(result.alert as any) };
@@ -197,7 +201,8 @@ export async function alertRoutes(app: FastifyInstance) {
       if (action === "acknowledge" || action === "resolve") {
         const commandLabel = alertCommandLabel(updated);
         const actionText = action === "acknowledge" ? "accepted" : "resolved";
-        const message = `${commandLabel} ${updated.department.name} alert ${actionText} on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.`;
+        const described = action === "resolve" && actionNote ? ` Issue: ${actionNote}` : "";
+        const message = `${commandLabel} ${updated.department.name} alert ${actionText} on ${updated.machine.name}${updated.machine.code ? ` (${updated.machine.code})` : ""}.${described}`;
         try {
           notifications.push(...await prisma.$transaction((tx) => createAlertSystemMessages(tx, {
             companyId: ctx.companyId,

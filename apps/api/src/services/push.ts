@@ -165,6 +165,18 @@ type AlertLike = {
 const callTag = (alertId: string) => `call:${alertId}`;
 const QUEUE_URL = "/queue";
 
+/** Message id for the Maintenance "which tech is needed" note on a call (one per call). */
+export const techNeededMessageId = (alertId: string) => `need:${alertId}`;
+
+/** The operator's "Mechanical tech needed" note for this call, if they sent one. */
+async function techNeeded(alert: { id: string; companyId: string }) {
+  const message = await prisma.communicationMessage.findFirst({
+    where: { companyId: alert.companyId, alertId: alert.id, clientMessageId: techNeededMessageId(alert.id), deletedAt: null },
+    select: { body: true }
+  });
+  return message?.body ?? "";
+}
+
 /** When each person was last sent each waiting call (alert id, then user id), to pace the reminders. */
 const lastSent = new Map<string, Map<string, number>>();
 
@@ -174,9 +186,11 @@ async function sendCall(alert: AlertLike, userIds: string[], reminder = false) {
   lastSent.set(alert.id, sentAt);
   for (const id of userIds) sentAt.set(id, Date.now());
   const note = alert.displayMessage || alert.operatorNote;
+  // Maintenance calls: what the operator said they need ("Mechanical tech needed") rides along with every alert
+  const need = await techNeeded(alert);
   await sendToUsers(alert.companyId, userIds, {
     title: `${alert.machine.name} needs ${alert.department.name}`,
-    body: [alert.issueType?.name, note ? `“${note}”` : ""].filter(Boolean).join(" · ") || "Tap to respond",
+    body: [need, alert.issueType?.name, note ? `“${note}”` : ""].filter(Boolean).join(" · ") || "Tap to respond",
     tag: callTag(alert.id),
     url: QUEUE_URL
   }, !reminder);
@@ -258,7 +272,21 @@ export function notifyCancelled(alert: AlertLike) {
 }
 
 /** A message on an accepted call goes to whoever accepted it and anyone helping, never back to the writer. */
-export function notifyMessage(alert: AlertLike & { status: string; acknowledgedByUserId?: string | null }, fromUserId: string, fromName: string, text: string) {
+export function notifyMessage(alert: AlertLike & { status: string; acknowledgedByUserId?: string | null }, fromUserId: string, fromName: string, text: string, clientMessageId?: string | null) {
+  // "Which tech is needed" (Maintenance): sent while the call is still waiting, and it goes to the whole team
+  if (clientMessageId === techNeededMessageId(alert.id)) {
+    if (alert.status !== "OPEN" && alert.status !== "ACKNOWLEDGED" && alert.status !== "ARRIVED") return;
+    later(async () => {
+      const team = (await responders(alert.companyId, alert.departmentId, alert.machine)).filter((id) => id !== fromUserId);
+      await sendToUsers(alert.companyId, team, {
+        title: `${alert.machine.name}: ${text}`,
+        body: [alert.department.name, alert.issueType?.name].filter(Boolean).join(" · ") || "Tap to respond",
+        tag: callTag(alert.id),
+        url: QUEUE_URL
+      }, true);
+    });
+    return;
+  }
   // Waiting calls: the call notification already went to the whole team. Closed calls: nobody needs it.
   if (alert.status !== "ACKNOWLEDGED" && alert.status !== "ARRIVED") return;
   later(async () => {

@@ -210,6 +210,7 @@ model Department {
   name      String
   color     String   @default("#2563eb")
   active    Boolean  @default(true)
+  requireResolveNote Boolean @default(false) @map("require_resolve_note")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

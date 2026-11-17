@@ -144,7 +144,8 @@ export function serializeAlert(alert: IncludedAlert) {
     department: {
       id: alert.department.id,
       name: alert.department.name,
-      color: alert.department.color
+      color: alert.department.color,
+      requireResolveNote: alert.department.requireResolveNote
     },
     issueType: alert.issueType ? {
       id: alert.issueType.id,

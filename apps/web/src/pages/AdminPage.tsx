@@ -772,6 +772,7 @@ function DepartmentsSection({ data }: { data: any }) {
   const [reason, setReason] = useState({ name: "", defaultPriority: "NORMAL" });
   const addDepartment = useSave(() => postJson<any>("/api/admin/departments", { name: name.trim() }));
   const departmentActive = useSave((item: any) => patchJson(`/api/admin/departments/${item.id}`, { active: !item.active }));
+  const needDescription = useSave((item: any) => patchJson(`/api/admin/departments/${item.id}`, { requireResolveNote: !item.requireResolveNote }));
   const departmentDelete = useSave((item: any) => deleteJson(`/api/admin/departments/${item.id}`));
   const addReason = useSave(() => postJson("/api/admin/issue-types", { name: reason.name.trim(), departmentId: selected?.id, defaultPriority: reason.defaultPriority }));
   const reasonActive = useSave((item: any) => patchJson(`/api/admin/issue-types/${item.id}`, { active: !item.active }));
@@ -806,6 +807,21 @@ function DepartmentsSection({ data }: { data: any }) {
           meta="The reasons an operator can pick when calling this team."
           actions={<><Status active={selected.active} /><RowActions active={selected.active} onToggle={() => departmentActive.mutate(selected)} onDelete={() => departmentDelete.mutate(selected)} deleteLabel={`Delete ${selected.name}? Only possible once nothing uses it; turn it off instead.`} /></>}
         >
+          <div className="cfg-setting">
+            <span className="cfg-setting-text">
+              <strong id="need-description-label">Need description before resolving an issue</strong>
+              <small>When on, closing a {selected.name} call asks for a short description of what the issue was. It can't be skipped.</small>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={Boolean(selected.requireResolveNote)}
+              aria-labelledby="need-description-label"
+              className={`cfg-switch ${selected.requireResolveNote ? "on" : ""}`}
+              onClick={() => needDescription.mutate(selected)}
+              disabled={needDescription.isPending}
+            ><i /></button>
+          </div>
           <ul className="cfg-list">
             {listed.map((item) => (
               <li key={item.id} className={`cfg-row ${item.active ? "" : "inactive"}`}>
@@ -823,7 +839,7 @@ function DepartmentsSection({ data }: { data: any }) {
             </select>
             <button type="submit" className="cfg-btn" disabled={!reason.name.trim() || addReason.isPending}>Add reason</button>
           </form>
-          <Problem error={addReason.error || departmentActive.error || departmentDelete.error || reasonActive.error || reasonDelete.error} />
+          <Problem error={addReason.error || needDescription.error || departmentActive.error || departmentDelete.error || reasonActive.error || reasonDelete.error} />
         </Card>
       ) : (
         <section className="cfg-card cfg-hint"><WrenchIcon /><p><strong>Add a department to start.</strong><span>Maintenance, Quality, Supervisor…</span></p></section>

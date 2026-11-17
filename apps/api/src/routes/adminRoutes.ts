@@ -359,13 +359,15 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.patch("/api/admin/departments/:id", adminWriteOptions, async (request, reply) => {
-    const body = request.body as { name?: string; color?: string; active?: boolean; sortOrder?: number };
+    const body = request.body as { name?: string; color?: string; active?: boolean; sortOrder?: number; requireResolveNote?: boolean };
     const params = request.params as { id: string };
     const active = optionalBoolean(body.active);
+    const requireResolveNote = optionalBoolean(body.requireResolveNote);
     const sortOrder = optionalSortOrder(body.sortOrder);
     if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
+    if (requireResolveNote === null) return reply.code(400).send({ success: false, error: "The description setting must be on or off." });
     if (sortOrder === null) return reply.code(400).send({ success: false, error: "Sort order must be a whole number." });
-    const data = { name: optionalString(body.name), color: optionalString(body.color), active, sortOrder };
+    const data = { name: optionalString(body.name), color: optionalString(body.color), active, sortOrder, requireResolveNote };
     if (Object.values(data).every((value) => value === undefined)) return reply.code(400).send({ success: false, error: "No changes provided." });
     const item = await updateOwned(reply, prisma.department, request.session.companyId, params.id, data);
     changed(request.session.companyId);
