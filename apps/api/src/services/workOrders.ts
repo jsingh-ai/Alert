@@ -136,15 +136,19 @@ async function open(alertId: string): Promise<string | null> {
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 /** Find the technician by name: { userId, categoryCode }. WORKORDER_TECH_URL may hold {name}, else the whole list is read. */
-async function findTech(name: string): Promise<{ userId: number | string; categoryCode: string } | null> {
+async function findTech(name: string, workType: string): Promise<{ userId: number | string; categoryCode: string } | null> {
   let url = env("WORKORDER_TECH_URL");
   if (!url) return null;
   url = url.replace("{name}", encodeURIComponent(name));
   const reply = await call("technician lookup", "TECH", "GET", url);
   const list: Json[] = Array.isArray(reply) ? reply : [reply.data, reply.users, reply.technicians, reply.items, reply.results].find(Array.isArray) ?? (reply.data ? [reply.data] : [reply]);
   const nameOf = (item: Json) => item.name ?? item.fullName ?? item.displayName ?? item.userName ?? item.username ?? [item.firstName, item.lastName].filter(Boolean).join(" ");
-  // Whatever the list says for this name: its id and category are sent as they are (the first row if there are two)
-  const hit = list.find((item) => norm(nameOf(item)) === norm(name)) ?? (list.length === 1 ? list[0] : undefined);
+  // Their id and category exactly as listed. A person listed under both categories (mechanic and electrical) is sent
+  // under the one that matches this call: a mechanic on an electrical order is not accepted. Otherwise the first row.
+  const rows = list.filter((item) => norm(nameOf(item)) === norm(name));
+  const codeOf = (item: Json) => String(item.categoryCode ?? item.category?.code ?? item.category ?? "").toUpperCase();
+  const wanted = workType === "electrical" ? "ELECTRICAL" : "MECHANIC";
+  const hit = rows.find((item) => codeOf(item) === wanted) ?? rows[0] ?? (list.length === 1 ? list[0] : undefined);
   const userId = hit?.userId ?? hit?.id;
   const categoryCode = hit?.categoryCode ?? hit?.category?.code ?? hit?.category;
   return hit && userId !== undefined && categoryCode ? { userId, categoryCode: String(categoryCode) } : null;
@@ -176,7 +180,8 @@ async function close(alertId: string, comment: string | null) {
   const accepted = alert.acknowledgedByUser?.displayName ? null : await prisma.alertEvent.findFirst({ where: { alertId, eventType: "ACKNOWLEDGED" }, orderBy: { createdAt: "asc" }, select: { actorNameText: true } });
   const name = alert.acknowledgedByUser?.displayName || accepted?.actorNameText || alert.responderNameText || "";
   const workType = (await workTypeOf(alert)) ?? "mechanical";
-  const tech = name ? await findTech(name) : null;
+  console.log(`ProcessGuard work order: ${folio} was accepted by "${name}"${dryRun() ? " (dry run)" : ""}.`);
+  const tech = name ? await findTech(name, workType) : null;
   if (!tech) {
     console.warn(`ProcessGuard work order: technician "${name}" was not found in the technician list, so ${folio} was not updated.`);
     return;
