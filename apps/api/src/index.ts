@@ -1,3 +1,4 @@
+import tls from "node:tls";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,16 @@ import { adminRoutes } from "./routes/adminRoutes.js";
 import { pushRoutes } from "./routes/pushRoutes.js";
 import { externalRoutes } from "./routes/externalRoutes.js";
 import { startCallReminders } from "./services/push.js";
+
+// Company networks often inspect HTTPS with their own certificate. Windows already trusts it, Node doesn't:
+// without this, calls to other https addresses (the work-order app) fail with "self-signed certificate in chain".
+try {
+  const system = (tls as any).getCACertificates?.("system") as string[] | undefined;
+  if (system?.length) (tls as any).setDefaultCACertificates([...(tls as any).getCACertificates("default"), ...system]);
+} catch {
+  // an older Node: start the service with NODE_OPTIONS=--use-system-ca instead
+}
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = Fastify({ logger: true, bodyLimit: 1_000_000, trustProxy: config.trustProxy });

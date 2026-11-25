@@ -6,7 +6,7 @@ import { prisma } from "../db.js";
 import { generatePagerToken, sha256, tokenFingerprint } from "../utils/crypto.js";
 import { ACTIVE_ALERT_STATUSES } from "../services/permissions.js";
 import { getQuickLoginProfiles, normalizeQuickLoginProfiles, QUICK_LOGIN_PROFILES, setQuickLoginProfiles } from "../services/quickLoginService.js";
-import { DEFAULT_REMINDER_SECONDS, isQuickLoginUsername, parseReminderSeconds, reminderSettingsByUser, saveReminderSeconds } from "../services/reminderSettings.js";
+import { DEFAULT_REMINDER_SECONDS, canMuteByUser, isQuickLoginUsername, parseReminderSeconds, reminderSettingsByUser, saveCanMute, saveReminderSeconds } from "../services/reminderSettings.js";
 import { emitCompany, getRealtimeStats } from "../services/realtime.js";
 import { startOfDayInTimeZone } from "../utils/time.js";
 
@@ -115,6 +115,8 @@ function scopeRows(membershipId: string, access: Access) {
   ];
 }
 
+/** The webhook address is a secret: the admin page only ever sees which host it points at. */
+
 function changed(companyId: string) {
   emitCompany(companyId, "admin.changed", { at: new Date().toISOString() });
 }
@@ -164,15 +166,19 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.commandTemplate.findMany({ where: { companyId }, include: { targets: { include: { department: true, issueType: true }, orderBy: { sortOrder: "asc" } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.user.findMany({ where: { memberships: { some: { companyId } } }, include: { memberships: { where: { companyId }, include: { scopes: true } } }, orderBy: { username: "asc" } }),
       prisma.pagerDevice.findMany({ where: { companyId }, include: { department: true }, orderBy: { name: "asc" } }),
-      getQuickLoginProfiles(companyId)
+      getQuickLoginProfiles(companyId),
+      prisma.teamsDestination.findMany({ where: { companyId }, orderBy: { name: "asc" } })
     ]);
     const reminders = await reminderSettingsByUser(companyId);
+    const canMute = await canMuteByUser(companyId);
     const scopedUsers = users.map(({ passwordHash: _hash, ...user }) => ({
       ...user,
       active: user.active && Boolean(user.memberships[0]?.active),
       // Seconds between reminder notifications; the shared quick-login accounts are fixed at the default
       reminderSeconds: isQuickLoginUsername(user.username) ? DEFAULT_REMINDER_SECONDS : reminders.get(user.id) ?? DEFAULT_REMINDER_SECONDS,
-      reminderFixed: isQuickLoginUsername(user.username)
+      reminderFixed: isQuickLoginUsername(user.username),
+      // May this person switch their own call notifications off
+      canMuteNotifications: !isQuickLoginUsername(user.username) && canMute.has(user.id)
     }));
     return { success: true, data: { machineGroups, machines, departments, issueTypes, commandTemplates, users: scopedUsers, pagerDevices, quickLoginProfiles } };
   });
@@ -518,13 +524,15 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/admin/users", adminWriteOptions, async (request, reply) => {
-    const body = request.body as { username?: string; password?: string; displayName?: string; role?: any; access?: unknown; reminderSeconds?: unknown };
+    const body = request.body as { username?: string; password?: string; displayName?: string; role?: any; access?: unknown; reminderSeconds?: unknown; canMuteNotifications?: unknown };
     const username = cleanString(body.username).toLowerCase();
     const displayName = cleanString(body.displayName);
     const role = optionalRole(body.role);
     if (!username || !body.password || !displayName || !role) return reply.code(400).send({ success: false, error: "Username, password, displayName, and valid role are required." });
     const reminderSeconds = body.reminderSeconds === undefined ? undefined : parseReminderSeconds(body.reminderSeconds);
     if (reminderSeconds === null) return reply.code(400).send({ success: false, error: "Reminder time must be one of the choices offered." });
+    const canMuteNotifications = optionalBoolean(body.canMuteNotifications);
+    if (canMuteNotifications === null) return reply.code(400).send({ success: false, error: "Notifications setting must be on or off." });
     if (body.password.length < 8) return reply.code(400).send({ success: false, error: "Password must be at least 8 characters." });
     // The user and what they cover are saved together, so nobody is ever left half set up
     const access = parseAccess(body.access);
@@ -546,6 +554,7 @@ export async function adminRoutes(app: FastifyInstance) {
         const rows = scopeRows(user.memberships[0].id, access);
         if (rows.length) await tx.membershipScope.createMany({ data: rows });
         if (reminderSeconds !== undefined && role === "RESPONDER" && !isQuickLoginUsername(username)) await saveReminderSeconds(tx, request.session.companyId, user.id, reminderSeconds);
+        if (canMuteNotifications !== undefined && role === "RESPONDER" && !isQuickLoginUsername(username)) await saveCanMute(tx, request.session.companyId, user.id, canMuteNotifications);
         const { passwordHash: _hash, ...safe } = user;
         return safe;
       });
@@ -561,7 +570,9 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.patch("/api/admin/users/:id", adminWriteOptions, async (request, reply) => {
     const params = request.params as { id: string };
-    const body = request.body as { active?: boolean; username?: string; displayName?: string; password?: string; role?: any; access?: unknown; reminderSeconds?: unknown };
+    const body = request.body as { active?: boolean; username?: string; displayName?: string; password?: string; role?: any; access?: unknown; reminderSeconds?: unknown; canMuteNotifications?: unknown };
+    const canMuteNotifications = optionalBoolean(body.canMuteNotifications);
+    if (canMuteNotifications === null) return reply.code(400).send({ success: false, error: "Notifications setting must be on or off." });
     const active = optionalBoolean(body.active);
     if (active === null) return reply.code(400).send({ success: false, error: "Active must be true or false." });
     const reminderSeconds = body.reminderSeconds === undefined ? undefined : parseReminderSeconds(body.reminderSeconds);
@@ -588,7 +599,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const access = body.access === undefined ? undefined : parseAccess(body.access);
     if (typeof access === "string") return reply.code(400).send({ success: false, error: access });
 
-    if (Object.keys(userData).length === 0 && Object.keys(membershipData).length === 0 && !access && reminderSeconds === undefined) {
+    if (Object.keys(userData).length === 0 && Object.keys(membershipData).length === 0 && !access && reminderSeconds === undefined && canMuteNotifications === undefined) {
       return reply.code(400).send({ success: false, error: "No changes provided." });
     }
 
@@ -626,9 +637,12 @@ export async function adminRoutes(app: FastifyInstance) {
           if (rows.length) await tx.membershipScope.createMany({ data: rows });
         }
         if (active) await tx.user.update({ where: { id: params.id }, data: { active: true } });
-        if (reminderSeconds !== undefined) {
+        if (reminderSeconds !== undefined || canMuteNotifications !== undefined) {
           const who = await tx.user.findUniqueOrThrow({ where: { id: params.id }, select: { username: true } });
-          if (!isQuickLoginUsername(who.username)) await saveReminderSeconds(tx, request.session.companyId, params.id, reminderSeconds);
+          if (!isQuickLoginUsername(who.username)) {
+            if (reminderSeconds !== undefined) await saveReminderSeconds(tx, request.session.companyId, params.id, reminderSeconds);
+            if (canMuteNotifications !== undefined) await saveCanMute(tx, request.session.companyId, params.id, canMuteNotifications);
+          }
         }
         const user = await tx.user.findUniqueOrThrow({ where: { id: params.id }, include: { memberships: { where: { companyId: request.session.companyId }, include: { scopes: true } } } });
         const { passwordHash: _hash, ...safe } = user;

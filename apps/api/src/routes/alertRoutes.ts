@@ -6,6 +6,7 @@ import { createAlertSystemMessages, createCommunicationMessage, ensureMachineCom
 import { ACTIVE_ALERT_STATUSES, canActAsResponder, canSeeDepartment, canUseMachine, machineWhereForContext, scopedDepartmentIds } from "../services/permissions.js";
 import { triggerAlertAcknowledged } from "../services/powerAutomateService.js";
 import { notifyAccepted, notifyCancelled, notifyMessage } from "../services/push.js";
+import { workOrderAccepted, workOrderResolved } from "../services/workOrders.js";
 import { emitChannel, emitCompany } from "../services/realtime.js";
 
 function cleanString(value: unknown) {
@@ -250,6 +251,8 @@ export async function alertRoutes(app: FastifyInstance) {
 
       if (action === "acknowledge") notifyAccepted(updated, updated.responderNameText || ctx.user.displayName, ctx.userId);
       if (action === "cancel") notifyCancelled(updated);
+      if (action === "acknowledge") workOrderAccepted(updated.id);
+      if (action === "resolve") workOrderResolved(updated.id, actionNote || null);
       emitCompany(ctx.companyId, "alert.changed", { alertId: updated.id, commandId: updated.commandId, action });
       for (const notification of notifications) {
         emitChannel(notification.channelId, "communication.message.created", serializeMessage(notification.message as any));

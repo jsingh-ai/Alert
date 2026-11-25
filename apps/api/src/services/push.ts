@@ -19,7 +19,7 @@ import type crypto from "node:crypto";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { canActAsResponder } from "./permissions.js";
-import { DEFAULT_REMINDER_SECONDS, reminderSecondsFor } from "./reminderSettings.js";
+import { DEFAULT_REMINDER_SECONDS, mutedUserIds, reminderSecondsFor } from "./reminderSettings.js";
 import { encryptPush, isPushServiceUrl, vapidJwt, vapidPrivateKey } from "./webPushCrypto.js";
 
 export type PushMessage = {
@@ -121,6 +121,10 @@ async function sendOne(keys: Vapid, subscription: Subscription, message: PushMes
 async function sendToUsers(companyId: string, userIds: string[], message: PushMessage, logSend = false) {
   const keys = loadVapid();
   if (!keys || userIds.length === 0) return;
+  // People allowed to switch notifications off, who have, get nothing
+  const muted = await mutedUserIds(companyId, Array.from(new Set(userIds))).catch(() => new Set<string>());
+  userIds = userIds.filter((id) => !muted.has(id));
+  if (userIds.length === 0) return;
   const subscriptions = await prisma.pushSubscription.findMany({
     where: { companyId, userId: { in: Array.from(new Set(userIds)) } },
     select: { id: true, endpoint: true, p256dh: true, auth: true }

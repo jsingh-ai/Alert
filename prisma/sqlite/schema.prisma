@@ -269,6 +269,7 @@ model AndonAlert {
   resolvedByUserId     String?  @map("resolved_by_user_id")
   cancelledByUserId    String?  @map("cancelled_by_user_id")
   responderNameText    String?  @map("responder_name_text")
+  externalRef          String?   @map("external_ref")
   createdAt            DateTime @default(now()) @map("created_at")
   acknowledgedAt       DateTime? @map("acknowledged_at")
   arrivedAt            DateTime? @map("arrived_at")
