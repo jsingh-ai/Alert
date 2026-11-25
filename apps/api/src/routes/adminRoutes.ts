@@ -166,8 +166,7 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.commandTemplate.findMany({ where: { companyId }, include: { targets: { include: { department: true, issueType: true }, orderBy: { sortOrder: "asc" } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       prisma.user.findMany({ where: { memberships: { some: { companyId } } }, include: { memberships: { where: { companyId }, include: { scopes: true } } }, orderBy: { username: "asc" } }),
       prisma.pagerDevice.findMany({ where: { companyId }, include: { department: true }, orderBy: { name: "asc" } }),
-      getQuickLoginProfiles(companyId),
-      prisma.teamsDestination.findMany({ where: { companyId }, orderBy: { name: "asc" } })
+      getQuickLoginProfiles(companyId)
     ]);
     const reminders = await reminderSettingsByUser(companyId);
     const canMute = await canMuteByUser(companyId);
