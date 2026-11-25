@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, postJson } from "../lib/api";
+import { api, postJson, putJson } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Alert } from "../lib/types";
 import { alertTiming, clock } from "../lib/callStages";
@@ -97,6 +97,19 @@ export function QueuePage() {
   const [departmentId, setDepartmentId] = useState(departments.length === 1 ? departments[0].id : "");
   const [group, setGroup] = useState("all");
   const push = usePush(userId);
+  // Only people an admin allowed see an on/off switch; everyone else's notifications always stay on
+  const queryClient = useQueryClient();
+  const notify = useQuery({
+    queryKey: ["notify-preference", userId],
+    queryFn: () => api<{ data?: { canMute: boolean; muted: boolean } }>("/api/push/preference", {}, { quiet: true }),
+    enabled: Boolean(userId)
+  });
+  const canMute = Boolean(notify.data?.data?.canMute);
+  const muted = canMute && Boolean(notify.data?.data?.muted);
+  const setMuted = useMutation({
+    mutationFn: (next: boolean) => putJson("/api/push/preference", { muted: next }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notify-preference", userId] })
+  });
   const [pushDismissed, dismissPush] = usePromptDismissed(userId);
   // The first-time card and the bell do the same job: show one at a time
   const pushPrompt = !pushDismissed && (push.state === "off" || push.state === "install");
@@ -110,7 +123,7 @@ export function QueuePage() {
   });
 
   // Rings while this page is open on an awake phone (works without https; push covers locked phones)
-  const alarm = useCallAlarm(active.data?.data ? active.data.data.filter((alert) => alert.status === "OPEN").map((alert) => alert.id) : null);
+  const alarm = useCallAlarm(!muted && active.data?.data ? active.data.data.filter((alert) => alert.status === "OPEN").map((alert) => alert.id) : null);
 
   const groups = useMemo(() => {
     const names = (session?.machines ?? []).map((m: any) => m.machineGroup?.name).filter((n: any): n is string => Boolean(n));
@@ -225,6 +238,19 @@ export function QueuePage() {
         title={department ? <span className="rq-head-team"><TeamIcon department={department} /><span>{department.name}</span></span> : "All departments"}
         status={status}
       >
+        {canMute && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={!muted}
+            className={`rq-notify ${muted ? "off" : "on"}`}
+            onClick={() => setMuted.mutate(!muted)}
+            disabled={setMuted.isPending}
+            title={muted ? "Call notifications are off. Tap to turn on." : "Call notifications are on. Tap to turn off."}
+          >
+            {muted ? "Notifications off" : "Notifications on"}
+          </button>
+        )}
         {!pushPrompt && <PushBell state={push.state} busy={push.busy} onEnable={push.enable} />}
         {kiosk && <SuiteMenu label="Menu" />}
       </SuiteHeader>

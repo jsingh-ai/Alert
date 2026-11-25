@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../db.js";
+import { muteSettingFor, saveMuted } from "../services/reminderSettings.js";
 import { pushPublicKey } from "../services/push.js";
 import { isPushServiceUrl } from "../services/webPushCrypto.js";
 
@@ -45,6 +46,22 @@ export async function pushRoutes(app: FastifyInstance) {
       await prisma.pushSubscription.deleteMany({ where: { id: { in: devices.slice(MAX_DEVICES).map((device) => device.id) } } });
     }
     return { success: true };
+  });
+
+  // The person's own on/off switch. It only exists for people an admin allowed to use it.
+  app.get("/api/push/preference", { preHandler: app.authenticate }, async (request) => {
+    const ctx = request.membershipContext!;
+    return { success: true, data: await muteSettingFor(ctx.companyId, ctx.userId) };
+  });
+
+  app.put("/api/push/preference", { preHandler: app.authenticate }, async (request, reply) => {
+    const ctx = request.membershipContext!;
+    const body = (request.body ?? {}) as { muted?: unknown };
+    if (typeof body.muted !== "boolean") return reply.code(400).send({ success: false, error: "Say whether notifications are on or off." });
+    const current = await muteSettingFor(ctx.companyId, ctx.userId);
+    if (!current.canMute) return reply.code(403).send({ success: false, error: "Your account can't turn notifications off." });
+    await saveMuted(ctx.companyId, ctx.userId, body.muted);
+    return { success: true, data: { canMute: true, muted: body.muted } };
   });
 
   app.post("/api/push/unsubscribe", { preHandler: app.authenticate }, async (request) => {

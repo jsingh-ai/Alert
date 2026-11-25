@@ -292,6 +292,8 @@ type Draft = {
   machineIds: Set<string>;
   /** Responder: seconds between reminder notifications while a call waits (0 = none). */
   reminderSeconds: number;
+  /** Responder: may switch their own call notifications off from their view. */
+  canMuteNotifications: boolean;
 };
 
 /** What a responder can pick for how often a waiting call re-notifies them. */
@@ -331,7 +333,8 @@ function draftOf(user: any): Draft {
     departmentIds: new Set(access.departmentIds),
     machineGroupIds: new Set(access.machineGroupIds),
     machineIds: new Set(access.machineIds),
-    reminderSeconds: typeof user?.reminderSeconds === "number" ? user.reminderSeconds : 60
+    reminderSeconds: typeof user?.reminderSeconds === "number" ? user.reminderSeconds : 60,
+    canMuteNotifications: Boolean(user?.canMuteNotifications)
   };
 }
 
@@ -382,7 +385,7 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
   const save = useSave(async () => {
     const body = {
       displayName: draft.displayName.trim(), username: draft.username.trim(), role: draft.role, access,
-      ...(draft.role === "RESPONDER" && !user?.reminderFixed ? { reminderSeconds: draft.reminderSeconds } : {}),
+      ...(draft.role === "RESPONDER" && !user?.reminderFixed ? { reminderSeconds: draft.reminderSeconds, canMuteNotifications: draft.canMuteNotifications } : {}),
       ...(draft.password ? { password: draft.password } : {})
     };
     const result = isNew ? await postJson<any>("/api/admin/users", body) : await patchJson<any>(`/api/admin/users/${user.id}`, body);
@@ -450,6 +453,22 @@ function UserEditor({ user, data, onDone, onClose }: { user: any; data: any; onD
                   {REMINDER_CHOICES.map((choice) => <option key={choice.seconds} value={choice.seconds}>{choice.label}</option>)}
                 </select>
               </Field>
+            )}
+            {!user?.reminderFixed && (
+              <div className="cfg-setting">
+                <span className="cfg-setting-text">
+                  <strong id="can-mute-label">Let them turn notifications on or off</strong>
+                  <small>When on, they get an on/off switch in their own view. While it's off they get no alerts or sounds. When off, notifications always stay on.</small>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={draft.canMuteNotifications}
+                  aria-labelledby="can-mute-label"
+                  className={`cfg-switch ${draft.canMuteNotifications ? "on" : ""}`}
+                  onClick={() => set({ canMuteNotifications: !draft.canMuteNotifications })}
+                ><i /></button>
+              </div>
             )}
           </fieldset>
         )}

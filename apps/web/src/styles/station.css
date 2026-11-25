@@ -595,3 +595,17 @@
 .ms-confirm-note textarea { width: 100%; resize: vertical; min-height: 4.5rem; padding: 0.6rem 0.75rem; border: 1px solid var(--pg-line); border-radius: 10px; background: var(--pg-card); color: inherit; font: inherit; }
 .ms-confirm-note textarea:focus-visible { outline: 2px solid var(--pg-text); outline-offset: 1px; }
 .ms-confirm.has-note > div { justify-content: flex-end; }
+
+/* A person's own notifications switch (only shown if an admin allowed it) */
+.rq-notify { padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid var(--pg-line); background: var(--pg-card); color: inherit; font: inherit; font-size: 0.8125rem; font-weight: 650; cursor: pointer; }
+.rq-notify.on { border-color: var(--pg-done, #13824f); color: var(--pg-done, #13824f); }
+.rq-notify.off { background: var(--pg-line); color: var(--pg-muted); }
+.rq-notify:disabled { opacity: 0.6; cursor: default; }
+
+/* The team question is mandatory: a close cross, no timer, three choices */
+.ms-need-card { padding-bottom: 1.75rem; }
+.ms-need-close { position: absolute; top: 0.6rem; right: 0.6rem; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--pg-text-2); font-size: 1.6rem; line-height: 1; cursor: pointer; }
+.ms-need-close:hover { background: var(--pg-line); color: var(--pg-text); }
+.ms-need-close:focus-visible { outline: 2px solid var(--pg-text); outline-offset: 1px; }
+.ms-need-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 520px) { .ms-need-choices { grid-template-columns: 1fr; } }

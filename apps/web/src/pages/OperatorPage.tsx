@@ -118,7 +118,8 @@ export function OperatorPage() {
   const [otherOpen, setOtherOpen] = useState(false);
   const [celebration, setCelebration] = useState<ClosedInfo | null>(null);
   // Maintenance: just raised a call, and the operator can say which kind of tech is needed
-  const [techPrompt, setTechPrompt] = useState<{ alertId: string } | null>(null);
+  // A call that includes Maintenance waits here until the operator says which team: nothing is created before that
+  const [teamAsk, setTeamAsk] = useState<{ payload: Record<string, unknown>; closeOther: boolean } | null>(null);
   // With several calls open, a call's messages show in the side panel so the rows never change height
   const [threadFor, setThreadFor] = useState<string | null>(null);
   const phone = usePhone();
@@ -188,14 +189,16 @@ export function OperatorPage() {
     ]);
 
   const createCall = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => postJson("/api/commands", { machineId, ...payload }),
+    mutationFn: async ({ tech, ...payload }: Record<string, unknown> & { tech?: string }) => {
+      const result: any = await postJson("/api/commands", { machineId, ...payload });
+      // Which team Maintenance should send goes out as a message on the new call (the responders get a notification)
+      const maintenance = (result?.data?.createdAlerts ?? []).find((created: any) => isMaintenance(created?.department?.name));
+      if (tech && maintenance?.id) await postTechNeeded(maintenance.id, tech);
+      return result;
+    },
     // Returned so the mutation stays pending until the new call is on screen: no idle gap
     // where a second tap could create a duplicate call.
-    onSuccess: (result: any) => {
-      const maintenance = (result?.data?.createdAlerts ?? []).find((created: any) => isMaintenance(created?.department?.name));
-      if (maintenance?.id) setTechPrompt({ alertId: maintenance.id });
-      return refresh();
-    }
+    onSuccess: () => refresh()
   });
 
   function chooseMachine(id: string) {
@@ -242,7 +245,9 @@ export function OperatorPage() {
   const sendingId = createCall.isPending ? (createCall.variables?.templateId as string | undefined) : undefined;
   const callTemplate = (template: Template) => {
     haptic();
-    createCall.mutate({ templateId: template.id });
+    const payload = { templateId: template.id };
+    if (template.targets.some((t) => isMaintenance(t.department.name))) setTeamAsk({ payload, closeOther: false });
+    else createCall.mutate(payload);
   };
   const group = groupLabel(machine);
   const openOther = () => {
@@ -321,7 +326,18 @@ export function OperatorPage() {
 
       <SuiteStatusBar connection={connection} lastGood={lastGood} />
 
-      {techPrompt && <TechNeededPrompt key={techPrompt.alertId} alertId={techPrompt.alertId} machineName={machine.name} onDone={() => setTechPrompt(null)} />}
+      {teamAsk && (
+        <TechChoicePrompt
+          machineName={machine.name}
+          onCancel={() => setTeamAsk(null)}
+          onChoose={(message) => {
+            const ask = teamAsk;
+            setTeamAsk(null);
+            haptic();
+            createCall.mutate({ ...ask.payload, tech: message }, ask.closeOther ? { onSuccess: () => setOtherOpen(false) } : undefined);
+          }}
+        />
+      )}
       {celebration && <ClosedCelebration key={celebration.id} info={celebration} machineName={machine.name} onDone={() => setCelebration(null)} />}
 
       {otherOpen && data && (
@@ -338,7 +354,9 @@ export function OperatorPage() {
           // "Manual Help Call" is the label the API recognises to display the issue name instead
           onSend={(targets) => {
             haptic();
-            createCall.mutate({ commandLabel: "Manual Help Call", targets }, { onSuccess: () => setOtherOpen(false) });
+            const payload = { commandLabel: "Manual Help Call", targets };
+            if (targets.some((t) => isMaintenance(data.departments.find((d) => d.id === t.departmentId)?.name))) setTeamAsk({ payload, closeOther: true });
+            else createCall.mutate(payload, { onSuccess: () => setOtherOpen(false) });
           }}
         />
       )}
@@ -890,16 +908,10 @@ function CallThread({ call, disabled, title, onClose, inline = false }: { call: 
 /** Maintenance is the one team that asks this; matched by name so it follows however the department is spelled. */
 const isMaintenance = (name?: string | null) => /maint/i.test(name ?? "");
 
-/** How long the operator has to choose before "both" goes out. */
-const TECH_MS = 5000;
-
 const TECH_CHOICES = [
   { id: "mechanical", label: "Mechanical", message: "Mechanical help needed" },
   { id: "electrical", label: "Electrical", message: "Electrical help needed" }
 ] as const;
-
-/** What goes out when nobody picks. */
-const TECH_BOTH = { id: "both", label: "Both", message: "Both mechanical and electrical help needed" } as const;
 
 /** The message is how Maintenance knows what to send, so a dismissed popup still sends it, retrying quietly. */
 async function postTechNeeded(alertId: string, message: string, attempts = 3) {
@@ -915,78 +927,34 @@ async function postTechNeeded(alertId: string, message: string, attempts = 3) {
 }
 
 /**
- * A few seconds to say which team Maintenance should send. Choosing sends that as a message on
- * the call (the responders see it with the call, and get a notification); doing nothing sends both.
- * Tapping anywhere outside closes it and asks for both.
+ * Asked before a call that includes Maintenance is made, and it has to be answered: the call isn't created
+ * until a team is chosen. The cross (or Escape) cancels, and then no call is made at all.
  */
-function TechNeededPrompt({ alertId, machineName, onDone }: { alertId: string; machineName: string; onDone: () => void }) {
-  const [picked, setPicked] = useState<string | null>(null);
-  const [leaving, setLeaving] = useState(false);
-  const [left, setLeft] = useState(Math.ceil(TECH_MS / 1000));
-  const [error, setError] = useState("");
-  const sending = useRef(false);
-  const done = useRef(onDone);
-  done.current = onDone;
-
-  const send = async (choice: (typeof TECH_CHOICES)[number] | typeof TECH_BOTH) => {
-    if (sending.current) return;
-    sending.current = true;
-    setPicked(choice.id);
-    setError("");
-    try {
-      // The same id every time, so a double send (a tap just as the clock runs out) is one message
-      await postJson(`/api/alerts/${alertId}/notes`, { note: choice.message, clientMessageId: `need:${alertId}` });
-      setLeaving(true);
-    } catch {
-      // Stay open so it can be tried again: this message is how Maintenance knows who to send
-      sending.current = false;
-      setPicked(null);
-      setError("Couldn't send that. Tap a choice to try again.");
-    }
-  };
-
-  // No choice in time: both
+function TechChoicePrompt({ machineName, onChoose, onCancel }: { machineName: string; onChoose: (message: string) => void; onCancel: () => void }) {
   useEffect(() => {
-    if (picked) return;
-    const timer = window.setTimeout(() => void send(TECH_BOTH), TECH_MS);
-    const tick = window.setInterval(() => setLeft((n) => Math.max(0, n - 1)), 1000);
-    return () => {
-      window.clearTimeout(timer);
-      window.clearInterval(tick);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked]);
-
-  // A moment to see what was sent, then out
-  useEffect(() => {
-    const timer = leaving ? window.setTimeout(() => done.current(), 360) : picked ? window.setTimeout(() => setLeaving(true), 900) : undefined;
-    return () => window.clearTimeout(timer);
-  }, [leaving, picked]);
-
-  // Clicking anywhere else on the page closes the window at once. Nothing was chosen, so it asks for both.
-  const dismiss = () => {
-    if (sending.current) return;
-    sending.current = true;
-    setLeaving(true);
-    void postTechNeeded(alertId, TECH_BOTH.message);
-  };
-
-  const chosen = picked === TECH_BOTH.id ? TECH_BOTH : TECH_CHOICES.find((choice) => choice.id === picked);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   return (
-    <div className={`ms-celebrate ms-need ${leaving ? "leaving" : ""}`} role="dialog" aria-modal="true" aria-label="Which team do you need" onClick={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
-      <div className="ms-need-card" style={{ "--life": `${TECH_MS}ms` } as CSSProperties}>
-        <h2>{chosen ? "Sent" : "Which team do you need?"}</h2>
-        <p>{chosen ? chosen.message : `${machineName} · Maintenance`}</p>
+    <div className="ms-celebrate ms-need" role="dialog" aria-modal="true" aria-label="Which team do you need">
+      <div className="ms-need-card">
+        <button type="button" className="ms-need-close" onClick={onCancel} aria-label="Cancel, don't make the call" title="Cancel, don't make the call">
+          <span aria-hidden="true">×</span>
+        </button>
+        <h2>Which team do you need?</h2>
+        <p>{machineName} · Maintenance</p>
         <div className="ms-need-choices">
           {TECH_CHOICES.map((choice) => (
-            <button key={choice.id} type="button" className={choice.id === picked ? "on" : ""} onClick={() => void send(choice)} disabled={Boolean(picked)} aria-pressed={choice.id === picked}>
+            <button key={choice.id} type="button" onClick={() => onChoose(choice.message)} autoFocus={choice.id === "mechanical"}>
               {choice.label}
             </button>
           ))}
         </div>
-        {error ? <p className="ms-error" role="alert">{error}</p> : !picked && <small>No choice asks for both teams in {left}s</small>}
-        {!picked && <i className="ms-celebrate-life" aria-hidden="true" />}
+        <small>The call is made once you choose.</small>
       </div>
     </div>
   );

@@ -102,7 +102,12 @@ export function useCallAlarm(waitingIds: string[] | null) {
   // Which calls are new since the page opened (or since the last list), and still waiting
   const key = waitingIds?.join("|") ?? null;
   useEffect(() => {
-    if (!waitingIds) return;
+    if (!waitingIds) {
+      // Switched off (or not loaded yet): stop ringing, and treat calls waiting when it comes back as new
+      known.current = null;
+      setPending((list) => (list.length ? [] : list));
+      return;
+    }
     const current = new Set(waitingIds);
     const before = known.current;
     known.current = current;
