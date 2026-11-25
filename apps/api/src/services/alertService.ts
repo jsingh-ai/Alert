@@ -364,11 +364,21 @@ export async function transitionAlert(db: Db, input: {
         arrivedAt: alert.arrivedAt,
         arrivedByUserId: alert.arrivedByUserId,
         resolvedAt: now,
-        resolvedByUserId: input.actorUserId ?? null,
-        responderNameText: input.responderNameText ?? actorNameText ?? alert.responderNameText
+        // The person who accepted a call is the one who resolves it, even when the button is pressed from
+        // a shared station login. Only a call nobody accepted (never in practice) falls back to the actor.
+        resolvedByUserId: alert.acknowledgedByUserId ?? input.actorUserId ?? null,
+        responderNameText: alert.responderNameText ?? input.responderNameText ?? actorNameText
       }
     });
-    await addEvent(db, { alertId: alert.id, eventType: "RESOLVED", actorUserId: input.actorUserId ?? null, actorNameText, note: input.note ?? null });
+    await addEvent(db, {
+      alertId: alert.id,
+      eventType: "RESOLVED",
+      actorUserId: alert.acknowledgedByUserId ?? input.actorUserId ?? null,
+      actorNameText: alert.responderNameText ?? actorNameText,
+      note: input.note ?? null,
+      // Who actually pressed the button, kept for the record
+      metadata: { pressedBy: actorNameText, pressedByUserId: input.actorUserId ?? null }
+    });
   }
 
   if (input.action === "cancel") {

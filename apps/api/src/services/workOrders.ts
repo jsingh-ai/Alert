@@ -38,7 +38,8 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Send with up to three tries (now, 2s, 10s). Returns the parsed reply. */
 async function call(label: string, request: Request, method: "GET" | "POST", url: string, body?: Json): Promise<Json> {
-  if (dryRun()) {
+  // Dry run: nothing that changes their app is sent. The technician lookup is only a read, so it still happens.
+  if (dryRun() && method !== "GET") {
     console.log(`ProcessGuard work order (dry run) ${label}: ${method} ${url}${body ? `\n${JSON.stringify(body, null, 2)}` : ""}`);
     return { __dryRun: true };
   }
@@ -60,7 +61,7 @@ async function call(label: string, request: Request, method: "GET" | "POST", url
 /* ---------- Which calls count ---------- */
 
 async function loadAlert(alertId: string) {
-  return prisma.andonAlert.findUnique({ where: { id: alertId }, include: { machine: true, department: true } });
+  return prisma.andonAlert.findUnique({ where: { id: alertId }, include: { machine: true, department: true, acknowledgedByUser: { select: { displayName: true } } } });
 }
 
 /** "mechanical" or "electrical" from the operator's "which tech is needed" note; null when it isn't one. */
@@ -135,12 +136,11 @@ async function open(alertId: string): Promise<string | null> {
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 /** Find the technician by name: { userId, categoryCode }. WORKORDER_TECH_URL may hold {name}, else the whole list is read. */
-async function findTech(name: string, workType: string): Promise<{ userId: number | string; categoryCode: string } | null> {
+async function findTech(name: string): Promise<{ userId: number | string; categoryCode: string } | null> {
   let url = env("WORKORDER_TECH_URL");
   if (!url) return null;
   url = url.replace("{name}", encodeURIComponent(name));
   const reply = await call("technician lookup", "TECH", "GET", url);
-  if (reply.__dryRun) return { userId: 0, categoryCode: workTypeCode(workType) };
   const list: Json[] = Array.isArray(reply) ? reply : [reply.data, reply.users, reply.technicians, reply.items, reply.results].find(Array.isArray) ?? (reply.data ? [reply.data] : [reply]);
   const nameOf = (item: Json) => item.name ?? item.fullName ?? item.displayName ?? item.userName ?? item.username ?? [item.firstName, item.lastName].filter(Boolean).join(" ");
   // Whatever the list says for this name: its id and category are sent as they are (the first row if there are two)
@@ -149,8 +149,6 @@ async function findTech(name: string, workType: string): Promise<{ userId: numbe
   const categoryCode = hit?.categoryCode ?? hit?.category?.code ?? hit?.category;
   return hit && userId !== undefined && categoryCode ? { userId, categoryCode: String(categoryCode) } : null;
 }
-
-const workTypeCode = (workType: string) => (workType === "electrical" ? "ELECTRICAL" : "MECHANIC");
 
 /* ---------- Resolved ---------- */
 
@@ -173,11 +171,12 @@ async function close(alertId: string, comment: string | null) {
     return;
   }
   const finishedAt = stamp(alert.resolvedAt ?? new Date());
-  // The person who accepted. (responderNameText is overwritten by whoever presses resolve, often a shared station login.)
-  const accepted = await prisma.alertEvent.findFirst({ where: { alertId, eventType: "ACKNOWLEDGED" }, orderBy: { createdAt: "asc" }, select: { actorNameText: true } });
-  const name = accepted?.actorNameText || alert.responderNameText || "";
+  // The account that accepted: the same person the Reports page shows as responder.
+  // (responderNameText is overwritten by whoever presses resolve, often a shared station login.)
+  const accepted = alert.acknowledgedByUser?.displayName ? null : await prisma.alertEvent.findFirst({ where: { alertId, eventType: "ACKNOWLEDGED" }, orderBy: { createdAt: "asc" }, select: { actorNameText: true } });
+  const name = alert.acknowledgedByUser?.displayName || accepted?.actorNameText || alert.responderNameText || "";
   const workType = (await workTypeOf(alert)) ?? "mechanical";
-  const tech = name ? await findTech(name, workType) : null;
+  const tech = name ? await findTech(name) : null;
   if (!tech) {
     console.warn(`ProcessGuard work order: technician "${name}" was not found in the technician list, so ${folio} was not updated.`);
     return;
