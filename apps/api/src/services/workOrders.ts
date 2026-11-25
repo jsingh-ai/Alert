@@ -184,12 +184,17 @@ async function close(alertId: string, comment: string | null) {
     console.warn(`ProcessGuard work order: technician "${name}" was not found in the technician list, so ${folio} was not updated.`);
     return;
   }
-  await call("close", "UPDATE", "POST", env("WORKORDER_UPDATE_URL") || env("WORKORDER_CREATE_URL"), {
-    data: {
-      folio,
-      workers: [{ userId: tech.userId, categoryCode: tech.categoryCode, workFinishedAt: finishedAt, workPerformed: comment?.trim() || "" }],
-      finishedAt
-    }
-  });
+  try {
+    await call("close", "UPDATE", "POST", env("WORKORDER_UPDATE_URL") || env("WORKORDER_CREATE_URL"), {
+      data: {
+        folio,
+        workers: [{ userId: tech.userId, categoryCode: tech.categoryCode, workFinishedAt: finishedAt, workPerformed: comment?.trim() || "" }],
+        finishedAt
+      }
+    });
+  } catch (error: any) {
+    // Say who was sent, so a rejected worker can be checked by hand
+    throw new Error(`${error?.message ?? error} [sent ${folio}: ${name}, userId ${tech.userId}, ${tech.categoryCode}, work type ${workType}]`);
+  }
   if (!dryRun()) console.log(`ProcessGuard work order: closed ${folio} (${name}, ${tech.categoryCode}).`);
 }
