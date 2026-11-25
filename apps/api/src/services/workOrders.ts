@@ -24,17 +24,20 @@ function stamp(date: Date) {
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
 }
 
-function headers() {
+/** Each request has its own key: WORKORDER_CREATE_KEY / _UPDATE_KEY / _TECH_KEY (WORKORDER_API_KEY if one key does all). */
+type Request = "CREATE" | "UPDATE" | "TECH";
+function headers(request: Request) {
   const out: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
-  const key = env("WORKORDER_API_KEY");
-  if (key) out[env("WORKORDER_AUTH_HEADER") || "Authorization"] = key;
+  const key = env(`WORKORDER_${request}_KEY`) || env("WORKORDER_API_KEY");
+  const name = env(`WORKORDER_${request}_AUTH_HEADER`) || env("WORKORDER_AUTH_HEADER") || "Authorization";
+  if (key) out[name] = key;
   return out;
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Send with up to three tries (now, 2s, 10s). Returns the parsed reply. */
-async function call(label: string, method: "GET" | "POST", url: string, body?: Json): Promise<Json> {
+async function call(label: string, request: Request, method: "GET" | "POST", url: string, body?: Json): Promise<Json> {
   if (dryRun()) {
     console.log(`ProcessGuard work order (dry run) ${label}: ${method} ${url}${body ? `\n${JSON.stringify(body, null, 2)}` : ""}`);
     return { __dryRun: true };
@@ -43,7 +46,7 @@ async function call(label: string, method: "GET" | "POST", url: string, body?: J
   for (const delay of [0, 2000, 10000]) {
     if (delay) await wait(delay);
     try {
-      const response = await fetch(url, { method, headers: headers(), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15_000) });
+      const response = await fetch(url, { method, headers: headers(request), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15_000) });
       const text = await response.text();
       if (!response.ok) throw new Error(`${response.status} ${text.slice(0, 200)}`);
       try { return text ? JSON.parse(text) : {}; } catch { return {}; }
@@ -109,7 +112,7 @@ async function open(alertId: string): Promise<string | null> {
     console.warn(`ProcessGuard work order: no machine number for ${alert.machine.name} (${alert.machine.code}); add it to WORKORDER_MACHINE_IDS. Skipped.`);
     return null;
   }
-  const reply = await call("open", "POST", env("WORKORDER_CREATE_URL"), {
+  const reply = await call("open", "CREATE", "POST", env("WORKORDER_CREATE_URL"), {
     data: { workType, Created_at: stamp(alert.createdAt), machineId, Start_time: stamp(alert.acknowledgedAt) }
   });
   const folio: string | null = reply.workOrder?.folio ?? (reply.__dryRun ? "DRY-RUN" : null);
@@ -127,7 +130,7 @@ async function findTech(name: string, workType: string): Promise<{ userId: numbe
   let url = env("WORKORDER_TECH_URL");
   if (!url) return null;
   url = url.replace("{name}", encodeURIComponent(name));
-  const reply = await call("technician lookup", "GET", url);
+  const reply = await call("technician lookup", "TECH", "GET", url);
   if (reply.__dryRun) return { userId: 0, categoryCode: workTypeCode(workType) };
   const list: Json[] = Array.isArray(reply) ? reply : [reply.data, reply.users, reply.technicians, reply.items, reply.results].find(Array.isArray) ?? (reply.data ? [reply.data] : [reply]);
   const nameOf = (item: Json) => item.name ?? item.fullName ?? item.displayName ?? item.userName ?? item.username ?? [item.firstName, item.lastName].filter(Boolean).join(" ");
@@ -167,7 +170,7 @@ async function close(alertId: string, comment: string | null) {
     console.warn(`ProcessGuard work order: technician "${name}" was not found in the technician list, so ${folio} was not updated.`);
     return;
   }
-  await call("close", "POST", env("WORKORDER_UPDATE_URL") || env("WORKORDER_CREATE_URL"), {
+  await call("close", "UPDATE", "POST", env("WORKORDER_UPDATE_URL") || env("WORKORDER_CREATE_URL"), {
     data: {
       folio,
       workers: [{ userId: tech.userId, categoryCode: tech.categoryCode, workFinishedAt: finishedAt, workPerformed: comment?.trim() || "" }],
