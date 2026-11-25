@@ -175,7 +175,9 @@ async function close(alertId: string, comment: string | null) {
     return;
   }
   const finishedAt = stamp(alert.resolvedAt ?? new Date());
-  const name = alert.responderNameText || "";
+  // The person who accepted. (responderNameText is overwritten by whoever presses resolve, often a shared station login.)
+  const accepted = await prisma.alertEvent.findFirst({ where: { alertId, eventType: "ACKNOWLEDGED" }, orderBy: { createdAt: "asc" }, select: { actorNameText: true } });
+  const name = accepted?.actorNameText || alert.responderNameText || "";
   const workType = (await workTypeOf(alert)) ?? "mechanical";
   const tech = name ? await findTech(name, workType) : null;
   if (!tech) {
