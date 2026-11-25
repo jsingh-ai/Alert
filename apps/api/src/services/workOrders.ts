@@ -143,10 +143,8 @@ async function findTech(name: string, workType: string): Promise<{ userId: numbe
   if (reply.__dryRun) return { userId: 0, categoryCode: workTypeCode(workType) };
   const list: Json[] = Array.isArray(reply) ? reply : [reply.data, reply.users, reply.technicians, reply.items, reply.results].find(Array.isArray) ?? (reply.data ? [reply.data] : [reply]);
   const nameOf = (item: Json) => item.name ?? item.fullName ?? item.displayName ?? item.userName ?? item.username ?? [item.firstName, item.lastName].filter(Boolean).join(" ");
-  // A person can be listed once per category (mechanic and electrician): take the row for this call's work type
-  const rows = list.filter((item) => norm(nameOf(item)) === norm(name));
-  const codeOf = (item: Json) => String(item.categoryCode ?? item.category?.code ?? item.category ?? "").toUpperCase();
-  const hit = rows.find((item) => codeOf(item) === workTypeCode(workType)) ?? rows[0] ?? (list.length === 1 ? list[0] : undefined);
+  // Whatever the list says for this name: its id and category are sent as they are (the first row if there are two)
+  const hit = list.find((item) => norm(nameOf(item)) === norm(name)) ?? (list.length === 1 ? list[0] : undefined);
   const userId = hit?.userId ?? hit?.id;
   const categoryCode = hit?.categoryCode ?? hit?.category?.code ?? hit?.category;
   return hit && userId !== undefined && categoryCode ? { userId, categoryCode: String(categoryCode) } : null;
@@ -184,12 +182,17 @@ async function close(alertId: string, comment: string | null) {
     console.warn(`ProcessGuard work order: technician "${name}" was not found in the technician list, so ${folio} was not updated.`);
     return;
   }
-  await call("close", "UPDATE", "POST", env("WORKORDER_UPDATE_URL") || env("WORKORDER_CREATE_URL"), {
-    data: {
-      folio,
-      workers: [{ userId: tech.userId, categoryCode: tech.categoryCode, workFinishedAt: finishedAt, workPerformed: comment?.trim() || "" }],
-      finishedAt
-    }
-  });
+  try {
+    await call("close", "UPDATE", "POST", env("WORKORDER_UPDATE_URL") || env("WORKORDER_CREATE_URL"), {
+      data: {
+        folio,
+        workers: [{ userId: tech.userId, categoryCode: tech.categoryCode, workFinishedAt: finishedAt, workPerformed: comment?.trim() || "" }],
+        finishedAt
+      }
+    });
+  } catch (error: any) {
+    // Say who was sent, so a rejected worker can be checked by hand
+    throw new Error(`${error?.message ?? error} [sent ${folio}: ${name}, userId ${tech.userId}, ${tech.categoryCode}, work type ${workType}]`);
+  }
   if (!dryRun()) console.log(`ProcessGuard work order: closed ${folio} (${name}, ${tech.categoryCode}).`);
 }
