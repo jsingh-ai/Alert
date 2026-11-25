@@ -91,7 +91,10 @@ const opening = new Map<string, Promise<string | null>>();
 
 /** The call was accepted: open the work order. Returns at once; never throws. */
 export function workOrderAccepted(alertId: string) {
-  if (!enabled()) return;
+  if (!enabled()) {
+    console.log("ProcessGuard work order: skipped, WORKORDER_CREATE_URL is not set (or the service was not restarted after setting it).");
+    return;
+  }
   setImmediate(() => {
     const job = open(alertId).catch((error) => {
       console.warn("ProcessGuard work order:", error?.message ?? error);
@@ -106,7 +109,10 @@ async function open(alertId: string): Promise<string | null> {
   const alert = await loadAlert(alertId);
   if (!alert || alert.externalRef || !alert.acknowledgedAt) return alert?.externalRef ?? null;
   const workType = await workTypeOf(alert);
-  if (!workType) return null;
+  if (!workType) {
+    console.log(`ProcessGuard work order: skipped ${alert.machine.name} (${alert.department.name}): not a Maintenance call with Mechanical or Electrical chosen.`);
+    return null;
+  }
   const machineId = machineNumber(alert.machine);
   if (machineId === null) {
     console.warn(`ProcessGuard work order: no machine number for ${alert.machine.name} (${alert.machine.code}); add it to WORKORDER_MACHINE_IDS. Skipped.`);
@@ -117,7 +123,10 @@ async function open(alertId: string): Promise<string | null> {
   });
   const folio: string | null = reply.workOrder?.folio ?? (reply.__dryRun ? "DRY-RUN" : null);
   if (!folio) throw new Error(`open: the reply had no workOrder.folio (${JSON.stringify(reply).slice(0, 200)})`);
-  if (!reply.__dryRun) await prisma.andonAlert.update({ where: { id: alertId }, data: { externalRef: folio } });
+  if (!reply.__dryRun) {
+    await prisma.andonAlert.update({ where: { id: alertId }, data: { externalRef: folio } });
+    console.log(`ProcessGuard work order: opened ${folio} for ${alert.machine.name} (${workType}).`);
+  }
   return folio;
 }
 
@@ -161,7 +170,10 @@ async function close(alertId: string, comment: string | null) {
   if (!alert) return;
   let folio = (await opening.get(alertId)) ?? alert.externalRef;
   if (!folio && dryRun() && (await workTypeOf(alert))) folio = "DRY-RUN"; // nothing is saved in a dry run
-  if (!folio) return; // not a work-order call, or opening it failed (already logged)
+  if (!folio) {
+    console.log(`ProcessGuard work order: nothing to close for ${alert.machine.name}: no work order was opened for this call.`);
+    return;
+  }
   const finishedAt = stamp(alert.resolvedAt ?? new Date());
   const name = alert.responderNameText || "";
   const workType = (await workTypeOf(alert)) ?? "mechanical";
@@ -177,4 +189,5 @@ async function close(alertId: string, comment: string | null) {
       finishedAt
     }
   });
+  if (!dryRun()) console.log(`ProcessGuard work order: closed ${folio} (${name}, ${tech.categoryCode}).`);
 }
